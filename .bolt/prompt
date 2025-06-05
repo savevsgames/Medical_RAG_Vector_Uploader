@@ -1,113 +1,77 @@
-# 🧠 Medical RAG Uploader – Product Design Document (PDD)
+# 📦 RunPod Backend Upgrade PDD
 
-## 🏁 Goal
-Build a scalable full-stack application that allows authenticated users to:
-- Upload and embed medical documents (PDF/DOCX/TXT/MD)
-- Extract text and generate embeddings with BioBERT
-- Store the original files in Supabase Storage
-- Store vector embeddings in a Supabase `pgvector`-enabled `documents` table
-- Display and manage uploads through a secure, component-based frontend dashboard
-- (Future) Query contextually via RAG-enabled `/chat`
-
-## 📐 Architecture Overview
-Frontend (React/Expo) → Backend (FastAPI Docker App) → Supabase (Auth + Storage + pgvector)
-
-## 🧰 Tech Stack
-
-| Layer         | Technology              |
-|---------------|--------------------------|
-| Frontend      | React + Tailwind (Vite or Next.js) |
-| Backend API   | FastAPI (Python 3.10)    |
-| Embedding     | BioBERT via HuggingFace Transformers |
-| Vector Store  | Supabase `pgvector`      |
-| Auth          | Supabase Auth (email/password) |
-| Hosting       | Render (Docker backend), Vercel (frontend) |
+## Goal
+Update the existing Medical RAG Vector Uploader backend to move BioBERT embedding and vectorization off of Render and into a scalable, GPU-backed service (e.g. RunPod). Supabase remains the source of truth for file and vector metadata.
 
 ---
 
-## 📦 Backend Folder Structure
-```
-backend/
-├── app/
-│   ├── main.py
-│   ├── embedder.py
-│   ├── supabase_client.py
-├── requirements.txt
-├── Dockerfile
-└── README.md
-```
+## Step-by-Step Backend Architecture Update
+
+### ✅ STEP 1: Replace Local Embedding with Remote API
+
+**Before:**
+- `rag.py` used `transformers` + `BioBERT` locally via `AutoTokenizer` and `AutoModel`
+- Heavy memory and VRAM usage
+- Fails on limited environments (e.g. Render free plan)
+
+**After:**
+- Remove `transformers`, `torch`, and `AutoModel` from local app
+- Replace with `POST` request to RunPod container hosting embedding logic
+- Add `REMOTE_EMBEDDING_URL` to `.env`
+
+### ✅ STEP 2: Create Embedding Microservice on RunPod
+
+**Before:**
+- No separation of model and FastAPI app
+- BioBERT pulled at server startup
+
+**After:**
+- Create container (or use notebook pod) with:
+  - BioBERT model loading
+  - `POST /embed` endpoint that accepts `{"text": "...", "metadata": {...}}`
+  - Returns embedding vector
+
+### ✅ STEP 3: Modify `embed_and_store()` Logic
+
+**Before:**
+- Embeddings generated directly using `BioBERT` locally
+
+**After:**
+- POST to RunPod
+- Validate response
+- Store returned vector in Supabase pgvector
+
+### ✅ STEP 4: Update Dockerfile + requirements.txt
+
+**Before:**
+- Dockerfile includes `transformers`, `torch`, `BioBERT`
+
+**After:**
+- Remove heavy ML packages
+- Add `httpx` or `requests`
+- Reduce build time and size
+- Confirm startup time under 10s (optional for Render)
+
+### ✅ STEP 5: Secure API Traffic
+
+**Before:**
+- All embedding logic internal
+
+**After:**
+- Include optional `RUNPOD_EMBEDDING_KEY` in headers to authenticate backend-to-RunPod call
+
+### ✅ STEP 6: (Optional) Build RAG Query Microservice
+
+**Before:**
+- Queries answered directly inside backend with agent logic and BioBERT
+
+**After:**
+- Use RunPod to also handle `/chat` or `/answer` with full context + agent logic if needed
 
 ---
 
-## 🖼 Frontend Folder Structure
-```
-frontend/
-├── pages/
-│   ├── index.tsx
-│   ├── login.tsx
-│   ├── signup.tsx
-│   └── dashboard.tsx
-├── components/
-│   ├── UploadForm.tsx
-│   ├── DocumentTable.tsx
-│   └── ChatBox.tsx (future)
-├── context/AuthProvider.tsx
-└── lib/supabaseClient.ts
-```
+## Notes
 
----
-
-## 🗃 Supabase Schema (do NOT change existing table)
-
-Schema remains:
-- `documents (id UUID PK, filename TEXT, content TEXT, metadata JSONB, embedding VECTOR(768))`
-
-To add per-user association, **add** this column:
-
-```sql
-ALTER TABLE documents ADD COLUMN user_id UUID;
-```
-
-And update policies accordingly:
-- RLS: only allow access to rows where `documents.user_id = auth.uid()`
-- Only allow insert/update if authenticated and `user_id = auth.uid()`
-
----
-
-## 🔐 Auth Flow
-- Supabase Auth manages user sign-up and login
-- JWT token is sent to backend with file uploads
-- Backend verifies token and includes `user_id` when writing to `documents`
-
----
-
-## 🔌 API Endpoints
-- `POST /upload`: uploads file, extracts text, embeds and stores vector
-- `GET /docs`: returns user’s uploaded document list
-- `GET /health`: for status checks
-- (future) `POST /chat`: RAG query handler
-
----
-
-## 🔍 Backend Requirements.txt Strategy
-Avoid pip-only `git+https://...` installs.
-
-Use pinned versions:
-```
-fastapi==0.110.0
-uvicorn==0.28.0
-pydantic==2.6.4
-python-dotenv==1.0.1
-transformers==4.40.1
-torch==2.2.1
-python-docx==1.1.0
-PyMuPDF==1.23.21
-supabase==1.0.3
-```
-
----
-
-## ✅ Deployment
-- Docker backend to Render (mount secrets)
-- Frontend to Vercel/Netlify
-- Supabase stores embedding and raw files centrally
+- You can keep frontend unchanged (calls backend at `/upload` and `/chat`)
+- Supabase still stores files (via bucket) and vector embeddings (pgvector)
+- Backend is now lightweight and cheap to run on Render
