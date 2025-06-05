@@ -47,7 +47,14 @@ async def startup_event():
     global supabase_client, document_processor, embedder
     
     # Check for required environment variables
-    required_env_vars = ["SUPABASE_URL", "SUPABASE_KEY", "SUPABASE_BUCKET"]
+    required_env_vars = [
+        "SUPABASE_URL",
+        "SUPABASE_KEY",
+        "SUPABASE_BUCKET",
+        "RUNPOD_EMBEDDING_URL",
+        "RUNPOD_EMBEDDING_KEY"
+    ]
+    
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     
     if missing_vars:
@@ -97,7 +104,8 @@ async def health_check():
     return {
         "status": "healthy",
         "supabase_connected": supabase_client.is_connected() if supabase_client else False,
-        "embedder_loaded": embedder.is_loaded() if embedder else False
+        "embedder_loaded": embedder.is_loaded() if embedder else False,
+        "runpod_url": os.getenv("RUNPOD_EMBEDDING_URL", "").split("/")[2]  # Only show domain
     }
 
 @app.post("/upload", response_model=UploadResponse)
@@ -120,7 +128,7 @@ async def upload_document(
         if not text:
             raise HTTPException(status_code=400, detail="Could not extract text from document")
         
-        # Generate embeddings
+        # Generate embeddings via RunPod
         embedding = embedder.embed_text(text)
         
         # Upload file to Supabase Storage
