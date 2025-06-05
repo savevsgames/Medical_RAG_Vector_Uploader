@@ -1,0 +1,15 @@
+{
+  "name": "medical-rag-vector-uploader-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "uvicorn app.main:app --host 0.0.0.0 --port 8000",
+    "dev": "uvicorn app.main:app --reload",
+    "install": "pip install -r requirements.txt",
+    "test": "pytest",
+    "clean": "rm -rf __pycache__ .pytest_cache"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
