@@ -3,6 +3,37 @@
 ## 🎯 Core Purpose
 This application serves as a secure platform for processing medical documents into vector embeddings for RAG (Retrieval Augmented Generation) applications. It combines document processing, vector embedding generation, and secure storage with granular access controls.
 
+## 🏗 Monorepo Architecture
+
+### Project Structure
+```
+/
+├── frontend/           # React frontend application
+│   ├── src/           # Frontend source code
+│   ├── package.json   # Frontend dependencies
+│   └── vite.config.ts # Vite configuration
+├── backend/           # FastAPI backend application
+│   ├── app/          # Backend source code
+│   ├── requirements.txt # Python dependencies
+│   └── Dockerfile    # Backend container definition
+├── supabase/         # Supabase configurations
+│   └── migrations/   # Database migrations
+└── package.json      # Root package.json for monorepo management
+```
+
+### Monorepo Benefits
+- **Unified Version Control**: Single repository for all project components
+- **Shared Configuration**: Common tooling and settings
+- **Simplified Dependencies**: Root-level package management
+- **Coordinated Deployments**: Synchronized frontend and backend releases
+- **Development Workflow**: Concurrent frontend and backend development
+
+### Development Scripts
+- `npm run install:all`: Install all dependencies (frontend and backend)
+- `npm run dev`: Start both frontend and backend in development mode
+- `npm run build`: Build the frontend application
+- `npm run lint`: Run linting across the project
+
 ## 🏗 Architecture Deep Dive
 
 ### Frontend Architecture
@@ -21,6 +52,59 @@ This application serves as a secure platform for processing medical documents in
   - `SupabaseClient`: Handles storage and database operations
 - **Security Layer**: JWT verification for protected endpoints
 - **Error Handling**: Comprehensive error catching and logging
+
+## 🚀 Deployment Architecture
+
+### Backend Deployment (Render)
+1. **Container Build**:
+   ```bash
+   cd backend
+   docker build -t medical-rag-backend .
+   ```
+
+2. **Render Configuration**:
+   - Service Type: Web Service
+   - Environment: Docker
+   - Build Command: `docker build -t medical-rag-backend .`
+   - Start Command: `docker run -p $PORT:8000 medical-rag-backend`
+
+3. **Environment Variables**:
+   ```
+   SUPABASE_URL=your_supabase_url
+   SUPABASE_KEY=your_supabase_key
+   SUPABASE_BUCKET=your_bucket_name
+   SUPABASE_JWT_SECRET=your_jwt_secret
+   ```
+
+### Frontend Deployment (Vercel)
+1. **Build Setup**:
+   - Build Command: `cd frontend && npm install && npm run build`
+   - Output Directory: `frontend/dist`
+   - Install Command: `npm run install:frontend`
+
+2. **Environment Variables**:
+   ```
+   VITE_SUPABASE_URL=your_supabase_url
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+   VITE_API_URL=your_backend_url
+   ```
+
+### Monorepo Deployment Strategy
+1. **Separate Services**:
+   - Frontend and backend are deployed as independent services
+   - Connected through environment variables
+   - Coordinated releases through Git tags
+
+2. **CI/CD Pipeline**:
+   - Triggered on main branch updates
+   - Runs tests across both applications
+   - Deploys backend first, then frontend
+   - Validates end-to-end functionality
+
+3. **Rollback Strategy**:
+   - Version tracking through Git tags
+   - Independent rollbacks possible for each service
+   - Database migrations with reversion support
 
 ## 🔄 Data Flow
 
@@ -98,23 +182,6 @@ WITH (lists = 100);
 - Cosine similarity via pgvector
 - IVFFlat index for performance
 - Configurable similarity threshold
-
-## 🚀 Deployment Architecture
-
-### Backend (Render)
-- Containerized FastAPI application
-- Environment variables for configuration
-- Health check endpoint for monitoring
-
-### Frontend (Vercel)
-- Static site deployment
-- Environment variable injection
-- API URL configuration
-
-### Database (Supabase)
-- Postgres with pgvector extension
-- Automated backups
-- Connection pooling
 
 ## 📈 Performance Considerations
 
