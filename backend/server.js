@@ -7,6 +7,9 @@ import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+fs.existsSync
 
 // Import our services
 import { DocumentProcessor } from './lib/documentProcessor.js';
