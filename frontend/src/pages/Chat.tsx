@@ -12,6 +12,7 @@ interface Message {
     filename: string;
     similarity: number;
   }>;
+  agent_id?: string;
 }
 
 export function Chat() {
@@ -20,7 +21,7 @@ export function Chat() {
     {
       id: '1',
       type: 'assistant',
-      content: 'Hello! I\'m your medical research assistant. I can help you analyze your uploaded documents and answer questions about medical topics. Upload some documents first, then ask me anything!',
+      content: 'Hello! I\'m your TxAgent-powered medical research assistant. I can help you analyze your uploaded documents and answer questions about medical topics. Upload some documents first, then ask me anything!',
       timestamp: new Date()
     }
   ]);
@@ -43,18 +44,36 @@ export function Chat() {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/chat`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: inputValue }),
-      });
+      // Try RunPod TxAgent API first
+      let response;
+      try {
+        response = await fetch(`${import.meta.env.VITE_API_URL}/api/chat`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            message: inputValue,
+            context: messages.slice(-5) // Send last 5 messages for context
+          }),
+        });
+      } catch (runpodError) {
+        console.warn('RunPod API failed, falling back to legacy chat:', runpodError);
+        // Fallback to legacy chat endpoint
+        response = await fetch(`${import.meta.env.VITE_API_URL}/chat`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message: inputValue }),
+        });
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.details || 'Chat request failed');
+        throw new Error(errorData.details || errorData.error || 'Chat request failed');
       }
 
       const data = await response.json();
@@ -64,10 +83,16 @@ export function Chat() {
         type: 'assistant',
         content: data.response,
         timestamp: new Date(),
-        sources: data.sources || []
+        sources: data.sources || [],
+        agent_id: data.agent_id
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+
+      // Show success toast if using TxAgent
+      if (data.agent_id) {
+        toast.success('Response from TxAgent container');
+      }
 
     } catch (error) {
       console.error('Chat error:', error);
@@ -77,7 +102,7 @@ export function Chat() {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: 'I apologize, but I encountered an error processing your request. Please make sure the backend is running and try again.',
+        content: 'I apologize, but I encountered an error processing your request. Please make sure the TxAgent container is running and try again.',
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -94,8 +119,8 @@ export function Chat() {
           <Bot className="w-6 h-6 text-blue-600" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Medical AI Assistant</h2>
-          <p className="text-sm text-gray-500">Powered by your uploaded documents</p>
+          <h2 className="text-lg font-semibold text-gray-900">TxAgent Medical Assistant</h2>
+          <p className="text-sm text-gray-500">Powered by RunPod containerized agents</p>
         </div>
       </div>
 
@@ -128,11 +153,18 @@ export function Chat() {
                   : 'bg-gray-100 text-gray-900'
               }`}>
                 <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                <p className={`text-xs mt-1 ${
+                <div className={`flex items-center justify-between mt-1 ${
                   message.type === 'user' ? 'text-blue-100' : 'text-gray-500'
                 }`}>
-                  {message.timestamp.toLocaleTimeString()}
-                </p>
+                  <p className="text-xs">
+                    {message.timestamp.toLocaleTimeString()}
+                  </p>
+                  {message.agent_id && (
+                    <p className="text-xs font-mono">
+                      TxAgent: {message.agent_id.substring(0, 8)}...
+                    </p>
+                  )}
+                </div>
               </div>
               
               {/* Sources */}
@@ -160,7 +192,7 @@ export function Chat() {
             <div className="bg-gray-100 px-4 py-2 rounded-lg">
               <div className="flex items-center space-x-2">
                 <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
-                <span className="text-sm text-gray-500">Analyzing your documents...</span>
+                <span className="text-sm text-gray-500">TxAgent is analyzing your documents...</span>
               </div>
             </div>
           </div>
@@ -174,7 +206,7 @@ export function Chat() {
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Ask me about your medical documents..."
+            placeholder="Ask your TxAgent about your medical documents..."
             className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={isLoading}
           />
