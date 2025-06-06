@@ -1,19 +1,26 @@
 import React, { useState } from 'react';
-import { Send, Bot, User, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Loader2, FileText } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import toast from 'react-hot-toast';
 
 interface Message {
   id: string;
   type: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  sources?: Array<{
+    filename: string;
+    similarity: number;
+  }>;
 }
 
 export function Chat() {
+  const { session } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       type: 'assistant',
-      content: 'Hello! I\'m your medical research assistant. I can help you analyze your uploaded documents and answer questions about medical topics. How can I assist you today?',
+      content: 'Hello! I\'m your medical research assistant. I can help you analyze your uploaded documents and answer questions about medical topics. Upload some documents first, then ask me anything!',
       timestamp: new Date()
     }
   ]);
@@ -22,7 +29,7 @@ export function Chat() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputValue.trim() || isLoading) return;
+    if (!inputValue.trim() || isLoading || !session) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -35,17 +42,48 @@ export function Chat() {
     setInputValue('');
     setIsLoading(true);
 
-    // Simulate AI response (replace with actual API call)
-    setTimeout(() => {
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: inputValue }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.details || 'Chat request failed');
+      }
+
+      const data = await response.json();
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: 'I understand your question. Once the backend chat endpoint is implemented, I\'ll be able to provide intelligent responses based on your uploaded documents and medical knowledge.',
+        content: data.response,
+        timestamp: new Date(),
+        sources: data.sources || []
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+
+    } catch (error) {
+      console.error('Chat error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to send message');
+      
+      // Add error message
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: 'assistant',
+        content: 'I apologize, but I encountered an error processing your request. Please make sure the backend is running and try again.',
         timestamp: new Date()
       };
-      setMessages(prev => [...prev, assistantMessage]);
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -57,7 +95,7 @@ export function Chat() {
         </div>
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Medical AI Assistant</h2>
-          <p className="text-sm text-gray-500">Ready to help with your medical queries</p>
+          <p className="text-sm text-gray-500">Powered by your uploaded documents</p>
         </div>
       </div>
 
@@ -81,17 +119,35 @@ export function Chat() {
                 <Bot className="w-4 h-4 text-blue-600" />
               )}
             </div>
-            <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-              message.type === 'user'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-900'
+            <div className={`max-w-xs lg:max-w-md ${
+              message.type === 'user' ? 'text-right' : ''
             }`}>
-              <p className="text-sm">{message.content}</p>
-              <p className={`text-xs mt-1 ${
-                message.type === 'user' ? 'text-blue-100' : 'text-gray-500'
+              <div className={`px-4 py-2 rounded-lg ${
+                message.type === 'user'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-900'
               }`}>
-                {message.timestamp.toLocaleTimeString()}
-              </p>
+                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                <p className={`text-xs mt-1 ${
+                  message.type === 'user' ? 'text-blue-100' : 'text-gray-500'
+                }`}>
+                  {message.timestamp.toLocaleTimeString()}
+                </p>
+              </div>
+              
+              {/* Sources */}
+              {message.sources && message.sources.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-gray-500 font-medium">Sources:</p>
+                  {message.sources.map((source, index) => (
+                    <div key={index} className="flex items-center space-x-2 text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
+                      <FileText className="w-3 h-3" />
+                      <span>{source.filename}</span>
+                      <span className="text-gray-400">({Math.round(source.similarity * 100)}% match)</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -104,7 +160,7 @@ export function Chat() {
             <div className="bg-gray-100 px-4 py-2 rounded-lg">
               <div className="flex items-center space-x-2">
                 <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
-                <span className="text-sm text-gray-500">Thinking...</span>
+                <span className="text-sm text-gray-500">Analyzing your documents...</span>
               </div>
             </div>
           </div>
@@ -130,6 +186,9 @@ export function Chat() {
             <Send className="w-5 h-5" />
           </button>
         </div>
+        <p className="text-xs text-gray-500 mt-2">
+          💡 Try asking: "What are the key findings in my documents?" or "Summarize the main points"
+        </p>
       </form>
     </div>
   );

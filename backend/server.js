@@ -8,6 +8,11 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// Import our services
+import { DocumentProcessor } from './lib/documentProcessor.js';
+import { EmbeddingService } from './lib/embedder.js';
+import { ChatService } from './lib/chatService.js';
+
 // Load environment variables
 dotenv.config();
 
@@ -17,11 +22,17 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 8000;
 
+// Initialize services
+const documentProcessor = new DocumentProcessor();
+const embeddingService = new EmbeddingService();
+
 // Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
+
+const chatService = new ChatService(supabase);
 
 // Middleware
 app.use(cors());
@@ -73,34 +84,105 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    supabase_connected: true // We'll assume it's connected for now
+    services: {
+      supabase_connected: true,
+      embedding_configured: embeddingService.isConfigured(),
+      openai_configured: !!process.env.OPENAI_API_KEY
+    }
   });
 });
 
-// Document upload endpoint (placeholder - will need document processing logic)
+// Document upload endpoint
 app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file provided' });
     }
 
+    console.log(`Processing upload: ${req.file.originalname} (${req.file.size} bytes)`);
+
     const documentId = uuidv4();
     
-    // TODO: Implement document processing logic
-    // - Extract text from file
-    // - Generate embeddings
-    // - Store in Supabase
-    
+    // Extract text from document
+    const { text, metadata } = await documentProcessor.extractText(
+      req.file.buffer, 
+      req.file.originalname
+    );
+
+    if (!text || text.trim().length === 0) {
+      return res.status(400).json({ error: 'Could not extract text from document' });
+    }
+
+    // Generate embedding
+    const embedding = await embeddingService.generateEmbedding(text);
+
+    // Store in Supabase
+    const { data, error } = await supabase
+      .from('documents')
+      .insert({
+        id: documentId,
+        filename: req.file.originalname,
+        content: text,
+        metadata: {
+          ...metadata,
+          file_size: req.file.size,
+          mime_type: req.file.mimetype
+        },
+        embedding,
+        user_id: req.userId
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Database insert error:', error);
+      throw error;
+    }
+
+    console.log(`Document processed successfully: ${documentId}`);
+
     res.json({
       document_id: documentId,
       filename: req.file.originalname,
-      content_length: req.file.size,
-      message: 'Upload endpoint ready - processing logic to be implemented'
+      content_length: text.length,
+      vector_dimensions: embedding.length,
+      message: 'Document uploaded and processed successfully'
     });
     
   } catch (error) {
     console.error('Upload error:', error);
-    res.status(500).json({ error: 'Upload failed' });
+    res.status(500).json({ 
+      error: 'Upload failed', 
+      details: error.message 
+    });
+  }
+});
+
+// Chat endpoint
+app.post('/chat', verifyToken, async (req, res) => {
+  try {
+    const { message } = req.body;
+    
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    console.log(`Processing chat message from user ${req.userId}: ${message.substring(0, 100)}...`);
+
+    const result = await chatService.processQuery(req.userId, message);
+
+    res.json({
+      response: result.response,
+      sources: result.sources,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Chat error:', error);
+    res.status(500).json({ 
+      error: 'Chat processing failed', 
+      details: error.message 
+    });
   }
 });
 
@@ -129,12 +211,17 @@ app.post('/agent/start', verifyToken, async (req, res) => {
       .insert({
         user_id: req.userId,
         status: 'active',
-        session_data: {}
+        session_data: {
+          started_at: new Date().toISOString(),
+          capabilities: ['document_search', 'chat', 'embedding_generation']
+        }
       })
       .select()
       .single();
 
     if (error) throw error;
+
+    console.log(`Agent started for user ${req.userId}: ${newAgent.id}`);
 
     res.json({
       agent_id: newAgent.id,
@@ -161,6 +248,8 @@ app.post('/agent/stop', verifyToken, async (req, res) => {
 
     if (error) throw error;
 
+    console.log(`Agent stopped for user ${req.userId}`);
+
     res.json({
       status: 'stopped',
       message: 'Agent terminated successfully'
@@ -184,7 +273,8 @@ app.get('/agent/status', verifyToken, async (req, res) => {
     res.json({
       agent_active: !!agent,
       agent_id: agent?.id || null,
-      last_active: agent?.last_active || null
+      last_active: agent?.last_active || null,
+      session_data: agent?.session_data || null
     });
 
   } catch (error) {
@@ -195,6 +285,10 @@ app.get('/agent/status', verifyToken, async (req, res) => {
 
 // Start server
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-  console.log(`Health check: http://localhost:${port}/health`);
+  console.log(`🚀 Medical RAG Server running on port ${port}`);
+  console.log(`📊 Health check: http://localhost:${port}/health`);
+  console.log(`🔧 Services configured:`);
+  console.log(`   - Embedding: ${embeddingService.isConfigured() ? '✅' : '❌'}`);
+  console.log(`   - OpenAI Chat: ${process.env.OPENAI_API_KEY ? '✅' : '❌'}`);
+  console.log(`   - Supabase: ${process.env.SUPABASE_URL ? '✅' : '❌'}`);
 });
