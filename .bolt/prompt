@@ -75,3 +75,102 @@ Frontend login successful → JWT received
 4. Ready to accept queries
 
 Use `uvicorn main:app --host 0.0.0.0 --port 8000` for container entrypoint
+
+FRONT END UPGRADE
+Vision Overview
+Your app will become a unified medical assistant dashboard with:
+
+Agent Chat Tab – Conversational UI for interacting with the AI assistant.
+
+RAG Document Tab – Upload, embed, and manage user documents.
+
+Agent Monitor Tab – Track the agent’s actions, history, and response context.
+
+Global Auth Context – Logged-in state, user info, logout menu, and secure route handling.
+
+🪜 Steps to Implement This Plan
+1. UI Tab Framework Setup
+Implement a global layout with three navigable tabs (React Router + Layout).
+
+Use a component like Tabs, Drawer, or a Sidebar with:
+
+Chat
+
+Documents
+
+Agent Monitor
+
+Ensure layout persists across routes.
+
+✅ DON’T: Don’t rebuild authentication logic in each tab—centralize it.
+
+2. Global Auth Context
+Use React.Context + useEffect to:
+
+Store user session (via Supabase Auth).
+
+Expose auth status and user info globally.
+
+Add logout button in header/sidebar.
+
+Protect routes via PrivateRoute or conditional redirects if not authenticated.
+
+✅ DON’T: Avoid passing auth tokens manually across components.
+
+3. Chat Tab (Agent Interaction)
+Build a conversational UI with:
+
+Input box, chat history display, and streaming responses.
+
+POST messages to backend /chat or /agent endpoint.
+
+Render context-aware responses from the agent.
+
+Optional: Add “thinking” loader and agent typing simulation.
+
+4. RAG Document Tab (Upload & Management)
+Use the existing FileUpload, DocumentList, and Supabase-backed flow.
+
+Allow deleting or reprocessing documents.
+
+Add filtering/sorting/searching for user docs.
+
+✅ DON’T: Don’t assume a file uploaded = embedded. Track status per file.
+
+5. Agent Monitor Tab (Logs & Status)
+Display:
+
+Logs of agent queries (from chat + internal events).
+
+RAG hit/miss breakdown.
+
+Token usage (if tracking with OpenAI API).
+
+Embedding success/failure summaries.
+
+Optional: Enable live WebSocket stream for real-time agent updates.
+
+6. Backend Support
+Add new FastAPI endpoints:
+
+POST /chat: Accept user input and return agent response.
+
+GET /logs: Return chat history and events.
+
+GET /status: Return current state (e.g., active memory, agent status).
+
+Add a simple logging module to track agent events and queries.
+
+7. Environment & Security
+All API calls should include JWT headers.
+
+Protect chat, document, and monitor endpoints with Supabase user ID validation.
+
+Add signed URLs to Supabase Storage for secure document retrieval.
+
+8. Bonus (Optional)
+Notifications: Toasts for uploads, responses, or errors.
+
+Agent Persona Selection: Dropdown to choose agent tone or narrator.
+
+Audit Trail: Show when RAG was used and how much each doc contributed.
