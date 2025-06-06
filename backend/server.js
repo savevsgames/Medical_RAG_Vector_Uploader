@@ -9,18 +9,38 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 
-fs.existsSync
-
-// Import our services
-import { DocumentProcessor } from './lib/documentProcessor.js';
-import { EmbeddingService } from './lib/embedder.js';
-import { ChatService } from './lib/chatService.js';
-
 // Load environment variables
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Diagnostic checks for file existence
+console.log('=== DIAGNOSTIC CHECKS ===');
+console.log('Current directory:', __dirname);
+console.log('Looking for files in:', path.join(__dirname, 'lib'));
+
+const documentProcessorPath = path.join(__dirname, 'lib', 'documentProcessor.js');
+const embedderPath = path.join(__dirname, 'lib', 'embedder.js');
+const chatServicePath = path.join(__dirname, 'lib', 'chatService.js');
+
+console.log('DocumentProcessor exists:', fs.existsSync(documentProcessorPath));
+console.log('Embedder exists:', fs.existsSync(embedderPath));
+console.log('ChatService exists:', fs.existsSync(chatServicePath));
+
+// List contents of lib directory if it exists
+const libDir = path.join(__dirname, 'lib');
+if (fs.existsSync(libDir)) {
+  console.log('Contents of lib directory:', fs.readdirSync(libDir));
+} else {
+  console.log('lib directory does not exist');
+}
+console.log('=== END DIAGNOSTIC ===');
+
+// Import our services
+import { DocumentProcessor } from './lib/documentProcessor.js';
+import { EmbeddingService } from './lib/embedder.js';
+import { ChatService } from './lib/chatService.js';
 
 const app = express();
 const port = process.env.PORT || 8000;
