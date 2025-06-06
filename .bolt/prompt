@@ -1,77 +1,77 @@
-# 📦 RunPod Backend Upgrade PDD
+# 🧠 RAG Agent Initialization - PDD
 
-## Goal
-Update the existing Medical RAG Vector Uploader backend to move BioBERT embedding and vectorization off of Render and into a scalable, GPU-backed service (e.g. RunPod). Supabase remains the source of truth for file and vector metadata.
+## Purpose
+Spin up and manage an intelligent retrieval agent that indexes user documents and responds to medical queries using vector search.
 
----
+## Trigger
+- User log in via frontend
+- Triggers backend endpoint: `/api/agent/start`
 
-## Step-by-Step Backend Architecture Update
+## Workflow
+1. Backend verifies JWT
+2. Retrieves user ID
+3. Loads previous embeddings from Supabase
+4. Initializes FastAPI background task for agent loop
+5. Agent listens on socket or API call
 
-### ✅ STEP 1: Replace Local Embedding with Remote API
+## Environment Variables Needed
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+- `SUPABASE_BUCKET`
+- `SUPABASE_JWT_SECRET`
+- `OPENAI_API_KEY`
+- `EMBEDDING_MODEL` (default: `dmis-lab/biobert-v1.1`)
 
-**Before:**
-- `rag.py` used `transformers` + `BioBERT` locally via `AutoTokenizer` and `AutoModel`
-- Heavy memory and VRAM usage
-- Fails on limited environments (e.g. Render free plan)
 
-**After:**
-- Remove `transformers`, `torch`, and `AutoModel` from local app
-- Replace with `POST` request to RunPod container hosting embedding logic
-- Add `REMOTE_EMBEDDING_URL` to `.env`
+# 📤 PDD: User Uploads RAG Documents
 
-### ✅ STEP 2: Create Embedding Microservice on RunPod
+## Trigger
+User drops file into `FileUpload` React component.
 
-**Before:**
-- No separation of model and FastAPI app
-- BioBERT pulled at server startup
+## Frontend Steps
+1. Validate file type/size
+2. POST `/api/documents/upload` with file and JWT
 
-**After:**
-- Create container (or use notebook pod) with:
-  - BioBERT model loading
-  - `POST /embed` endpoint that accepts `{"text": "...", "metadata": {...}}`
-  - Returns embedding vector
+## Backend Steps
+1. Verify JWT, extract user ID
+2. Extract file text
+3. Generate embedding (BioBERT)
+4. Store document in Supabase
+5. Return success or failure
 
-### ✅ STEP 3: Modify `embed_and_store()` Logic
 
-**Before:**
-- Embeddings generated directly using `BioBERT` locally
+# 🔄 RAG Agent Workflow
 
-**After:**
-- POST to RunPod
-- Validate response
-- Store returned vector in Supabase pgvector
+## Agent Loop
+- Check for incoming queries
+- Tokenize and embed query
+- Search pgvector in Supabase
+- Format top result chunks
+- Call OpenAI with RAG context
+- Optionally pass to ElevenLabs or Tavus for voice/video
 
-### ✅ STEP 4: Update Dockerfile + requirements.txt
+## Steps
+1. Receive query
+2. Embed with BioBERT
+3. Search: cosine similarity
+4. Filter by threshold
+5. Create prompt with context
+6. Generate response
+7. (Optional) Convert to voice/video
 
-**Before:**
-- Dockerfile includes `transformers`, `torch`, `BioBERT`
 
-**After:**
-- Remove heavy ML packages
-- Add `httpx` or `requests`
-- Reduce build time and size
-- Confirm startup time under 10s (optional for Render)
+# 🚀 Auto-Spin Agent on Login
 
-### ✅ STEP 5: Secure API Traffic
+## Trigger
+Frontend login successful → JWT received
 
-**Before:**
-- All embedding logic internal
+## Frontend
+- POST to `/api/agent/initialize`
 
-**After:**
-- Include optional `RUNPOD_EMBEDDING_KEY` in headers to authenticate backend-to-RunPod call
+## Backend
+1. Decode JWT → Get user_id
+2. Check for existing agent session
+3. Spin up background task
+4. Ready to accept queries
 
-### ✅ STEP 6: (Optional) Build RAG Query Microservice
-
-**Before:**
-- Queries answered directly inside backend with agent logic and BioBERT
-
-**After:**
-- Use RunPod to also handle `/chat` or `/answer` with full context + agent logic if needed
-
----
-
-## Notes
-
-- You can keep frontend unchanged (calls backend at `/upload` and `/chat`)
-- Supabase still stores files (via bucket) and vector embeddings (pgvector)
-- Backend is now lightweight and cheap to run on Render
+Use `uvicorn main:app --host 0.0.0.0 --port 8000` for container entrypoint
