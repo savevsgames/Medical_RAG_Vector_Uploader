@@ -1,176 +1,66 @@
-# 🧠 RAG Agent Initialization - PDD
+# Monorepo Deployment Split: Contextual PDD
 
 ## Purpose
-Spin up and manage an intelligent retrieval agent that indexes user documents and responds to medical queries using vector search.
+This document outlines the architectural refactor and deployment changes necessary to convert the current fullstack monorepo-based RAG document uploader into two independently deployed services: a backend (API) service deployed on Render, and a static frontend deployed to Vercel or Netlify.
 
-## Trigger
-- User log in via frontend
-- Triggers backend endpoint: `/api/agent/start`
+## Background
+Originally, the app was served as a unified monorepo where both backend and frontend were deployed under a single Render web service. However, this introduced routing and runtime issues (e.g., React frontend 404s, backend routes conflicting with static files). Splitting deployments avoids these issues.
 
-## Workflow
-1. Backend verifies JWT
-2. Retrieves user ID
-3. Loads previous embeddings from Supabase
-4. Initializes FastAPI background task for agent loop
-5. Agent listens on socket or API call
+## Goals
+- Maintain monorepo architecture for local development.
+- Deploy backend (FastAPI) as a web service to Render.
+- Deploy frontend (React + Vite) as a static site to Vercel or Netlify.
+- Share environment variables across services as needed.
+- Use Supabase for user authentication, RLS, and vector storage.
+- Integrate optional RunPod LLM embedding agent endpoint.
 
-## Environment Variables Needed
-- `SUPABASE_URL`
-- `SUPABASE_KEY`
-- `SUPABASE_BUCKET`
-- `SUPABASE_JWT_SECRET`
-- `OPENAI_API_KEY`
-- `EMBEDDING_MODEL` (default: `dmis-lab/biobert-v1.1`)
+## New Directory Summary
 
+```
+/
+├── backend/           # FastAPI service (deployed to Render)
+├── frontend/          # React client (deployed to Vercel/Netlify)
+├── supabase/          # Supabase migrations, config
+├── package.json       # Dev tool scripts (npm run dev, lint, etc.)
+```
 
-# 📤 PDD: User Uploads RAG Documents
+## Services
 
-## Trigger
-User drops file into `FileUpload` React component.
+### Backend API Service (Render)
+- Framework: FastAPI
+- Containerized: Yes (optional)
+- Routes:
+  - `POST /upload`
+  - `GET /docs`
+  - `POST /chat`
+- Auth: Supabase JWT
+- Needs `.env` vars:
+  - `SUPABASE_URL`
+  - `SUPABASE_KEY`
+  - `SUPABASE_BUCKET`
+  - `SUPABASE_JWT_SECRET`
+  - `OPENAI_API_KEY` (optional)
+  - `RUNPOD_EMBEDDING_URL` (optional)
+  - `RUNPOD_EMBEDDING_KEY` (optional)
 
-## Frontend Steps
-1. Validate file type/size
-2. POST `/api/documents/upload` with file and JWT
+### Frontend Static Site (Vercel)
+- Framework: React (Vite)
+- Pages:
+  - `/`: Landing / Login
+  - `/dashboard`: Upload & document list
+  - `/chat`: Query interface
+  - `/agent`: Health/monitor
+- Env vars:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+  - `VITE_API_URL` (Render backend endpoint)
 
-## Backend Steps
-1. Verify JWT, extract user ID
-2. Extract file text
-3. Generate embedding (BioBERT)
-4. Store document in Supabase
-5. Return success or failure
+## Design Constraints
+- Maintain developer velocity through a unified monorepo with shared tools.
+- Avoid CORS errors by ensuring VITE_API_URL matches deployed backend.
+- Keep frontend backend-agnostic (talks only to API_URL).
 
-
-# 🔄 RAG Agent Workflow
-
-## Agent Loop
-- Check for incoming queries
-- Tokenize and embed query
-- Search pgvector in Supabase
-- Format top result chunks
-- Call OpenAI with RAG context
-- Optionally pass to ElevenLabs or Tavus for voice/video
-
-## Steps
-1. Receive query
-2. Embed with BioBERT
-3. Search: cosine similarity
-4. Filter by threshold
-5. Create prompt with context
-6. Generate response
-7. (Optional) Convert to voice/video
-
-
-# 🚀 Auto-Spin Agent on Login
-
-## Trigger
-Frontend login successful → JWT received
-
-## Frontend
-- POST to `/api/agent/initialize`
-
-## Backend
-1. Decode JWT → Get user_id
-2. Check for existing agent session
-3. Spin up background task
-4. Ready to accept queries
-
-Use `uvicorn main:app --host 0.0.0.0 --port 8000` for container entrypoint
-
-FRONT END UPGRADE
-Vision Overview
-Your app will become a unified medical assistant dashboard with:
-
-Agent Chat Tab – Conversational UI for interacting with the AI assistant.
-
-RAG Document Tab – Upload, embed, and manage user documents.
-
-Agent Monitor Tab – Track the agent’s actions, history, and response context.
-
-Global Auth Context – Logged-in state, user info, logout menu, and secure route handling.
-
-🪜 Steps to Implement This Plan
-1. UI Tab Framework Setup
-Implement a global layout with three navigable tabs (React Router + Layout).
-
-Use a component like Tabs, Drawer, or a Sidebar with:
-
-Chat
-
-Documents
-
-Agent Monitor
-
-Ensure layout persists across routes.
-
-✅ DON’T: Don’t rebuild authentication logic in each tab—centralize it.
-
-2. Global Auth Context
-Use React.Context + useEffect to:
-
-Store user session (via Supabase Auth).
-
-Expose auth status and user info globally.
-
-Add logout button in header/sidebar.
-
-Protect routes via PrivateRoute or conditional redirects if not authenticated.
-
-✅ DON’T: Avoid passing auth tokens manually across components.
-
-3. Chat Tab (Agent Interaction)
-Build a conversational UI with:
-
-Input box, chat history display, and streaming responses.
-
-POST messages to backend /chat or /agent endpoint.
-
-Render context-aware responses from the agent.
-
-Optional: Add “thinking” loader and agent typing simulation.
-
-4. RAG Document Tab (Upload & Management)
-Use the existing FileUpload, DocumentList, and Supabase-backed flow.
-
-Allow deleting or reprocessing documents.
-
-Add filtering/sorting/searching for user docs.
-
-✅ DON’T: Don’t assume a file uploaded = embedded. Track status per file.
-
-5. Agent Monitor Tab (Logs & Status)
-Display:
-
-Logs of agent queries (from chat + internal events).
-
-RAG hit/miss breakdown.
-
-Token usage (if tracking with OpenAI API).
-
-Embedding success/failure summaries.
-
-Optional: Enable live WebSocket stream for real-time agent updates.
-
-6. Backend Support
-Add new FastAPI endpoints:
-
-POST /chat: Accept user input and return agent response.
-
-GET /logs: Return chat history and events.
-
-GET /status: Return current state (e.g., active memory, agent status).
-
-Add a simple logging module to track agent events and queries.
-
-7. Environment & Security
-All API calls should include JWT headers.
-
-Protect chat, document, and monitor endpoints with Supabase user ID validation.
-
-Add signed URLs to Supabase Storage for secure document retrieval.
-
-8. Bonus (Optional)
-Notifications: Toasts for uploads, responses, or errors.
-
-Agent Persona Selection: Dropdown to choose agent tone or narrator.
-
-Audit Trail: Show when RAG was used and how much each doc contributed.
+## Risks
+- Render cold-start latency for free-tier backends.
+- Supabase vector limits or bandwidth constraints.
+- RunPod must be reliable for long-lived pods (e.g. agent health monitoring).
