@@ -12,6 +12,8 @@ class ErrorLogger {
   constructor() {
     this.logDir = path.join(__dirname, '..', 'logs');
     this.ensureLogDirectory();
+    // Add debug mode configuration based on environment variable
+    this.debugMode = process.env.BACKEND_DEBUG_LOGGING === 'true';
   }
 
   ensureLogDirectory() {
@@ -67,6 +69,15 @@ class ErrorLogger {
     const formatted = this.formatMessage('success', message, context);
     console.log(`✅ ${formatted}`);
     this.writeToFile('info', `SUCCESS: ${message}`, context);
+  }
+
+  // Add debug method that respects debugMode setting
+  debug(message, context = {}) {
+    if (this.debugMode) {
+      const formatted = this.formatMessage('debug', message, context);
+      console.debug(`🔍 ${formatted}`);
+      this.writeToFile('debug', message, context);
+    }
   }
 
   // Agent-specific logging methods
