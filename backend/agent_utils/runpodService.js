@@ -25,31 +25,36 @@ class RunPodService {
     try {
       const { documentText } = req.body;
       const userId = req.userId;
+      const userJWT = req.headers.authorization; // Get the full Authorization header
       
       if (!documentText || typeof documentText !== 'string') {
         errorLogger.warn('Invalid embedding request - missing document text', { user_id: userId });
         return res.status(400).json({ error: 'Document text is required' });
       }
 
-      if (!process.env.RUNPOD_EMBEDDING_URL || !process.env.RUNPOD_EMBEDDING_KEY) {
+      if (!process.env.RUNPOD_EMBEDDING_URL) {
         errorLogger.warn('RunPod embedding service not configured', { user_id: userId });
         return res.status(503).json({ error: 'RunPod embedding service not configured' });
       }
 
       errorLogger.runpodRequest('embed', userId, {
         text_length: documentText.length,
-        text_preview: documentText.substring(0, 100)
+        text_preview: documentText.substring(0, 100),
+        has_jwt: !!userJWT
       });
 
       const response = await axios.post(
         `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
         { 
-          text: documentText,
-          user_id: userId 
+          file_path: 'inline_text', // Since we're sending text directly
+          metadata: {
+            text_length: documentText.length,
+            source: 'direct_upload'
+          }
         },
         { 
           headers: { 
-            'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}`,
+            'Authorization': userJWT, // Send user's Supabase JWT
             'Content-Type': 'application/json'
           },
           timeout: this.defaultTimeout
@@ -59,14 +64,16 @@ class RunPodService {
       errorLogger.success('RunPod embedding completed', {
         user_id: userId,
         dimensions: response.data.dimensions || response.data.embedding?.length,
-        processing_time: response.data.processing_time
+        processing_time: response.data.processing_time,
+        status: response.data.status
       });
 
       res.json({
         embedding: response.data.embedding || response.data,
         dimensions: response.data.dimensions || response.data.embedding?.length,
         processing_time: response.data.processing_time,
-        user_id: userId
+        user_id: userId,
+        status: response.data.status || 'success'
       });
 
     } catch (error) {
@@ -78,13 +85,14 @@ class RunPodService {
     try {
       const { message, context } = req.body;
       const userId = req.userId;
+      const userJWT = req.headers.authorization; // Get the full Authorization header
       
       if (!message || typeof message !== 'string') {
         errorLogger.warn('Invalid chat request - missing message', { user_id: userId });
         return res.status(400).json({ error: 'Message is required' });
       }
 
-      if (!process.env.RUNPOD_EMBEDDING_URL || !process.env.RUNPOD_EMBEDDING_KEY) {
+      if (!process.env.RUNPOD_EMBEDDING_URL) {
         errorLogger.warn('RunPod chat service not configured', { user_id: userId });
         return res.status(503).json({ error: 'RunPod chat service not configured' });
       }
@@ -92,19 +100,21 @@ class RunPodService {
       errorLogger.runpodRequest('chat', userId, {
         message_length: message.length,
         message_preview: message.substring(0, 100),
-        has_context: !!context
+        has_context: !!context,
+        has_jwt: !!userJWT
       });
 
       const response = await axios.post(
         `${process.env.RUNPOD_EMBEDDING_URL}/chat`,
         { 
           query: message,
-          user_id: userId,
-          context: context || null
+          history: context || [],
+          top_k: 5,
+          temperature: 0.7
         },
         { 
           headers: { 
-            'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}`,
+            'Authorization': userJWT, // Send user's Supabase JWT
             'Content-Type': 'application/json'
           },
           timeout: this.chatTimeout
@@ -115,7 +125,8 @@ class RunPodService {
         user_id: userId,
         agent_id: response.data.agent_id || 'txagent',
         processing_time: response.data.processing_time,
-        sources_count: response.data.sources?.length || 0
+        sources_count: response.data.sources?.length || 0,
+        status: response.data.status
       });
 
       res.json({
@@ -123,7 +134,8 @@ class RunPodService {
         sources: response.data.sources || [],
         agent_id: response.data.agent_id || 'txagent',
         processing_time: response.data.processing_time,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        status: response.data.status || 'success'
       });
 
     } catch (error) {
@@ -138,13 +150,28 @@ class RunPodService {
       user_id: userId,
       error_code: error.code,
       response_status: error.response?.status,
-      response_data: error.response?.data
+      response_data: error.response?.data,
+      has_jwt: !!req.headers.authorization
     });
     
     if (error.code === 'ECONNABORTED') {
       return res.status(504).json({ 
         error: `RunPod ${operation} request timeout`,
         details: 'The TxAgent container may be starting up or overloaded'
+      });
+    }
+    
+    if (error.response?.status === 401) {
+      return res.status(401).json({
+        error: `RunPod ${operation} authentication failed`,
+        details: 'Invalid or expired user token'
+      });
+    }
+    
+    if (error.response?.status === 405) {
+      return res.status(502).json({
+        error: `RunPod ${operation} method not allowed`,
+        details: 'TxAgent container may not be properly configured or running'
       });
     }
     
@@ -161,34 +188,40 @@ class RunPodService {
     });
   }
 
-  // Utility method to test RunPod connection
-  async testConnection() {
+  // Utility method to test RunPod connection with user JWT
+  async testConnection(userJWT = null) {
     try {
-      if (!process.env.RUNPOD_EMBEDDING_URL || !process.env.RUNPOD_EMBEDDING_KEY) {
+      if (!process.env.RUNPOD_EMBEDDING_URL) {
         errorLogger.connectionCheck('RunPod', false, { reason: 'Missing configuration' });
         return false;
+      }
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (userJWT) {
+        headers['Authorization'] = userJWT;
       }
 
       const response = await axios.get(
         `${process.env.RUNPOD_EMBEDDING_URL}/health`,
         { 
-          headers: { 
-            'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}`
-          },
+          headers,
           timeout: 5000
         }
       );
 
       errorLogger.connectionCheck('RunPod', true, { 
         status: response.status,
-        health: response.data
+        health: response.data,
+        authenticated: !!userJWT
       });
       return true;
 
     } catch (error) {
       errorLogger.connectionCheck('RunPod', false, { 
         error: error.message,
-        code: error.code
+        code: error.code,
+        status: error.response?.status,
+        authenticated: !!userJWT
       });
       return false;
     }

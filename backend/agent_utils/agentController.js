@@ -29,7 +29,7 @@ class AgentController {
     this.router.use(agentMiddleware.rateLimitAgent(20, 60000)); // 20 requests per minute
 
     // New API routes
-    this.router.post('/start', agentMiddleware.validateRunPodConfig, this.startAgent.bind(this));
+    this.router.post('/start', this.startAgent.bind(this));
     this.router.post('/stop', this.stopAgent.bind(this));
     this.router.get('/status', this.getAgentStatus.bind(this));
     this.router.get('/stats', this.getAgentStats.bind(this));
@@ -67,9 +67,20 @@ class AgentController {
   async startAgent(req, res) {
     try {
       const userId = req.userId;
-      const { RUNPOD_EMBEDDING_URL, RUNPOD_EMBEDDING_KEY } = process.env;
+      const userJWT = req.headers.authorization; // Get user's Supabase JWT
+      const { RUNPOD_EMBEDDING_URL } = process.env;
 
-      errorLogger.info('Activating TxAgent session', { user_id: userId });
+      if (!RUNPOD_EMBEDDING_URL) {
+        return res.status(503).json({ 
+          error: 'RunPod service not configured',
+          details: 'Missing RUNPOD_EMBEDDING_URL'
+        });
+      }
+
+      errorLogger.info('Activating TxAgent session', { 
+        user_id: userId,
+        has_jwt: !!userJWT
+      });
 
       // Check if user already has an active agent
       const existingStatus = await this.agentManager.getAgentStatus(userId);
@@ -86,12 +97,12 @@ class AgentController {
         });
       }
 
-      // Verify TxAgent container is healthy
+      // Verify TxAgent container is healthy using user's JWT
       const healthResponse = await axios.get(
         `${RUNPOD_EMBEDDING_URL}/health`,
         { 
           headers: { 
-            'Authorization': `Bearer ${RUNPOD_EMBEDDING_KEY}`,
+            'Authorization': userJWT, // Send user's Supabase JWT
             'Content-Type': 'application/json'
           },
           timeout: 10000
@@ -129,6 +140,13 @@ class AgentController {
         return res.status(504).json({ 
           error: 'TxAgent health check timeout',
           details: 'Container may be starting up or overloaded'
+        });
+      }
+      
+      if (error.response?.status === 401) {
+        return res.status(401).json({
+          error: 'TxAgent authentication failed',
+          details: 'Invalid or expired user token'
         });
       }
       
@@ -174,6 +192,7 @@ class AgentController {
   async getAgentStatus(req, res) {
     try {
       const userId = req.userId;
+      const userJWT = req.headers.authorization; // Get user's Supabase JWT
       
       // Get local database status
       const localStatus = await this.agentManager.getAgentStatus(userId);
@@ -186,13 +205,13 @@ class AgentController {
       }
 
       // Check TxAgent container health if configured
-      if (process.env.RUNPOD_EMBEDDING_URL && process.env.RUNPOD_EMBEDDING_KEY) {
+      if (process.env.RUNPOD_EMBEDDING_URL) {
         try {
           const response = await axios.get(
             `${process.env.RUNPOD_EMBEDDING_URL}/health`,
             { 
               headers: { 
-                'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}`
+                'Authorization': userJWT // Send user's Supabase JWT
               },
               timeout: 10000
             }
@@ -212,7 +231,8 @@ class AgentController {
         } catch (runpodError) {
           errorLogger.warn('TxAgent health check failed', {
             user_id: userId,
-            error: runpodError.message
+            error: runpodError.message,
+            status: runpodError.response?.status
           });
           
           res.json({
