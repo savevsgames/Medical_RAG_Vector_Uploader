@@ -70,6 +70,18 @@ class AgentController {
       const userJWT = req.headers.authorization; // Get user's Supabase JWT
       const { RUNPOD_EMBEDDING_URL } = process.env;
 
+      if (!userId) {
+        errorLogger.warn('Start agent called without user ID', {
+          path: req.path,
+          ip: req.ip,
+          headers: Object.keys(req.headers)
+        });
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          details: 'User ID not found in request'
+        });
+      }
+
       if (!RUNPOD_EMBEDDING_URL) {
         return res.status(503).json({ 
           error: 'RunPod service not configured',
@@ -169,6 +181,13 @@ class AgentController {
     try {
       const userId = req.userId;
 
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          details: 'User ID not found in request'
+        });
+      }
+
       errorLogger.info('Deactivating TxAgent session', { user_id: userId });
 
       // Update agent session in database
@@ -193,6 +212,18 @@ class AgentController {
     try {
       const userId = req.userId;
       const userJWT = req.headers.authorization; // Get user's Supabase JWT
+      
+      if (!userId) {
+        errorLogger.warn('Agent status called without user ID', {
+          path: req.path,
+          ip: req.ip,
+          headers: Object.keys(req.headers)
+        });
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          details: 'User ID not found in request'
+        });
+      }
       
       // Get local database status
       const localStatus = await this.agentManager.getAgentStatus(userId);
