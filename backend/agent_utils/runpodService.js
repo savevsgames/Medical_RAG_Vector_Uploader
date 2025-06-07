@@ -119,113 +119,61 @@ class RunPodService {
         has_context: !!(context || history),
         has_jwt: !!userJWT,
         top_k,
-        temperature
+        temperature,
+        request_method: 'POST'
       });
 
-      // Based on your TxAgent repository, try different endpoint patterns
-      const endpoints = [
-        '/chat',           // Standard FastAPI chat endpoint
-        '/api/chat',       // Alternative API path
-        '/query',          // Alternative query endpoint
-        '/ask'             // Alternative ask endpoint
-      ];
+      // Based on your TxAgent FastAPI code, use the correct endpoint and payload format
+      const chatEndpoint = '/chat';
+      const requestPayload = {
+        query: message,
+        history: history || context || [],
+        top_k: top_k,
+        temperature: temperature
+      };
 
-      let lastError = null;
-      
-      for (const endpoint of endpoints) {
-        try {
-          errorLogger.info(`Trying TxAgent endpoint: ${endpoint}`, {
-            user_id: userId,
-            endpoint_url: `${process.env.RUNPOD_EMBEDDING_URL}${endpoint}`
-          });
+      errorLogger.debug('Sending POST request to TxAgent', {
+        user_id: userId,
+        endpoint: `${process.env.RUNPOD_EMBEDDING_URL}${chatEndpoint}`,
+        method: 'POST',
+        payload: requestPayload,
+        has_auth: !!userJWT
+      });
 
-          // Prepare request payload - try multiple formats
-          const requestPayloads = [
-            // Format 1: Standard chat format
-            {
-              query: message,
-              history: history || context || [],
-              top_k: top_k,
-              temperature: temperature,
-              stream: false
-            },
-            // Format 2: Simple message format
-            {
-              message: message,
-              context: history || context || [],
-              max_results: top_k,
-              temperature: temperature
-            },
-            // Format 3: Question format
-            {
-              question: message,
-              chat_history: history || context || [],
-              k: top_k,
-              temperature: temperature
-            }
-          ];
-
-          for (const payload of requestPayloads) {
-            try {
-              const response = await axios.post(
-                `${process.env.RUNPOD_EMBEDDING_URL}${endpoint}`,
-                payload,
-                { 
-                  headers: { 
-                    'Authorization': userJWT, // Send user's Supabase JWT
-                    'Content-Type': 'application/json'
-                  },
-                  timeout: this.chatTimeout
-                }
-              );
-
-              errorLogger.success('RunPod chat completed', {
-                user_id: userId,
-                endpoint: endpoint,
-                payload_format: requestPayloads.indexOf(payload) + 1,
-                response_length: response.data.response?.length || response.data.answer?.length || 0,
-                sources_count: response.data.sources?.length || 0,
-                status: response.data.status
-              });
-
-              // Handle different response formats
-              const chatResponse = response.data.response || response.data.answer || response.data.result || 'No response generated';
-              const sources = response.data.sources || response.data.documents || [];
-
-              return res.json({
-                response: chatResponse,
-                sources: sources,
-                agent_id: 'txagent',
-                processing_time: response.data.processing_time,
-                timestamp: new Date().toISOString(),
-                status: response.data.status || 'success',
-                endpoint_used: endpoint,
-                payload_format: requestPayloads.indexOf(payload) + 1
-              });
-
-            } catch (payloadError) {
-              errorLogger.warn(`Payload format ${requestPayloads.indexOf(payload) + 1} failed for ${endpoint}`, {
-                user_id: userId,
-                error: payloadError.message,
-                status: payloadError.response?.status
-              });
-              lastError = payloadError;
-              continue;
-            }
-          }
-        } catch (endpointError) {
-          errorLogger.warn(`Endpoint ${endpoint} failed`, {
-            user_id: userId,
-            error: endpointError.message,
-            status: endpointError.response?.status
-          });
-          lastError = endpointError;
-          continue;
+      const response = await axios.post(
+        `${process.env.RUNPOD_EMBEDDING_URL}${chatEndpoint}`,
+        requestPayload,
+        { 
+          headers: { 
+            'Authorization': userJWT, // Send user's Supabase JWT
+            'Content-Type': 'application/json'
+          },
+          timeout: this.chatTimeout
         }
-      }
+      );
 
-      // If all endpoints failed, throw the last error
-      throw lastError || new Error('All TxAgent endpoints failed');
+      errorLogger.success('RunPod chat completed', {
+        user_id: userId,
+        endpoint: chatEndpoint,
+        response_length: response.data.response?.length || response.data.answer?.length || 0,
+        sources_count: response.data.sources?.length || 0,
+        status: response.data.status,
+        response_status: response.status
+      });
+
+      // Handle TxAgent response format
+      const chatResponse = response.data.response || response.data.answer || response.data.result || 'No response generated';
+      const sources = response.data.sources || response.data.documents || [];
+
+      return res.json({
+        response: chatResponse,
+        sources: sources,
+        agent_id: 'txagent',
+        processing_time: response.data.processing_time,
+        timestamp: new Date().toISOString(),
+        status: response.data.status || 'success',
+        endpoint_used: chatEndpoint
+      });
 
     } catch (error) {
       this.handleRunPodError('chat', error, req, res);
@@ -241,7 +189,8 @@ class RunPodService {
       response_status: error.response?.status,
       response_data: error.response?.data,
       has_jwt: !!req.headers.authorization,
-      runpod_url: process.env.RUNPOD_EMBEDDING_URL
+      runpod_url: process.env.RUNPOD_EMBEDDING_URL,
+      request_method: 'POST'
     });
     
     if (error.code === 'ECONNABORTED') {
@@ -261,7 +210,7 @@ class RunPodService {
     if (error.response?.status === 405) {
       return res.status(502).json({
         error: `RunPod ${operation} method not allowed`,
-        details: 'TxAgent container endpoints may not be properly configured. Check /embed and /chat endpoints.'
+        details: 'TxAgent container endpoints may not be properly configured. Verify POST endpoints are available.'
       });
     }
 
@@ -279,7 +228,8 @@ class RunPodService {
         debug_info: {
           status: error.response.status,
           url: process.env.RUNPOD_EMBEDDING_URL,
-          endpoint: `/${operation}`
+          endpoint: `/${operation}`,
+          method: 'POST'
         }
       });
     }
@@ -289,7 +239,8 @@ class RunPodService {
       details: 'RunPod service unavailable',
       debug_info: {
         runpod_url: process.env.RUNPOD_EMBEDDING_URL,
-        error_message: error.message
+        error_message: error.message,
+        method: 'POST'
       }
     });
   }
