@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Send, Bot, User, Loader2, FileText, Cpu, Brain, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Send, Bot, User, Loader2, FileText, Cpu, Brain, ChevronDown, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { logger, logUserAction, logApiCall, logAgentOperation } from '../utils/logger';
@@ -28,6 +28,13 @@ interface AgentConfig {
   bgColor: string;
 }
 
+interface TxAgentStatus {
+  agent_active: boolean;
+  agent_id: string | null;
+  container_status?: string;
+  container_health?: any;
+}
+
 const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
   txagent: {
     id: 'txagent',
@@ -52,18 +59,109 @@ const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
 export function Chat() {
   const { session, user } = useAuth();
   const [selectedAgent, setSelectedAgent] = useState<AgentType>('txagent');
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      type: 'assistant',
-      content: 'Hello! I\'m your AI-powered medical research assistant. You can choose between TxAgent (specialized BioBERT model) or OpenAI (GPT with RAG) using the dropdown above. Upload some documents first, then ask me anything!',
-      timestamp: new Date()
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [txAgentStatus, setTxAgentStatus] = useState<TxAgentStatus | null>(null);
+  const [connectionChecking, setConnectionChecking] = useState(true);
 
   const currentAgent = AGENT_CONFIGS[selectedAgent];
+
+  // Check TxAgent connection status on component mount
+  useEffect(() => {
+    const checkTxAgentConnection = async () => {
+      if (!session) {
+        setConnectionChecking(false);
+        return;
+      }
+
+      const userEmail = user?.email;
+      
+      logger.info('Checking TxAgent connection status', {
+        component: 'Chat',
+        user: userEmail
+      });
+
+      try {
+        // Check agent status
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/agent/status`, {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (response.ok) {
+          const statusData = await response.json();
+          setTxAgentStatus(statusData);
+          
+          // Create connection status message
+          let statusMessage = '';
+          let statusIcon = '';
+          
+          if (statusData.agent_active && statusData.container_status === 'running') {
+            statusIcon = '🟢';
+            statusMessage = `TxAgent Connection: ACTIVE\n\n✅ Container Status: ${statusData.container_status}\n✅ Session ID: ${statusData.agent_id?.substring(0, 12)}...\n✅ BioBERT model ready for medical document analysis\n\nYou can now ask questions about your uploaded documents using the specialized medical AI model.`;
+          } else if (statusData.agent_active && statusData.container_status === 'starting') {
+            statusIcon = '🟡';
+            statusMessage = `TxAgent Connection: STARTING\n\n⏳ Container Status: ${statusData.container_status}\n⏳ Session ID: ${statusData.agent_id?.substring(0, 12)}...\n⏳ BioBERT model is initializing\n\nPlease wait a moment for the container to fully start up.`;
+          } else if (statusData.container_status === 'unreachable') {
+            statusIcon = '🔴';
+            statusMessage = `TxAgent Connection: UNREACHABLE\n\n❌ Container Status: ${statusData.container_status}\n❌ RunPod container is not responding\n❌ BioBERT model unavailable\n\nFalling back to OpenAI for document analysis. You can try starting the TxAgent from the Monitor page.`;
+          } else {
+            statusIcon = '🔴';
+            statusMessage = `TxAgent Connection: INACTIVE\n\n❌ Container Status: ${statusData.container_status || 'stopped'}\n❌ No active session\n❌ BioBERT model not available\n\nYou can start the TxAgent from the Monitor page or use OpenAI as an alternative.`;
+          }
+
+          // Add container health details if available
+          if (statusData.container_health && typeof statusData.container_health === 'object') {
+            const health = statusData.container_health;
+            statusMessage += `\n\n📊 Container Health:\n• Model: ${health.model || 'Unknown'}\n• Device: ${health.device || 'Unknown'}\n• Version: ${health.version || 'Unknown'}`;
+          }
+
+          const connectionMessage: Message = {
+            id: 'connection-status',
+            type: 'assistant',
+            content: `${statusIcon} ${statusMessage}`,
+            timestamp: new Date(),
+            agent_id: 'system'
+          };
+
+          setMessages([connectionMessage]);
+
+          logAgentOperation('Connection Status Checked', userEmail, {
+            agentActive: statusData.agent_active,
+            containerStatus: statusData.container_status,
+            agentId: statusData.agent_id,
+            component: 'Chat'
+          });
+
+        } else {
+          throw new Error(`Status check failed: ${response.status}`);
+        }
+      } catch (error) {
+        logger.error('Failed to check TxAgent connection', {
+          component: 'Chat',
+          user: userEmail,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+
+        // Show connection error message
+        const errorMessage: Message = {
+          id: 'connection-error',
+          type: 'assistant',
+          content: `🔴 TxAgent Connection: ERROR\n\n❌ Failed to check container status\n❌ Backend communication error\n❌ BioBERT model status unknown\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nYou can try refreshing the page or use OpenAI as an alternative.`,
+          timestamp: new Date(),
+          agent_id: 'system'
+        };
+
+        setMessages([errorMessage]);
+      } finally {
+        setConnectionChecking(false);
+      }
+    };
+
+    checkTxAgentConnection();
+  }, [session, user]);
 
   const handleAgentChange = (newAgent: AgentType) => {
     const userEmail = user?.email;
@@ -216,6 +314,20 @@ export function Chat() {
     }
   };
 
+  const getConnectionStatusIcon = () => {
+    if (connectionChecking) return <Loader2 className="w-4 h-4 animate-spin text-gray-500" />;
+    
+    if (!txAgentStatus) return <XCircle className="w-4 h-4 text-red-500" />;
+    
+    if (txAgentStatus.agent_active && txAgentStatus.container_status === 'running') {
+      return <CheckCircle className="w-4 h-4 text-green-500" />;
+    } else if (txAgentStatus.container_status === 'starting') {
+      return <AlertCircle className="w-4 h-4 text-yellow-500" />;
+    } else {
+      return <XCircle className="w-4 h-4 text-red-500" />;
+    }
+  };
+
   return (
     <div className="h-[calc(100vh-200px)] flex flex-col bg-white rounded-lg shadow">
       {/* Chat Header with Agent Selector */}
@@ -225,7 +337,10 @@ export function Chat() {
             <currentAgent.icon className={`w-6 h-6 ${currentAgent.color}`} />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Medical AI Assistant</h2>
+            <div className="flex items-center space-x-2">
+              <h2 className="text-lg font-semibold text-gray-900">Medical AI Assistant</h2>
+              {getConnectionStatusIcon()}
+            </div>
             <p className="text-sm text-gray-500">{currentAgent.description}</p>
           </div>
         </div>
@@ -257,6 +372,19 @@ export function Chat() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {connectionChecking && (
+          <div className="flex items-start space-x-3">
+            <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+            </div>
+            <div className="bg-gray-100 px-4 py-2 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-500">Checking TxAgent connection status...</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {messages.map((message) => (
           <div
             key={message.id}
@@ -269,12 +397,16 @@ export function Chat() {
                 ? 'bg-gray-100' 
                 : message.agent_id === 'openai'
                 ? 'bg-green-100'
+                : message.agent_id === 'system'
+                ? 'bg-purple-100'
                 : 'bg-blue-100'
             }`}>
               {message.type === 'user' ? (
                 <User className="w-4 h-4 text-gray-600" />
               ) : message.agent_id === 'openai' ? (
                 <Brain className="w-4 h-4 text-green-600" />
+              ) : message.agent_id === 'system' ? (
+                <AlertCircle className="w-4 h-4 text-purple-600" />
               ) : (
                 <Bot className="w-4 h-4 text-blue-600" />
               )}
@@ -294,7 +426,7 @@ export function Chat() {
                   <p className="text-xs">
                     {message.timestamp.toLocaleTimeString()}
                   </p>
-                  {message.agent_id && (
+                  {message.agent_id && message.agent_id !== 'system' && (
                     <p className="text-xs font-mono">
                       {message.agent_id === 'txagent' ? 'TxAgent' : 'OpenAI'}
                       {message.agent_id === 'txagent' && message.agent_id.length > 8 && 
