@@ -186,7 +186,8 @@ const corsOptions = {
     const allowedDomainPatterns = [
       /^https:\/\/.*\.onrender\.com$/,
       /^https:\/\/.*\.vercel\.app$/,
-      /^https:\/\/.*\.netlify\.app$/
+      /^https:\/\/.*\.netlify\.app$/,
+      /^https:\/\/.*\.webcontainer-api\.io$/  // Add WebContainer pattern
     ];
     
     // Check exact matches
