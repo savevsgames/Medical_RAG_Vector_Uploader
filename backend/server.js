@@ -233,7 +233,7 @@ app.get('/health', async (req, res) => {
     supabase_connected: true,
     embedding_configured: embeddingService.isConfigured(),
     openai_configured: !!process.env.OPENAI_API_KEY,
-    runpod_configured: !!(process.env.RUNPOD_EMBEDDING_URL && process.env.RUNPOD_EMBEDDING_KEY)
+    runpod_configured: !!process.env.RUNPOD_EMBEDDING_URL
   };
 
   // Test RunPod connection if configured
@@ -242,7 +242,6 @@ app.get('/health', async (req, res) => {
       const response = await axios.get(
         `${process.env.RUNPOD_EMBEDDING_URL}/health`,
         { 
-          headers: { 'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}` },
           timeout: 5000
         }
       );
@@ -290,7 +289,7 @@ app.post('/api/chat', verifyToken, async (req, res) => {
     });
 
     // Try RunPod TxAgent first if configured
-    if (process.env.RUNPOD_EMBEDDING_URL && process.env.RUNPOD_EMBEDDING_KEY) {
+    if (process.env.RUNPOD_EMBEDDING_URL) {
       try {
         errorLogger.info('Attempting RunPod TxAgent chat', {
           user_id: userId,
@@ -301,12 +300,14 @@ app.post('/api/chat', verifyToken, async (req, res) => {
           `${process.env.RUNPOD_EMBEDDING_URL}/chat`,
           { 
             query: message,
-            user_id: userId,
-            context: context || null
+            history: context || [],
+            top_k: 5,
+            temperature: 0.7,
+            stream: false
           },
           { 
             headers: { 
-              'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}`,
+              'Authorization': req.headers.authorization, // Forward user's JWT
               'Content-Type': 'application/json'
             },
             timeout: 60000
@@ -320,9 +321,9 @@ app.post('/api/chat', verifyToken, async (req, res) => {
         });
 
         return res.json({
-          response: response.data.response || response.data.answer || 'No response from TxAgent',
+          response: response.data.response || 'No response from TxAgent',
           sources: response.data.sources || [],
-          agent_id: response.data.agent_id || 'txagent',
+          agent_id: 'txagent',
           processing_time: response.data.processing_time,
           timestamp: new Date().toISOString()
         });
@@ -331,7 +332,8 @@ app.post('/api/chat', verifyToken, async (req, res) => {
         errorLogger.warn('RunPod TxAgent failed, falling back to local chat', {
           user_id: userId,
           error: runpodError.message,
-          error_code: runpodError.code
+          error_code: runpodError.code,
+          status: runpodError.response?.status
         });
       }
     }
@@ -469,7 +471,7 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
     let embeddingSource = 'local';
     
     try {
-      if (process.env.RUNPOD_EMBEDDING_URL && process.env.RUNPOD_EMBEDDING_KEY) {
+      if (process.env.RUNPOD_EMBEDDING_URL) {
         errorLogger.info('Attempting RunPod embedding', {
           user_id: req.userId,
           document_id: documentId,
@@ -480,27 +482,52 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
         const runpodResponse = await axios.post(
           `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
           { 
-            text: text,
-            user_id: req.userId 
+            file_path: `upload_${documentId}`,
+            metadata: {
+              ...metadata,
+              file_size: req.file.size,
+              mime_type: req.file.mimetype,
+              inline_text: text,
+              user_id: req.userId
+            }
           },
           { 
             headers: { 
-              'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}`,
+              'Authorization': req.headers.authorization, // Forward user's JWT
               'Content-Type': 'application/json'
             },
             timeout: 30000
           }
         );
         
-        embedding = runpodResponse.data.embedding || runpodResponse.data;
-        embeddingSource = 'runpod';
-        
-        errorLogger.success('RunPod embedding completed', {
-          user_id: req.userId,
-          document_id: documentId,
-          dimensions: runpodResponse.data.dimensions || embedding?.length,
-          response_status: runpodResponse.status
-        });
+        // Handle different response formats from TxAgent
+        if (runpodResponse.data.document_ids && runpodResponse.data.document_ids.length > 0) {
+          // Background processing response
+          embeddingSource = 'runpod_processing';
+          errorLogger.info('RunPod background processing initiated', {
+            user_id: req.userId,
+            document_id: documentId,
+            document_ids: runpodResponse.data.document_ids,
+            chunk_count: runpodResponse.data.chunk_count
+          });
+          
+          // For background processing, use local embedding for immediate storage
+          embedding = await embeddingService.generateEmbedding(text);
+          embeddingSource = 'local_with_runpod_processing';
+        } else if (runpodResponse.data.embedding) {
+          // Direct embedding response
+          embedding = runpodResponse.data.embedding;
+          embeddingSource = 'runpod';
+          
+          errorLogger.success('RunPod embedding completed', {
+            user_id: req.userId,
+            document_id: documentId,
+            dimensions: embedding.length,
+            response_status: runpodResponse.status
+          });
+        } else {
+          throw new Error('Invalid RunPod response format');
+        }
       } else {
         throw new Error('RunPod not configured');
       }
@@ -509,7 +536,8 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
         user_id: req.userId,
         document_id: documentId,
         error: embeddingError.message,
-        error_code: embeddingError.code
+        error_code: embeddingError.code,
+        status: embeddingError.response?.status
       });
       
       embedding = await embeddingService.generateEmbedding(text);
@@ -671,7 +699,7 @@ app.listen(port, () => {
   errorLogger.connectionCheck('Embedding', embeddingService.isConfigured());
   errorLogger.connectionCheck('OpenAI Chat', !!process.env.OPENAI_API_KEY);
   errorLogger.connectionCheck('Supabase', !!process.env.SUPABASE_URL);
-  errorLogger.connectionCheck('RunPod TxAgent', !!(process.env.RUNPOD_EMBEDDING_URL && process.env.RUNPOD_EMBEDDING_KEY));
+  errorLogger.connectionCheck('RunPod TxAgent', !!process.env.RUNPOD_EMBEDDING_URL);
   
   errorLogger.info('📚 Available endpoints:');
   errorLogger.info('  - GET  /health (Health check)');

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Clock, CheckCircle, XCircle, AlertCircle, Container, Cpu } from 'lucide-react';
+import { Activity, Clock, CheckCircle, XCircle, AlertCircle, Container, Cpu, RefreshCw, Play, Square, Zap } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { logger, logUserAction, logApiCall, logAgentOperation } from '../utils/logger';
@@ -13,11 +13,20 @@ interface AgentStatus {
   session_data?: any;
 }
 
+interface TxAgentHealth {
+  status: string;
+  model: string;
+  device: string;
+  version: string;
+}
+
 export function Monitor() {
   const { session, user } = useAuth();
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [txAgentHealth, setTxAgentHealth] = useState<TxAgentHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
   useEffect(() => {
     const fetchAgentStatus = async () => {
@@ -86,6 +95,13 @@ export function Monitor() {
           });
 
           setAgentStatus(data);
+          
+          // Extract TxAgent health if available
+          if (data.container_health && typeof data.container_health === 'object') {
+            setTxAgentHealth(data.container_health);
+          }
+          
+          setLastRefresh(new Date());
         } else {
           const errorData = await response.json().catch(() => ({}));
           
@@ -194,7 +210,7 @@ export function Monitor() {
         });
 
         if (data.endpoint_url) {
-          toast.success('TxAgent container started successfully!');
+          toast.success('TxAgent session activated successfully!');
         } else {
           toast.success('Local agent started successfully!');
         }
@@ -209,7 +225,7 @@ export function Monitor() {
           component: 'Monitor'
         });
 
-        throw new Error(errorData.error || 'Failed to start agent');
+        throw new Error(errorData.error || errorData.details || 'Failed to start agent');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -298,7 +314,7 @@ export function Monitor() {
           component: 'Monitor'
         });
 
-        toast.success('Agent stopped successfully!');
+        toast.success('TxAgent session deactivated successfully!');
       } else {
         const errorData = await response.json().catch(() => ({}));
         
@@ -310,7 +326,7 @@ export function Monitor() {
           component: 'Monitor'
         });
 
-        throw new Error(errorData.error || 'Failed to stop agent');
+        throw new Error(errorData.error || errorData.details || 'Failed to stop agent');
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -326,6 +342,11 @@ export function Monitor() {
     }
   };
 
+  const handleRefreshStatus = () => {
+    setLoading(true);
+    window.location.reload();
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -339,7 +360,8 @@ export function Monitor() {
       case 'running': return 'text-green-600';
       case 'stopped': return 'text-red-600';
       case 'starting': return 'text-yellow-600';
-      case 'unknown': return 'text-gray-600';
+      case 'unreachable': return 'text-orange-600';
+      case 'not_configured': return 'text-gray-600';
       default: return 'text-gray-400';
     }
   };
@@ -349,6 +371,7 @@ export function Monitor() {
       case 'running': return CheckCircle;
       case 'stopped': return XCircle;
       case 'starting': return Clock;
+      case 'unreachable': return AlertCircle;
       default: return AlertCircle;
     }
   };
@@ -357,20 +380,35 @@ export function Monitor() {
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center space-x-3 mb-4">
-          <div className="flex items-center justify-center w-10 h-10 bg-purple-100 rounded-lg">
-            <Activity className="w-6 h-6 text-purple-600" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center justify-center w-10 h-10 bg-purple-100 rounded-lg">
+              <Activity className="w-6 h-6 text-purple-600" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">TxAgent Monitor</h1>
+              <p className="text-gray-600">Track your RunPod containerized AI agent's status and activity</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">TxAgent Monitor</h1>
-            <p className="text-gray-600">Track your RunPod containerized AI agent's status and activity</p>
+          <div className="text-right">
+            <p className="text-sm text-gray-500">Last updated</p>
+            <p className="text-sm font-medium text-gray-900">{lastRefresh.toLocaleTimeString()}</p>
           </div>
         </div>
       </div>
 
       {/* Agent Status Card */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Agent Status</h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-semibold text-gray-900">Agent Status</h2>
+          <button
+            onClick={handleRefreshStatus}
+            className="flex items-center space-x-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Refresh</span>
+          </button>
+        </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {/* Status */}
@@ -381,7 +419,7 @@ export function Monitor() {
               ) : (
                 <XCircle className="w-5 h-5 text-red-500" />
               )}
-              <span className="font-medium text-gray-900">Status</span>
+              <span className="font-medium text-gray-900">Session</span>
             </div>
             <p className={`text-sm ${
               agentStatus?.agent_active ? 'text-green-600' : 'text-red-600'
@@ -408,7 +446,7 @@ export function Monitor() {
           <div className="bg-gray-50 rounded-lg p-4">
             <div className="flex items-center space-x-2 mb-2">
               <Container className="w-5 h-5 text-blue-500" />
-              <span className="font-medium text-gray-900">Agent ID</span>
+              <span className="font-medium text-gray-900">Session ID</span>
             </div>
             <p className="text-sm text-gray-600 font-mono">
               {agentStatus?.agent_id ? 
@@ -433,8 +471,36 @@ export function Monitor() {
           </div>
         </div>
 
-        {/* Container Health */}
-        {agentStatus?.container_health && (
+        {/* TxAgent Health Details */}
+        {txAgentHealth && (
+          <div className="bg-blue-50 rounded-lg p-4 mb-6">
+            <div className="flex items-center space-x-2 mb-3">
+              <Zap className="w-5 h-5 text-blue-600" />
+              <span className="font-medium text-gray-900">TxAgent Container Health</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="text-gray-600">Status:</span>
+                <p className="font-medium text-blue-700">{txAgentHealth.status}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Model:</span>
+                <p className="font-medium text-blue-700">{txAgentHealth.model}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Device:</span>
+                <p className="font-medium text-blue-700">{txAgentHealth.device}</p>
+              </div>
+              <div>
+                <span className="text-gray-600">Version:</span>
+                <p className="font-medium text-blue-700">{txAgentHealth.version}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Container Health (fallback) */}
+        {agentStatus?.container_health && !txAgentHealth && (
           <div className="bg-blue-50 rounded-lg p-4 mb-6">
             <div className="flex items-center space-x-2 mb-2">
               <Cpu className="w-5 h-5 text-blue-600" />
@@ -476,25 +542,28 @@ export function Monitor() {
             <button
               onClick={handleStopAgent}
               disabled={actionLoading}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {actionLoading ? 'Stopping...' : 'Stop TxAgent'}
+              <Square className="w-4 h-4" />
+              <span>{actionLoading ? 'Deactivating...' : 'Deactivate Session'}</span>
             </button>
           ) : (
             <button
               onClick={handleStartAgent}
               disabled={actionLoading}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {actionLoading ? 'Starting...' : 'Start TxAgent'}
+              <Play className="w-4 h-4" />
+              <span>{actionLoading ? 'Activating...' : 'Activate TxAgent'}</span>
             </button>
           )}
           
           <button
-            onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors"
+            onClick={handleRefreshStatus}
+            className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors"
           >
-            Refresh Status
+            <RefreshCw className="w-4 h-4" />
+            <span>Refresh Status</span>
           </button>
         </div>
       </div>
@@ -508,6 +577,16 @@ export function Monitor() {
           <p className="text-sm">This will show TxAgent queries, RAG hits, and response metrics</p>
         </div>
       </div>
+
+      {/* Debug Information */}
+      {import.meta.env.DEV && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <h3 className="font-medium text-yellow-800 mb-2">Debug Information</h3>
+          <pre className="text-xs text-yellow-700 overflow-auto">
+            {JSON.stringify({ agentStatus, txAgentHealth }, null, 2)}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
