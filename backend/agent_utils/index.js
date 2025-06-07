@@ -3,14 +3,12 @@
 
 import { agentController } from './agentController.js';
 import { runpodService } from './runpodService.js';
-import { agentManager } from './agentManager.js';
 import { agentMiddleware } from './agentMiddleware.js';
 import { errorLogger } from './errorLogger.js';
 
 export {
   agentController,
   runpodService,
-  agentManager,
   agentMiddleware,
   errorLogger
 };
