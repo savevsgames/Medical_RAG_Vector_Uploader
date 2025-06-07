@@ -263,7 +263,7 @@ app.get('/health', async (req, res) => {
   });
 });
 
-// Mount agent routes
+// Mount agent routes FIRST (before other routes)
 try {
   mountAgentRoutes(app);
   errorLogger.success('Agent routes mounted successfully');
@@ -272,7 +272,7 @@ try {
   process.exit(1);
 }
 
-// Add the missing /api/chat endpoint
+// Add the /api/chat endpoint
 app.post('/api/chat', verifyToken, async (req, res) => {
   try {
     const { message, context } = req.body;
@@ -363,6 +363,49 @@ app.post('/api/chat', verifyToken, async (req, res) => {
       error_stack: error.stack
     });
     
+    res.status(500).json({ 
+      error: 'Chat processing failed',
+      details: error.message
+    });
+  }
+});
+
+// Add legacy /chat endpoint for backward compatibility
+app.post('/chat', verifyToken, async (req, res) => {
+  errorLogger.warn('DEPRECATED: Legacy /chat endpoint used', {
+    user_id: req.userId,
+    ip: req.ip,
+    user_agent: req.get('User-Agent')?.substring(0, 100)
+  });
+  
+  res.setHeader('X-Deprecated-Endpoint', '/chat');
+  res.setHeader('X-New-Endpoint', '/api/chat');
+  
+  try {
+    const { message } = req.body;
+    const userId = req.userId;
+    
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    errorLogger.info('Processing legacy chat request', {
+      user_id: userId,
+      message_length: message.length
+    });
+
+    // Use local chat service for legacy endpoint
+    const result = await chatService.processQuery(userId, message);
+
+    res.json({
+      response: result.response,
+      sources: result.sources,
+      agent_id: 'legacy',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    errorLogger.error('Legacy chat error', error, { user_id: req.userId });
     res.status(500).json({ 
       error: 'Chat processing failed',
       details: error.message
@@ -634,10 +677,10 @@ app.listen(port, () => {
   errorLogger.info('  - GET  /health (Health check)');
   errorLogger.info('  - POST /upload (Document upload)');
   errorLogger.info('  - POST /api/chat (Chat with TxAgent/OpenAI)');
+  errorLogger.info('  - POST /chat (Legacy chat - deprecated)');
   errorLogger.info('  - POST /api/agent/start (Start TxAgent)');
   errorLogger.info('  - POST /api/agent/stop (Stop TxAgent)');
   errorLogger.info('  - GET  /api/agent/status (Agent status)');
   errorLogger.info('  - POST /api/embed (RunPod embedding)');
   errorLogger.info('  - POST /agent/* (Legacy endpoints - deprecated)');
-  errorLogger.info('  - POST /chat (Legacy chat - deprecated)');
 });
