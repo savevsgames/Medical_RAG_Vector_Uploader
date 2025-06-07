@@ -86,7 +86,20 @@ Based on the Python FastAPI code provided:
   - User sessions maintained across frontend/backend
   - JWT forwarding to TxAgent container implemented
 
+#### TxAgent Container Startup
+- **Status**: ✅ WORKING
+- **Details**:
+  - BioBERT model loading successfully on CUDA
+  - FastAPI server starting on port 8000
+  - Container health endpoint responding correctly
+
 ### ❌ What Doesn't Work
+
+#### CORS Configuration (RESOLVED)
+- **Status**: ✅ FIXED
+- **Previous Error**: Frontend blocked by CORS policy
+- **Solution**: Updated backend CORS configuration to allow frontend origins
+- **Details**: Added proper origin validation for deployed services
 
 #### Chat Endpoint Communication
 - **Status**: ❌ FAILING
@@ -133,9 +146,10 @@ Based on the Python FastAPI code provided:
   - Request bodies match Pydantic models in TxAgent
   - Multiple payload formats attempted
 
-#### CORS Issues
-- **Ruled Out**: CORS configured to allow all origins in TxAgent
-- **Evidence**: No CORS-related errors in browser or server logs
+#### CORS Issues (NOW RESOLVED)
+- **Previously Ruled Out**: CORS configured to allow all origins in TxAgent
+- **Update**: CORS was actually the main issue blocking frontend communication
+- **Resolution**: Fixed backend CORS configuration for deployed services
 
 ### 🤔 Potential Root Causes
 
@@ -204,30 +218,50 @@ DEVICE=cuda
 - `last_active` (timestamptz)
 - `terminated_at` (timestamptz)
 
+## Latest Updates (2025-06-07)
+
+### CORS Issue Resolution
+- **Problem**: Frontend deployed at different subdomain than backend
+- **Solution**: Enhanced CORS configuration with pattern matching for Render subdomains
+- **Status**: ✅ RESOLVED
+
+### TxAgent Container Status
+- **Container Startup**: ✅ Working (BioBERT loading on CUDA)
+- **Health Endpoint**: ✅ Working (returns proper JSON)
+- **POST Endpoints**: ❌ Still failing with 405 errors
+
+### Current Focus Areas
+1. **TxAgent POST Endpoint Investigation**: Why are POST methods returning 405?
+2. **Environment Variable Verification**: Ensure all required vars are set in RunPod
+3. **Direct Container Testing**: Bypass Node.js backend to isolate issues
+
 ## Next Steps for Resolution
 
-1. **Verify TxAgent Deployment**:
+1. **Test TxAgent Container Directly**:
+   - Use curl/Postman to test POST endpoints directly
+   - Verify FastAPI is actually serving the expected endpoints
+   - Check if RunPod proxy is interfering with POST requests
+
+2. **Verify TxAgent Deployment**:
    - Confirm deployed code matches provided Python files
    - Check RunPod container logs for FastAPI startup messages
    - Verify all environment variables are properly set
 
-2. **Direct Container Testing**:
-   - Test TxAgent endpoints directly with curl/Postman
-   - Bypass Node.js backend to isolate the issue
-   - Verify JWT validation is working in container
-
-3. **Simplify TxAgent Endpoints**:
-   - Create minimal test endpoints that just return success
-   - Gradually add complexity back to identify failure point
+3. **Debug Authentication Flow**:
+   - Test TxAgent JWT validation independently
+   - Verify Supabase JWT secret is correctly configured
    - Test with and without authentication requirements
 
-4. **Monitor Integration**:
-   - Add more detailed logging to both applications
-   - Implement request/response debugging
-   - Track the complete request lifecycle
+4. **Simplify Integration**:
+   - Create minimal test endpoints that just return success
+   - Gradually add complexity back to identify failure point
+   - Implement comprehensive request/response logging
 
 ## Success Metrics
 
+- [x] CORS configuration working for deployed services
+- [x] TxAgent container starting successfully with BioBERT
+- [x] Health endpoint responding correctly
 - [ ] TxAgent `/chat` endpoint responds to POST requests
 - [ ] Document embedding via TxAgent completes successfully
 - [ ] Agent status monitoring shows accurate container state
@@ -238,7 +272,7 @@ DEVICE=cuda
 ## Current Deployment Status
 
 - **Frontend**: ✅ Deployed and functional
-- **Backend**: ✅ Deployed with fallback capabilities
+- **Backend**: ✅ Deployed with enhanced CORS configuration
 - **Database**: ✅ Configured with proper RLS and vector support
-- **TxAgent Container**: ⚠️ Deployed but communication failing
-- **Integration**: ❌ Partial functionality, core features blocked
+- **TxAgent Container**: ⚠️ Deployed, health working, POST endpoints failing
+- **Integration**: 🔄 CORS resolved, working on TxAgent communication
