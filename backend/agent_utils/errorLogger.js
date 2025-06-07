@@ -24,7 +24,7 @@ class ErrorLogger {
 
   formatMessage(level, message, context = {}) {
     const timestamp = new Date().toISOString();
-    const contextStr = Object.keys(context).length > 0 ? JSON.stringify(context) : '';
+    const contextStr = Object.keys(context).length > 0 ? JSON.stringify(context, null, 2) : '';
     return `[${timestamp}] [${level.toUpperCase()}] ${message} ${contextStr}`;
   }
 

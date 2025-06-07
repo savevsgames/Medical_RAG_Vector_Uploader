@@ -27,16 +27,35 @@ class RunPodService {
       const userId = req.userId;
       const userJWT = req.headers.authorization; // Get the full Authorization header
       
+      errorLogger.debug('Embedding request initiated', {
+        user_id: userId,
+        has_document_text: !!documentText,
+        has_file_path: !!file_path,
+        has_metadata: !!metadata,
+        has_jwt: !!userJWT,
+        jwt_preview: userJWT ? userJWT.substring(0, 50) + '...' : 'none',
+        component: 'RunPodService.handleEmbedding'
+      });
+
       // Support both direct text and file path
       const textToEmbed = documentText || file_path;
       
       if (!textToEmbed || typeof textToEmbed !== 'string') {
-        errorLogger.warn('Invalid embedding request - missing document text or file path', { user_id: userId });
+        errorLogger.warn('Invalid embedding request - missing document text or file path', { 
+          user_id: userId,
+          has_document_text: !!documentText,
+          has_file_path: !!file_path,
+          text_type: typeof textToEmbed,
+          component: 'RunPodService.handleEmbedding'
+        });
         return res.status(400).json({ error: 'Document text or file path is required' });
       }
 
       if (!process.env.RUNPOD_EMBEDDING_URL) {
-        errorLogger.warn('RunPod embedding service not configured', { user_id: userId });
+        errorLogger.warn('RunPod embedding service not configured', { 
+          user_id: userId,
+          component: 'RunPodService.handleEmbedding'
+        });
         return res.status(503).json({ error: 'RunPod embedding service not configured' });
       }
 
@@ -68,7 +87,9 @@ class RunPodService {
         endpoint: `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
         method: 'POST',
         payload: requestPayload,
-        has_auth: !!userJWT
+        has_auth: !!userJWT,
+        payload_size: JSON.stringify(requestPayload).length,
+        component: 'RunPodService.handleEmbedding'
       });
 
       const response = await axios.post(
@@ -82,6 +103,15 @@ class RunPodService {
           timeout: this.defaultTimeout
         }
       );
+
+      errorLogger.debug('TxAgent embedding response received', {
+        user_id: userId,
+        status: response.status,
+        status_text: response.statusText,
+        response_data: response.data,
+        response_headers: response.headers,
+        component: 'RunPodService.handleEmbedding'
+      });
 
       errorLogger.success('RunPod embedding completed', {
         user_id: userId,
@@ -113,13 +143,33 @@ class RunPodService {
       const userId = req.userId;
       const userJWT = req.headers.authorization; // Get the full Authorization header
       
+      errorLogger.debug('Chat request initiated', {
+        user_id: userId,
+        message_length: message?.length || 0,
+        message_preview: message ? message.substring(0, 100) : 'none',
+        has_context: !!(context || history),
+        has_jwt: !!userJWT,
+        jwt_preview: userJWT ? userJWT.substring(0, 50) + '...' : 'none',
+        top_k,
+        temperature,
+        component: 'RunPodService.handleChat'
+      });
+      
       if (!message || typeof message !== 'string') {
-        errorLogger.warn('Invalid chat request - missing message', { user_id: userId });
+        errorLogger.warn('Invalid chat request - missing message', { 
+          user_id: userId,
+          message_type: typeof message,
+          message_length: message?.length || 0,
+          component: 'RunPodService.handleChat'
+        });
         return res.status(400).json({ error: 'Message is required' });
       }
 
       if (!process.env.RUNPOD_EMBEDDING_URL) {
-        errorLogger.warn('RunPod chat service not configured', { user_id: userId });
+        errorLogger.warn('RunPod chat service not configured', { 
+          user_id: userId,
+          component: 'RunPodService.handleChat'
+        });
         return res.status(503).json({ error: 'RunPod chat service not configured' });
       }
 
@@ -147,7 +197,9 @@ class RunPodService {
         endpoint: `${process.env.RUNPOD_EMBEDDING_URL}${chatEndpoint}`,
         method: 'POST',
         payload: requestPayload,
-        has_auth: !!userJWT
+        has_auth: !!userJWT,
+        payload_size: JSON.stringify(requestPayload).length,
+        component: 'RunPodService.handleChat'
       });
 
       const response = await axios.post(
@@ -161,6 +213,15 @@ class RunPodService {
           timeout: this.chatTimeout
         }
       );
+
+      errorLogger.debug('TxAgent chat response received', {
+        user_id: userId,
+        status: response.status,
+        status_text: response.statusText,
+        response_data: response.data,
+        response_headers: response.headers,
+        component: 'RunPodService.handleChat'
+      });
 
       errorLogger.success('RunPod chat completed', {
         user_id: userId,
@@ -196,11 +257,20 @@ class RunPodService {
     errorLogger.runpodError(operation, error, {
       user_id: userId,
       error_code: error.code,
+      error_type: error.constructor.name,
       response_status: error.response?.status,
       response_data: error.response?.data,
+      response_headers: error.response?.headers,
       has_jwt: !!req.headers.authorization,
       runpod_url: process.env.RUNPOD_EMBEDDING_URL,
-      request_method: 'POST'
+      request_method: 'POST',
+      axios_config: error.config ? {
+        url: error.config.url,
+        method: error.config.method,
+        timeout: error.config.timeout,
+        headers: error.config.headers ? Object.keys(error.config.headers) : []
+      } : null,
+      component: `RunPodService.handleRunPodError.${operation}`
     });
     
     if (error.code === 'ECONNABORTED') {
@@ -259,7 +329,10 @@ class RunPodService {
   async testConnection(userJWT = null) {
     try {
       if (!process.env.RUNPOD_EMBEDDING_URL) {
-        errorLogger.connectionCheck('RunPod', false, { reason: 'Missing configuration' });
+        errorLogger.connectionCheck('RunPod', false, { 
+          reason: 'Missing configuration',
+          component: 'RunPodService.testConnection'
+        });
         return false;
       }
 
@@ -272,7 +345,8 @@ class RunPodService {
         url: process.env.RUNPOD_EMBEDDING_URL,
         method: 'GET',
         endpoint: '/health',
-        has_auth: !!userJWT
+        has_auth: !!userJWT,
+        component: 'RunPodService.testConnection'
       });
 
       const response = await axios.get(
@@ -283,6 +357,14 @@ class RunPodService {
         }
       );
 
+      errorLogger.debug('RunPod connection test successful', {
+        status: response.status,
+        status_text: response.statusText,
+        response_data: response.data,
+        authenticated: !!userJWT,
+        component: 'RunPodService.testConnection'
+      });
+
       errorLogger.connectionCheck('RunPod', true, { 
         status: response.status,
         health: response.data,
@@ -291,6 +373,17 @@ class RunPodService {
       return true;
 
     } catch (error) {
+      errorLogger.debug('RunPod connection test failed', {
+        error: error.message,
+        error_type: error.constructor.name,
+        code: error.code,
+        status: error.response?.status,
+        response_data: error.response?.data,
+        authenticated: !!userJWT,
+        url: process.env.RUNPOD_EMBEDDING_URL,
+        component: 'RunPodService.testConnection'
+      });
+
       errorLogger.connectionCheck('RunPod', false, { 
         error: error.message,
         code: error.code,

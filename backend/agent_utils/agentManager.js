@@ -11,10 +11,12 @@ class AgentManager {
   // Create or update agent session in database
   async createAgentSession(userId, containerData) {
     try {
-      errorLogger.info('Creating agent session', {
+      errorLogger.debug('Creating agent session - input validation', {
         user_id: userId,
         container_id: containerData.container_id,
-        endpoint_url: containerData.endpoint_url
+        endpoint_url: containerData.endpoint_url,
+        has_health_status: !!containerData.health_status,
+        component: 'AgentManager.createAgentSession'
       });
 
       const sessionData = {
@@ -24,6 +26,12 @@ class AgentManager {
         capabilities: ['embedding', 'chat', 'document_analysis'],
         health_status: containerData.health_status || null
       };
+
+      errorLogger.debug('Prepared session data for Supabase insert', {
+        user_id: userId,
+        session_data: sessionData,
+        component: 'AgentManager.createAgentSession'
+      });
 
       errorLogger.info('Inserting agent session into Supabase', {
         user_id: userId,
@@ -42,14 +50,27 @@ class AgentManager {
         .single();
 
       if (error) {
-        errorLogger.error('Failed to create agent session in Supabase', error, {
+        errorLogger.error('Supabase agent session insert failed', error, {
           user_id: userId,
           container_id: containerData.container_id,
           error_code: error.code,
-          error_details: error.details
+          error_details: error.details,
+          error_hint: error.hint,
+          error_message: error.message,
+          supabase_operation: 'upsert',
+          table: 'agents',
+          component: 'AgentManager.createAgentSession'
         });
         throw error;
       }
+
+      errorLogger.debug('Supabase agent session insert successful', {
+        user_id: userId,
+        agent_id: data.id,
+        status: data.status,
+        created_at: data.created_at,
+        component: 'AgentManager.createAgentSession'
+      });
 
       errorLogger.agentStart(userId, data.id, {
         container_id: containerData.container_id,
@@ -62,7 +83,10 @@ class AgentManager {
     } catch (error) {
       errorLogger.agentError(userId, 'create_session', error, {
         container_data: containerData,
-        error_stack: error.stack
+        error_stack: error.stack,
+        error_type: error.constructor.name,
+        supabase_error_details: error.details || null,
+        component: 'AgentManager.createAgentSession'
       });
       throw error;
     }
@@ -71,6 +95,11 @@ class AgentManager {
   // Terminate agent session
   async terminateAgentSession(userId) {
     try {
+      errorLogger.debug('Terminating agent session - starting process', {
+        user_id: userId,
+        component: 'AgentManager.terminateAgentSession'
+      });
+
       errorLogger.info('Terminating agent session', { 
         user_id: userId 
       });
@@ -86,13 +115,25 @@ class AgentManager {
         .select();
 
       if (error) {
-        errorLogger.error('Failed to terminate agent session in Supabase', error, { 
+        errorLogger.error('Supabase agent session termination failed', error, { 
           user_id: userId,
           error_code: error.code,
-          error_details: error.details
+          error_details: error.details,
+          error_hint: error.hint,
+          error_message: error.message,
+          supabase_operation: 'update',
+          table: 'agents',
+          component: 'AgentManager.terminateAgentSession'
         });
         throw error;
       }
+
+      errorLogger.debug('Supabase agent session termination successful', {
+        user_id: userId,
+        terminated_sessions: data?.length || 0,
+        session_ids: data?.map(d => d.id) || [],
+        component: 'AgentManager.terminateAgentSession'
+      });
 
       errorLogger.agentStop(userId, {
         terminated_sessions: data?.length || 0,
@@ -103,7 +144,10 @@ class AgentManager {
 
     } catch (error) {
       errorLogger.agentError(userId, 'terminate_session', error, {
-        error_stack: error.stack
+        error_stack: error.stack,
+        error_type: error.constructor.name,
+        supabase_error_details: error.details || null,
+        component: 'AgentManager.terminateAgentSession'
       });
       throw error;
     }
@@ -112,6 +156,11 @@ class AgentManager {
   // Get current agent status
   async getAgentStatus(userId) {
     try {
+      errorLogger.debug('Fetching agent status - starting query', {
+        user_id: userId,
+        component: 'AgentManager.getAgentStatus'
+      });
+
       errorLogger.info('Fetching agent status', { 
         user_id: userId 
       });
@@ -124,12 +173,25 @@ class AgentManager {
         .single();
 
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-        errorLogger.error('Failed to get agent status from Supabase', error, { 
+        errorLogger.error('Supabase agent status query failed', error, { 
           user_id: userId,
           error_code: error.code,
-          error_details: error.details
+          error_details: error.details,
+          error_hint: error.hint,
+          error_message: error.message,
+          supabase_operation: 'select',
+          table: 'agents',
+          component: 'AgentManager.getAgentStatus'
         });
         throw error;
+      }
+
+      if (error && error.code === 'PGRST116') {
+        errorLogger.debug('No active agent found for user (PGRST116)', {
+          user_id: userId,
+          error_code: error.code,
+          component: 'AgentManager.getAgentStatus'
+        });
       }
 
       const status = {
@@ -138,6 +200,15 @@ class AgentManager {
         last_active: agent?.last_active || null,
         session_data: agent?.session_data || null
       };
+
+      errorLogger.debug('Agent status query completed', {
+        user_id: userId,
+        agent_active: status.agent_active,
+        agent_id: status.agent_id,
+        has_session_data: !!status.session_data,
+        last_active: status.last_active,
+        component: 'AgentManager.getAgentStatus'
+      });
 
       errorLogger.info('Agent status retrieved', {
         user_id: userId,
@@ -150,7 +221,10 @@ class AgentManager {
 
     } catch (error) {
       errorLogger.agentError(userId, 'get_status', error, {
-        error_stack: error.stack
+        error_stack: error.stack,
+        error_type: error.constructor.name,
+        supabase_error_details: error.details || null,
+        component: 'AgentManager.getAgentStatus'
       });
       throw error;
     }
@@ -159,6 +233,11 @@ class AgentManager {
   // Update agent last active timestamp
   async updateLastActive(userId) {
     try {
+      errorLogger.debug('Updating agent last active timestamp', {
+        user_id: userId,
+        component: 'AgentManager.updateLastActive'
+      });
+
       errorLogger.info('Updating agent last active timestamp', {
         user_id: userId
       });
@@ -173,9 +252,15 @@ class AgentManager {
         errorLogger.warn('Failed to update last active in Supabase', {
           user_id: userId,
           error: error.message,
-          error_code: error.code
+          error_code: error.code,
+          error_details: error.details,
+          component: 'AgentManager.updateLastActive'
         });
       } else {
+        errorLogger.debug('Agent last active updated successfully', {
+          user_id: userId,
+          component: 'AgentManager.updateLastActive'
+        });
         errorLogger.info('Agent last active updated successfully', {
           user_id: userId
         });
@@ -185,7 +270,9 @@ class AgentManager {
       errorLogger.warn('Error updating last active', {
         user_id: userId,
         error: error.message,
-        error_stack: error.stack
+        error_stack: error.stack,
+        error_type: error.constructor.name,
+        component: 'AgentManager.updateLastActive'
       });
     }
   }
@@ -195,6 +282,12 @@ class AgentManager {
     try {
       const cutoffTime = new Date();
       cutoffTime.setHours(cutoffTime.getHours() - maxAgeHours);
+
+      errorLogger.debug('Starting stale agent cleanup process', {
+        max_age_hours: maxAgeHours,
+        cutoff_time: cutoffTime.toISOString(),
+        component: 'AgentManager.cleanupStaleAgents'
+      });
 
       errorLogger.info('Starting stale agent cleanup', {
         max_age_hours: maxAgeHours,
@@ -212,14 +305,25 @@ class AgentManager {
         .select();
 
       if (error) {
-        errorLogger.error('Failed to cleanup stale agents in Supabase', error, {
+        errorLogger.error('Supabase stale agent cleanup failed', error, {
           error_code: error.code,
-          error_details: error.details
+          error_details: error.details,
+          error_hint: error.hint,
+          max_age_hours: maxAgeHours,
+          component: 'AgentManager.cleanupStaleAgents'
         });
         return 0;
       }
 
       const cleanedCount = data?.length || 0;
+      
+      errorLogger.debug('Stale agent cleanup completed', {
+        cleaned_count: cleanedCount,
+        max_age_hours: maxAgeHours,
+        cleaned_agent_ids: data?.map(d => d.id) || [],
+        component: 'AgentManager.cleanupStaleAgents'
+      });
+
       if (cleanedCount > 0) {
         errorLogger.info('Cleaned up stale agents', {
           count: cleanedCount,
@@ -237,7 +341,9 @@ class AgentManager {
     } catch (error) {
       errorLogger.error('Error during agent cleanup', error, {
         max_age_hours: maxAgeHours,
-        error_stack: error.stack
+        error_stack: error.stack,
+        error_type: error.constructor.name,
+        component: 'AgentManager.cleanupStaleAgents'
       });
       return 0;
     }
@@ -246,6 +352,10 @@ class AgentManager {
   // Get agent statistics (for monitoring)
   async getAgentStats() {
     try {
+      errorLogger.debug('Fetching agent statistics', {
+        component: 'AgentManager.getAgentStats'
+      });
+
       errorLogger.info('Fetching agent statistics');
 
       const { data: activeAgents, error: activeError } = await this.supabase
@@ -259,9 +369,12 @@ class AgentManager {
 
       if (activeError || totalError) {
         const error = activeError || totalError;
-        errorLogger.error('Failed to get agent statistics from Supabase', error, {
+        errorLogger.error('Supabase agent statistics query failed', error, {
           active_error: activeError?.message,
-          total_error: totalError?.message
+          total_error: totalError?.message,
+          active_error_code: activeError?.code,
+          total_error_code: totalError?.code,
+          component: 'AgentManager.getAgentStats'
         });
         throw error;
       }
@@ -278,6 +391,12 @@ class AgentManager {
         timestamp: new Date().toISOString()
       };
 
+      errorLogger.debug('Agent statistics retrieved successfully', {
+        active_count: stats.active_agents,
+        total_count: stats.total_agents,
+        component: 'AgentManager.getAgentStats'
+      });
+
       errorLogger.info('Agent statistics retrieved', {
         active_count: stats.active_agents,
         total_count: stats.total_agents
@@ -287,7 +406,9 @@ class AgentManager {
 
     } catch (error) {
       errorLogger.error('Failed to get agent statistics', error, {
-        error_stack: error.stack
+        error_stack: error.stack,
+        error_type: error.constructor.name,
+        component: 'AgentManager.getAgentStats'
       });
       throw error;
     }
