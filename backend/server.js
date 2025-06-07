@@ -36,6 +36,31 @@ errorLogger.info('Environment check', {
   working_directory: __dirname
 });
 
+// DIAGNOSTIC: Log all environment variables to understand what Render is providing
+errorLogger.debug('DIAGNOSTIC: All environment variables at startup', {
+  all_env_vars: Object.keys(process.env).sort(),
+  supabase_vars: Object.keys(process.env).filter(key => key.includes('SUPABASE')),
+  runpod_vars: Object.keys(process.env).filter(key => key.includes('RUNPOD')),
+  openai_vars: Object.keys(process.env).filter(key => key.includes('OPENAI')),
+  total_env_count: Object.keys(process.env).length,
+  sample_vars: {
+    NODE_ENV: process.env.NODE_ENV,
+    PORT: process.env.PORT,
+    PWD: process.env.PWD,
+    HOME: process.env.HOME
+  }
+});
+
+// DIAGNOSTIC: Specifically check for Supabase variables
+errorLogger.debug('DIAGNOSTIC: Supabase environment variable check', {
+  SUPABASE_URL: process.env.SUPABASE_URL ? 'SET' : 'MISSING',
+  SUPABASE_KEY: process.env.SUPABASE_KEY ? 'SET' : 'MISSING',
+  SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET ? 'SET' : 'MISSING',
+  supabase_url_value: process.env.SUPABASE_URL ? process.env.SUPABASE_URL.substring(0, 30) + '...' : 'undefined',
+  supabase_key_length: process.env.SUPABASE_KEY ? process.env.SUPABASE_KEY.length : 0,
+  jwt_secret_length: process.env.SUPABASE_JWT_SECRET ? process.env.SUPABASE_JWT_SECRET.length : 0
+});
+
 // Environment variable validation
 const requiredEnvVars = [
   'SUPABASE_URL',
@@ -49,7 +74,10 @@ if (missingEnvVars.length > 0) {
   errorLogger.error('Missing required environment variables', null, {
     missing_variables: missingEnvVars,
     available_variables: Object.keys(process.env).filter(key => key.startsWith('SUPABASE')),
-    env_file_exists: fs.existsSync(path.join(__dirname, '.env'))
+    env_file_exists: fs.existsSync(path.join(__dirname, '.env')),
+    working_directory: __dirname,
+    process_cwd: process.cwd(),
+    all_env_keys_count: Object.keys(process.env).length
   });
   
   console.error('\n❌ CRITICAL ERROR: Missing required environment variables:');
