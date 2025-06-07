@@ -2,38 +2,72 @@ import React, { useState, useEffect } from 'react';
 import { Activity, Clock, CheckCircle, XCircle, AlertCircle, Container, Cpu } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { logger, logUserAction, logApiCall, logAgentOperation } from '../utils/logger';
 
 interface AgentStatus {
   agent_active: boolean;
   agent_id: string | null;
   last_active: string | null;
   container_status?: string;
-  container_health?: string;
+  container_health?: string | object;
   session_data?: any;
 }
 
 export function Monitor() {
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     const fetchAgentStatus = async () => {
-      if (!session) return;
+      if (!session) {
+        logger.warn('No session available for agent status check', {
+          component: 'Monitor'
+        });
+        return;
+      }
+
+      const userEmail = user?.email;
+
+      logger.debug('Fetching agent status', {
+        component: 'Monitor',
+        user: userEmail
+      });
 
       try {
         // Try new API endpoint first, fallback to legacy
         let response;
+        let endpoint = '/api/agent/status';
+        let isLegacyFallback = false;
+
+        logApiCall(endpoint, 'GET', userEmail, 'initiated', {
+          component: 'Monitor'
+        });
+
         try {
-          response = await fetch(`${import.meta.env.VITE_API_URL}/api/agent/status`, {
+          response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
             headers: {
               'Authorization': `Bearer ${session.access_token}`,
             },
           });
         } catch (apiError) {
-          console.warn('New API failed, trying legacy endpoint:', apiError);
-          response = await fetch(`${import.meta.env.VITE_API_URL}/agent/status`, {
+          logger.warn('Primary API failed, trying legacy endpoint', {
+            component: 'Monitor',
+            user: userEmail,
+            error: apiError instanceof Error ? apiError.message : 'Unknown error',
+            fallbackEndpoint: '/agent/status'
+          });
+
+          endpoint = '/agent/status';
+          isLegacyFallback = true;
+          
+          logApiCall(endpoint, 'GET', userEmail, 'initiated', {
+            isLegacyFallback: true,
+            component: 'Monitor'
+          });
+
+          response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
             headers: {
               'Authorization': `Bearer ${session.access_token}`,
             },
@@ -42,10 +76,33 @@ export function Monitor() {
 
         if (response.ok) {
           const data = await response.json();
+          
+          logApiCall(endpoint, 'GET', userEmail, 'success', {
+            status: response.status,
+            agentActive: data.agent_active,
+            containerStatus: data.container_status,
+            isLegacyFallback,
+            component: 'Monitor'
+          });
+
           setAgentStatus(data);
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          
+          logApiCall(endpoint, 'GET', userEmail, 'error', {
+            status: response.status,
+            statusText: response.statusText,
+            errorData,
+            isLegacyFallback,
+            component: 'Monitor'
+          });
         }
       } catch (error) {
-        console.error('Error fetching agent status:', error);
+        logger.error('Failed to fetch agent status', {
+          component: 'Monitor',
+          user: userEmail,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
       } finally {
         setLoading(false);
       }
@@ -56,17 +113,30 @@ export function Monitor() {
     // Refresh status every 30 seconds
     const interval = setInterval(fetchAgentStatus, 30000);
     return () => clearInterval(interval);
-  }, [session]);
+  }, [session, user]);
 
   const handleStartAgent = async () => {
     if (!session) return;
+
+    const userEmail = user?.email;
+    
+    logUserAction('Start TxAgent Initiated', userEmail, {
+      component: 'Monitor'
+    });
 
     setActionLoading(true);
     try {
       // Try new TxAgent API first
       let response;
+      let endpoint = '/api/agent/start';
+      let isLegacyFallback = false;
+
+      logApiCall(endpoint, 'POST', userEmail, 'initiated', {
+        component: 'Monitor'
+      });
+
       try {
-        response = await fetch(`${import.meta.env.VITE_API_URL}/api/agent/start`, {
+        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
@@ -74,8 +144,22 @@ export function Monitor() {
           },
         });
       } catch (apiError) {
-        console.warn('TxAgent API failed, trying legacy endpoint:', apiError);
-        response = await fetch(`${import.meta.env.VITE_API_URL}/agent/start`, {
+        logger.warn('TxAgent API failed, trying legacy endpoint', {
+          component: 'Monitor',
+          user: userEmail,
+          error: apiError instanceof Error ? apiError.message : 'Unknown error',
+          fallbackEndpoint: '/agent/start'
+        });
+
+        endpoint = '/agent/start';
+        isLegacyFallback = true;
+        
+        logApiCall(endpoint, 'POST', userEmail, 'initiated', {
+          isLegacyFallback: true,
+          component: 'Monitor'
+        });
+
+        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
@@ -86,13 +170,29 @@ export function Monitor() {
 
       if (response.ok) {
         const data = await response.json();
+        
+        logApiCall(endpoint, 'POST', userEmail, 'success', {
+          status: response.status,
+          agentId: data.agent_id,
+          containerId: data.container_id,
+          isLegacyFallback,
+          component: 'Monitor'
+        });
+
         setAgentStatus({
           agent_active: true,
           agent_id: data.agent_id,
           last_active: new Date().toISOString(),
-          container_status: 'running'
+          container_status: data.status === 'activated' ? 'running' : 'starting'
         });
         
+        logAgentOperation('Started Successfully', userEmail, {
+          agentId: data.agent_id,
+          containerId: data.container_id,
+          endpointUrl: data.endpoint_url,
+          component: 'Monitor'
+        });
+
         if (data.endpoint_url) {
           toast.success('TxAgent container started successfully!');
         } else {
@@ -100,11 +200,26 @@ export function Monitor() {
         }
       } else {
         const errorData = await response.json().catch(() => ({}));
+        
+        logApiCall(endpoint, 'POST', userEmail, 'error', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+          isLegacyFallback,
+          component: 'Monitor'
+        });
+
         throw new Error(errorData.error || 'Failed to start agent');
       }
     } catch (error) {
-      console.error('Error starting agent:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to start agent');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      logAgentOperation('Start Failed', userEmail, {
+        error: errorMessage,
+        component: 'Monitor'
+      });
+
+      toast.error(errorMessage);
     } finally {
       setActionLoading(false);
     }
@@ -113,12 +228,25 @@ export function Monitor() {
   const handleStopAgent = async () => {
     if (!session) return;
 
+    const userEmail = user?.email;
+    
+    logUserAction('Stop TxAgent Initiated', userEmail, {
+      component: 'Monitor'
+    });
+
     setActionLoading(true);
     try {
       // Try new TxAgent API first
       let response;
+      let endpoint = '/api/agent/stop';
+      let isLegacyFallback = false;
+
+      logApiCall(endpoint, 'POST', userEmail, 'initiated', {
+        component: 'Monitor'
+      });
+
       try {
-        response = await fetch(`${import.meta.env.VITE_API_URL}/api/agent/stop`, {
+        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
@@ -126,8 +254,22 @@ export function Monitor() {
           },
         });
       } catch (apiError) {
-        console.warn('TxAgent API failed, trying legacy endpoint:', apiError);
-        response = await fetch(`${import.meta.env.VITE_API_URL}/agent/stop`, {
+        logger.warn('TxAgent API failed, trying legacy endpoint', {
+          component: 'Monitor',
+          user: userEmail,
+          error: apiError instanceof Error ? apiError.message : 'Unknown error',
+          fallbackEndpoint: '/agent/stop'
+        });
+
+        endpoint = '/agent/stop';
+        isLegacyFallback = true;
+        
+        logApiCall(endpoint, 'POST', userEmail, 'initiated', {
+          isLegacyFallback: true,
+          component: 'Monitor'
+        });
+
+        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
@@ -137,20 +279,48 @@ export function Monitor() {
       }
 
       if (response.ok) {
+        const data = await response.json();
+        
+        logApiCall(endpoint, 'POST', userEmail, 'success', {
+          status: response.status,
+          isLegacyFallback,
+          component: 'Monitor'
+        });
+
         setAgentStatus({
           agent_active: false,
           agent_id: null,
           last_active: null,
           container_status: 'stopped'
         });
+
+        logAgentOperation('Stopped Successfully', userEmail, {
+          component: 'Monitor'
+        });
+
         toast.success('Agent stopped successfully!');
       } else {
         const errorData = await response.json().catch(() => ({}));
+        
+        logApiCall(endpoint, 'POST', userEmail, 'error', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+          isLegacyFallback,
+          component: 'Monitor'
+        });
+
         throw new Error(errorData.error || 'Failed to stop agent');
       }
     } catch (error) {
-      console.error('Error stopping agent:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to stop agent');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      logAgentOperation('Stop Failed', userEmail, {
+        error: errorMessage,
+        component: 'Monitor'
+      });
+
+      toast.error(errorMessage);
     } finally {
       setActionLoading(false);
     }
@@ -270,7 +440,12 @@ export function Monitor() {
               <Cpu className="w-5 h-5 text-blue-600" />
               <span className="font-medium text-gray-900">Container Health</span>
             </div>
-            <p className="text-sm text-blue-700">{agentStatus.container_health}</p>
+            <p className="text-sm text-blue-700">
+              {typeof agentStatus.container_health === 'string' 
+                ? agentStatus.container_health 
+                : JSON.stringify(agentStatus.container_health, null, 2)
+              }
+            </p>
           </div>
         )}
 

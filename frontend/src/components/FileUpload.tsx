@@ -3,24 +3,65 @@ import { useDropzone } from 'react-dropzone';
 import { Upload } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../lib/supabaseClient';
+import { logger, logUserAction, logApiCall, logFileOperation, logSupabaseOperation } from '../utils/logger';
 
 export function FileUpload() {
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
-    if (!file) return;
+    if (!file) {
+      logger.warn('No file provided to upload', { component: 'FileUpload' });
+      return;
+    }
+
+    logFileOperation('Upload Started', file.name, null, {
+      fileSize: file.size,
+      fileType: file.type,
+      component: 'FileUpload'
+    });
 
     // Get the current session
-    const { data: { session } } = await supabase.auth.getSession();
+    logger.debug('Checking user session for upload', { component: 'FileUpload' });
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError) {
+      logSupabaseOperation('getSession', null, 'error', {
+        error: sessionError.message,
+        component: 'FileUpload'
+      });
+      toast.error('Session error: Please login again');
+      return;
+    }
+
     if (!session) {
+      logUserAction('Upload Blocked - No Session', null, {
+        component: 'FileUpload',
+        fileName: file.name
+      });
       toast.error('Please login to upload files');
       return;
     }
+
+    const userEmail = session.user?.email;
+    logUserAction('File Upload Initiated', userEmail, {
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      component: 'FileUpload'
+    });
 
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/upload`, {
+      const apiUrl = `${import.meta.env.VITE_API_URL}/upload`;
+      
+      logApiCall('/upload', 'POST', userEmail, 'initiated', {
+        fileName: file.name,
+        fileSize: file.size,
+        component: 'FileUpload'
+      });
+
+      const response = await fetch(apiUrl, {
         method: 'POST',
         body: formData,
         headers: {
@@ -30,12 +71,49 @@ export function FileUpload() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Upload failed');
+        
+        logApiCall('/upload', 'POST', userEmail, 'error', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+          fileName: file.name,
+          component: 'FileUpload'
+        });
+
+        throw new Error(errorData.detail || errorData.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
+      const responseData = await response.json();
+      
+      logApiCall('/upload', 'POST', userEmail, 'success', {
+        status: response.status,
+        responseData,
+        fileName: file.name,
+        component: 'FileUpload'
+      });
+
+      logFileOperation('Upload Completed', file.name, userEmail, {
+        documentId: responseData.document_id,
+        contentLength: responseData.content_length,
+        vectorDimensions: responseData.vector_dimensions,
+        embeddingSource: responseData.embedding_source,
+        component: 'FileUpload'
+      });
+
       toast.success('File uploaded successfully!');
+      
+      // Trigger a page refresh to update document list
+      setTimeout(() => window.location.reload(), 1000);
+
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to upload file');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
+      
+      logFileOperation('Upload Failed', file.name, userEmail, {
+        error: errorMessage,
+        component: 'FileUpload'
+      });
+
+      toast.error(errorMessage);
       console.error('Upload error:', error);
     }
   }, []);
@@ -49,6 +127,15 @@ export function FileUpload() {
       'text/markdown': ['.md'],
     },
     maxFiles: 1,
+    onDropRejected: (fileRejections) => {
+      logger.warn('File upload rejected', {
+        component: 'FileUpload',
+        rejections: fileRejections.map(rejection => ({
+          fileName: rejection.file.name,
+          errors: rejection.errors.map(e => e.message)
+        }))
+      });
+    }
   });
 
   return (

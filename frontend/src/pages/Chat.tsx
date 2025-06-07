@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Send, Bot, User, Loader2, FileText } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
+import { logger, logUserAction, logApiCall, logAgentOperation } from '../utils/logger';
 
 interface Message {
   id: string;
@@ -16,7 +17,7 @@ interface Message {
 }
 
 export function Chat() {
-  const { session } = useAuth();
+  const { session, user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -32,10 +33,19 @@ export function Chat() {
     e.preventDefault();
     if (!inputValue.trim() || isLoading || !session) return;
 
+    const userEmail = user?.email;
+    const messageContent = inputValue.trim();
+
+    logUserAction('Chat Message Sent', userEmail, {
+      messageLength: messageContent.length,
+      messagePreview: messageContent.substring(0, 100),
+      component: 'Chat'
+    });
+
     const userMessage: Message = {
       id: Date.now().toString(),
       type: 'user',
-      content: inputValue,
+      content: messageContent,
       timestamp: new Date()
     };
 
@@ -46,37 +56,79 @@ export function Chat() {
     try {
       // Try RunPod TxAgent API first
       let response;
+      let endpoint = '/api/chat';
+      let isLegacyFallback = false;
+
+      logApiCall(endpoint, 'POST', userEmail, 'initiated', {
+        messageLength: messageContent.length,
+        contextMessages: messages.slice(-5).length,
+        component: 'Chat'
+      });
+
       try {
-        response = await fetch(`${import.meta.env.VITE_API_URL}/api/chat`, {
+        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ 
-            message: inputValue,
+            message: messageContent,
             context: messages.slice(-5) // Send last 5 messages for context
           }),
         });
       } catch (runpodError) {
-        console.warn('RunPod API failed, falling back to legacy chat:', runpodError);
+        logger.warn('Primary API failed, falling back to legacy chat', {
+          component: 'Chat',
+          user: userEmail,
+          error: runpodError instanceof Error ? runpodError.message : 'Unknown error',
+          fallbackEndpoint: '/chat'
+        });
+
         // Fallback to legacy chat endpoint
-        response = await fetch(`${import.meta.env.VITE_API_URL}/chat`, {
+        endpoint = '/chat';
+        isLegacyFallback = true;
+        
+        logApiCall(endpoint, 'POST', userEmail, 'initiated', {
+          messageLength: messageContent.length,
+          isLegacyFallback: true,
+          component: 'Chat'
+        });
+
+        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ message: inputValue }),
+          body: JSON.stringify({ message: messageContent }),
         });
       }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.details || errorData.error || 'Chat request failed');
+        
+        logApiCall(endpoint, 'POST', userEmail, 'error', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+          isLegacyFallback,
+          component: 'Chat'
+        });
+
+        throw new Error(errorData.details || errorData.error || `HTTP ${response.status}: Chat request failed`);
       }
 
       const data = await response.json();
+
+      logApiCall(endpoint, 'POST', userEmail, 'success', {
+        status: response.status,
+        agentId: data.agent_id,
+        sourcesCount: data.sources?.length || 0,
+        responseLength: data.response?.length || 0,
+        isLegacyFallback,
+        component: 'Chat'
+      });
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -90,22 +142,42 @@ export function Chat() {
       setMessages(prev => [...prev, assistantMessage]);
 
       // Show success toast if using TxAgent
-      if (data.agent_id) {
+      if (data.agent_id && data.agent_id !== 'legacy') {
+        logAgentOperation('Response Received', userEmail, {
+          agentId: data.agent_id,
+          sourcesCount: data.sources?.length || 0,
+          processingTime: data.processing_time,
+          component: 'Chat'
+        });
         toast.success('Response from TxAgent container');
+      } else if (isLegacyFallback) {
+        logger.info('Legacy chat response received', {
+          component: 'Chat',
+          user: userEmail,
+          responseLength: data.response?.length || 0
+        });
       }
 
     } catch (error) {
-      console.error('Chat error:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to send message');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown chat error';
+      
+      logger.error('Chat request failed', {
+        component: 'Chat',
+        user: userEmail,
+        error: errorMessage,
+        messageLength: messageContent.length
+      });
+
+      toast.error(errorMessage);
       
       // Add error message
-      const errorMessage: Message = {
+      const errorMessage_obj: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
         content: 'I apologize, but I encountered an error processing your request. Please make sure the TxAgent container is running and try again.',
         timestamp: new Date()
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => [...prev, errorMessage_obj]);
     } finally {
       setIsLoading(false);
     }

@@ -134,6 +134,36 @@ try {
 app.use(cors());
 app.use(express.json());
 
+// Request logging middleware
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  
+  errorLogger.info('Incoming request', {
+    method: req.method,
+    path: req.originalUrl,
+    ip: req.ip,
+    user_agent: req.get('User-Agent')?.substring(0, 100),
+    content_type: req.get('Content-Type'),
+    content_length: req.get('Content-Length')
+  });
+
+  // Log response when finished
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    const level = res.statusCode >= 400 ? 'error' : 'info';
+    
+    errorLogger[level]('Request completed', {
+      method: req.method,
+      path: req.originalUrl,
+      status_code: res.statusCode,
+      duration_ms: duration,
+      user_id: req.userId || 'anonymous'
+    });
+  });
+
+  next();
+});
+
 // Configure multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -164,7 +194,7 @@ const verifyToken = (req, res, next) => {
     errorLogger.warn('Authentication failed - no token provided', {
       ip: req.ip,
       path: req.path,
-      user_agent: req.get('User-Agent')
+      user_agent: req.get('User-Agent')?.substring(0, 100)
     });
     return res.status(401).json({ error: 'No token provided' });
   }
@@ -174,6 +204,13 @@ const verifyToken = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
     req.userId = decoded.sub;
+    
+    errorLogger.info('User authenticated', {
+      user_id: req.userId,
+      path: req.path,
+      method: req.method
+    });
+    
     next();
   } catch (error) {
     errorLogger.warn('Authentication failed - invalid token', {
@@ -187,7 +224,10 @@ const verifyToken = (req, res, next) => {
 
 // Health check endpoint with comprehensive status
 app.get('/health', async (req, res) => {
-  errorLogger.info('Health check requested');
+  errorLogger.info('Health check requested', {
+    ip: req.ip,
+    user_agent: req.get('User-Agent')?.substring(0, 100)
+  });
   
   const services = {
     supabase_connected: true,
@@ -214,6 +254,8 @@ app.get('/health', async (req, res) => {
     }
   }
 
+  errorLogger.info('Health check completed', { services });
+
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -230,11 +272,16 @@ try {
   process.exit(1);
 }
 
-// Enhanced document upload endpoint with RunPod integration
+// Enhanced document upload endpoint with comprehensive logging
 app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     if (!req.file) {
-      errorLogger.warn('Upload failed - no file provided', { user_id: req.userId });
+      errorLogger.warn('Upload failed - no file provided', { 
+        user_id: req.userId,
+        ip: req.ip
+      });
       return res.status(400).json({ error: 'No file provided' });
     }
 
@@ -242,12 +289,19 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
       user_id: req.userId,
       filename: req.file.originalname,
       size: req.file.size,
-      mimetype: req.file.mimetype
+      mimetype: req.file.mimetype,
+      ip: req.ip
     });
 
     const documentId = uuidv4();
     
     // Extract text from document
+    errorLogger.info('Starting text extraction', {
+      user_id: req.userId,
+      document_id: documentId,
+      filename: req.file.originalname
+    });
+
     const { text, metadata } = await documentProcessor.extractText(
       req.file.buffer, 
       req.file.originalname
@@ -256,10 +310,18 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
     if (!text || text.trim().length === 0) {
       errorLogger.warn('Upload failed - no text extracted', {
         user_id: req.userId,
-        filename: req.file.originalname
+        filename: req.file.originalname,
+        metadata
       });
       return res.status(400).json({ error: 'Could not extract text from document' });
     }
+
+    errorLogger.info('Text extraction completed', {
+      user_id: req.userId,
+      document_id: documentId,
+      text_length: text.length,
+      metadata
+    });
 
     // Try RunPod embedding first, fallback to local embedding service
     let embedding;
@@ -269,7 +331,9 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
       if (process.env.RUNPOD_EMBEDDING_URL && process.env.RUNPOD_EMBEDDING_KEY) {
         errorLogger.info('Attempting RunPod embedding', {
           user_id: req.userId,
-          text_length: text.length
+          document_id: documentId,
+          text_length: text.length,
+          runpod_url: process.env.RUNPOD_EMBEDDING_URL
         });
 
         const runpodResponse = await axios.post(
@@ -287,11 +351,14 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
           }
         );
         
-        embedding = runpodResponse.data.embedding;
+        embedding = runpodResponse.data.embedding || runpodResponse.data;
         embeddingSource = 'runpod';
+        
         errorLogger.success('RunPod embedding completed', {
           user_id: req.userId,
-          dimensions: runpodResponse.data.dimensions
+          document_id: documentId,
+          dimensions: runpodResponse.data.dimensions || embedding?.length,
+          response_status: runpodResponse.status
         });
       } else {
         throw new Error('RunPod not configured');
@@ -299,14 +366,29 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
     } catch (embeddingError) {
       errorLogger.warn('RunPod embedding failed, using local service', {
         user_id: req.userId,
-        error: embeddingError.message
+        document_id: documentId,
+        error: embeddingError.message,
+        error_code: embeddingError.code
       });
       
       embedding = await embeddingService.generateEmbedding(text);
       embeddingSource = 'local';
+      
+      errorLogger.info('Local embedding completed', {
+        user_id: req.userId,
+        document_id: documentId,
+        dimensions: embedding?.length
+      });
     }
 
     // Store in Supabase
+    errorLogger.info('Storing document in Supabase', {
+      user_id: req.userId,
+      document_id: documentId,
+      filename: req.file.originalname,
+      embedding_source: embeddingSource
+    });
+
     const { data, error } = await supabase
       .from('documents')
       .insert({
@@ -317,7 +399,8 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
           ...metadata,
           file_size: req.file.size,
           mime_type: req.file.mimetype,
-          embedding_source: embeddingSource
+          embedding_source: embeddingSource,
+          processing_time_ms: Date.now() - startTime
         },
         embedding,
         user_id: req.userId
@@ -326,35 +409,47 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
       .single();
 
     if (error) {
-      errorLogger.error('Database insert failed', error, {
+      errorLogger.error('Supabase insert failed', error, {
         user_id: req.userId,
-        document_id: documentId
+        document_id: documentId,
+        filename: req.file.originalname,
+        error_code: error.code,
+        error_details: error.details
       });
       throw error;
     }
+
+    const processingTime = Date.now() - startTime;
 
     errorLogger.success('Document processed successfully', {
       user_id: req.userId,
       document_id: documentId,
       filename: req.file.originalname,
       content_length: text.length,
-      vector_dimensions: embedding.length,
-      embedding_source: embeddingSource
+      vector_dimensions: embedding?.length,
+      embedding_source: embeddingSource,
+      processing_time_ms: processingTime,
+      supabase_id: data.id
     });
 
     res.json({
       document_id: documentId,
       filename: req.file.originalname,
       content_length: text.length,
-      vector_dimensions: embedding.length,
+      vector_dimensions: embedding?.length,
       embedding_source: embeddingSource,
+      processing_time_ms: processingTime,
       message: 'Document uploaded and processed successfully'
     });
     
   } catch (error) {
+    const processingTime = Date.now() - startTime;
+    
     errorLogger.error('Upload processing failed', error, {
       user_id: req.userId,
-      filename: req.file?.originalname
+      filename: req.file?.originalname,
+      processing_time_ms: processingTime,
+      error_stack: error.stack
     });
     
     res.status(500).json({ 
@@ -364,17 +459,36 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
   }
 });
 
-// Error handling middleware
+// Error handling middleware with enhanced logging
 app.use((error, req, res, next) => {
   errorLogger.error('Unhandled server error', error, {
     user_id: req.userId,
     path: req.path,
-    method: req.method
+    method: req.method,
+    ip: req.ip,
+    user_agent: req.get('User-Agent')?.substring(0, 100),
+    error_stack: error.stack
   });
   
   res.status(500).json({
     error: 'Internal server error',
     details: process.env.NODE_ENV === 'development' ? error.message : 'Server error occurred'
+  });
+});
+
+// 404 handler with logging
+app.use((req, res) => {
+  errorLogger.warn('Route not found', {
+    method: req.method,
+    path: req.originalUrl,
+    ip: req.ip,
+    user_agent: req.get('User-Agent')?.substring(0, 100)
+  });
+  
+  res.status(404).json({
+    error: 'Route not found',
+    path: req.originalUrl,
+    method: req.method
   });
 });
 
@@ -390,12 +504,17 @@ process.on('SIGINT', () => {
 });
 
 process.on('uncaughtException', (error) => {
-  errorLogger.error('Uncaught exception', error);
+  errorLogger.error('Uncaught exception', error, {
+    error_stack: error.stack
+  });
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  errorLogger.error('Unhandled rejection', reason, { promise: promise.toString() });
+  errorLogger.error('Unhandled rejection', reason, { 
+    promise: promise.toString(),
+    reason_stack: reason?.stack
+  });
   process.exit(1);
 });
 
@@ -403,7 +522,8 @@ process.on('unhandledRejection', (reason, promise) => {
 app.listen(port, () => {
   errorLogger.success('🚀 Medical RAG Server running', {
     port: port,
-    health_check: `http://localhost:${port}/health`
+    health_check: `http://localhost:${port}/health`,
+    environment: process.env.NODE_ENV || 'development'
   });
   
   errorLogger.info('🔧 Services configured:');
