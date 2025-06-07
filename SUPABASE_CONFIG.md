@@ -108,6 +108,22 @@ CREATE TABLE agents (
 - `last_active`: Timestamp of last agent activity
 - `terminated_at`: Timestamp when agent was terminated
 
+**Session Data Structure:**
+```json
+{
+  "container_id": "bjo5yophw94s7b",
+  "started_at": "2025-01-07T20:00:00Z",
+  "runpod_endpoint": "https://bjo5yophw94s7b-8000.proxy.runpod.net",
+  "capabilities": ["embedding", "chat", "document_analysis"],
+  "health_status": {
+    "status": "healthy",
+    "model": "dmis-lab/biobert-v1.1",
+    "device": "cuda",
+    "version": "1.0.0"
+  }
+}
+```
+
 **Indexes:**
 ```sql
 CREATE INDEX agents_user_id_idx ON agents(user_id);
@@ -383,6 +399,14 @@ The `auth.uid()` function returns the current user's ID from the JWT token, whic
 4. Session data updated with container info
 5. Agent terminated when user stops or times out
 
+### Enhanced Monitoring Flow (NEW)
+
+1. **Real-time Status Monitoring**: Frontend polls agent status every 10 seconds when auto-refresh is enabled
+2. **Interactive Status Testing**: Users can manually trigger comprehensive endpoint tests
+3. **Container Log Visibility**: Frontend displays real-time logs from container operations
+4. **Detailed Health Checks**: System tests health, chat, and embed endpoints individually
+5. **Connection Diagnostics**: Provides detailed feedback on JWT validation, network connectivity, and endpoint availability
+
 ## Environment Variables
 
 ### Node.js Backend
@@ -400,7 +424,7 @@ RUNPOD_EMBEDDING_KEY=your-runpod-api-key
 # OpenAI Fallback
 OPENAI_API_KEY=your-openai-api-key
 
-# Debug Logging
+# Debug Logging - ENABLE THIS FOR TROUBLESHOOTING
 BACKEND_DEBUG_LOGGING=true
 ```
 
@@ -432,6 +456,44 @@ SUPABASE_STORAGE_BUCKET=documents
 MODEL_NAME=dmis-lab/biobert-v1.1
 DEVICE=cuda
 ```
+
+## Enhanced Monitoring Features
+
+### 1. Interactive Status Dashboard
+
+The Monitor page now provides:
+- **Real-time Status Cards**: Session, Container, Connection, and Endpoints status
+- **Auto-refresh Toggle**: Automatic status updates every 10 seconds
+- **Manual Test Button**: On-demand comprehensive endpoint testing
+- **Visual Status Indicators**: Color-coded status with clear icons
+
+### 2. Detailed Endpoint Testing
+
+The system performs individual tests on:
+- **Health Endpoint**: Verifies container is reachable and healthy
+- **Chat Endpoint**: Tests POST requests to `/api/chat` with minimal payload
+- **Embed Endpoint**: Tests POST requests to `/api/embed` with test document
+
+### 3. Container Log Visibility
+
+- **Real-time Logs**: Display container activity, errors, and status changes
+- **Log Levels**: Color-coded ERROR, WARN, SUCCESS, INFO, DEBUG levels
+- **Component Tracking**: Shows which system component generated each log
+- **Log Persistence**: Maintains last 100 log entries for troubleshooting
+
+### 4. Enhanced Error Reporting
+
+- **Detailed Error Messages**: Specific error codes and descriptions
+- **JWT Validation Status**: Clear indication of authentication issues
+- **Network Connectivity**: Distinguishes between network and application errors
+- **Container Health**: Separate tracking of container vs. application status
+
+### 5. Debug Information
+
+- **Development Mode**: Additional debug panels in development environment
+- **Environment Variables**: Display of current configuration
+- **Request/Response Logging**: Detailed API call tracking
+- **Copy to Clipboard**: Easy copying of container IDs and endpoints
 
 ## Current Issues & Fixes
 
@@ -475,7 +537,15 @@ const response = await axios.post(
 );
 ```
 
-### 3. TxAgent JWT Audience Fix ❌ NEEDS CONTAINER UPDATE
+### 3. Enhanced Frontend Monitoring ✅ IMPLEMENTED
+
+The frontend now provides:
+- **Interactive Status Checking**: Manual and automatic status verification
+- **Real-time Log Display**: Container activity visibility
+- **Detailed Error Reporting**: Specific error codes and messages
+- **Connection Diagnostics**: JWT, network, and endpoint testing
+
+### 4. TxAgent JWT Audience Fix ❌ NEEDS CONTAINER UPDATE
 
 The TxAgent container needs to accept `"authenticated"` as a valid JWT audience:
 
@@ -489,6 +559,38 @@ decoded_token = jwt.decode(
     options={"verify_aud": True}
 )
 ```
+
+## Expected Behavior After TxAgent Container Fix
+
+### ✅ What Should Work
+
+1. **Agent Activation**: 
+   - Monitor page shows "Session: Active"
+   - Container status shows "running"
+   - Connection status shows "Reachable"
+   - Endpoints status shows "Working"
+
+2. **Chat Functionality**:
+   - Chat page shows "TxAgent Connection: ACTIVE"
+   - Green status indicator with container details
+   - Successful message exchange with BioBERT responses
+
+3. **Document Upload**:
+   - Documents processed through TxAgent BioBERT embeddings
+   - Embedding jobs tracked in database
+   - Vector search returns relevant results
+
+4. **Real-time Monitoring**:
+   - Live status updates every 10 seconds
+   - Container logs show successful operations
+   - Health checks return 200 status codes
+
+### 🔧 Troubleshooting Tools
+
+1. **Manual Status Check**: Click "Test Connection" to verify all endpoints
+2. **Container Logs**: View real-time activity and error messages
+3. **Debug Information**: Development mode shows detailed configuration
+4. **Auto-refresh**: Continuous monitoring of container status
 
 ## Migration History
 
@@ -509,6 +611,7 @@ decoded_token = jwt.decode(
 3. **SECURITY DEFINER**: The `match_documents` function uses SECURITY DEFINER to bypass RLS for vector search while maintaining user filtering
 4. **Foreign Key Constraints**: Ensure data integrity with CASCADE deletes
 5. **Token Forwarding**: Backend forwards user JWT tokens, not service keys
+6. **Log Privacy**: Container logs filter sensitive information (JWT tokens truncated)
 
 ## Performance Considerations
 
@@ -516,6 +619,7 @@ decoded_token = jwt.decode(
 2. **User ID Indexing**: Indexes on user_id columns for efficient RLS filtering
 3. **Status Indexing**: Index on job status for monitoring queries
 4. **Connection Pooling**: Use connection pooling for high-traffic applications
+5. **Auto-refresh Optimization**: 10-second intervals balance real-time updates with performance
 
 ## Troubleshooting
 
@@ -538,6 +642,12 @@ decoded_token = jwt.decode(
 
 - **Slow similarity search**: Ensure vector index is created and statistics are updated
 - **Slow user queries**: Ensure user_id indexes are present
+
+### Monitoring Issues
+
+- **Status not updating**: Check auto-refresh toggle and network connectivity
+- **Logs not showing**: Verify container is active and endpoints are reachable
+- **Test failures**: Use detailed error messages to identify specific issues
 
 ## API Integration Examples
 
@@ -583,9 +693,51 @@ const { data, error } = await supabase
     session_data: {
       container_id: 'container-123',
       endpoint_url: 'https://container.runpod.net',
-      capabilities: ['embedding', 'chat']
+      capabilities: ['embedding', 'chat'],
+      health_status: {
+        status: 'healthy',
+        model: 'dmis-lab/biobert-v1.1',
+        device: 'cuda',
+        version: '1.0.0'
+      }
     }
   });
 ```
 
-This configuration ensures secure, scalable, and efficient operation of the Medical RAG Vector Uploader system with proper data isolation and performance optimization.
+### Testing Container Endpoints
+
+```javascript
+// Health check
+const healthResponse = await fetch(`${apiUrl}/api/agent/status`, {
+  method: 'GET',
+  headers: { 'Authorization': `Bearer ${token}` }
+});
+
+// Chat test
+const chatResponse = await fetch(`${apiUrl}/api/chat`, {
+  method: 'POST',
+  headers: { 
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({ 
+    message: "Test connection",
+    context: []
+  })
+});
+
+// Embed test
+const embedResponse = await fetch(`${apiUrl}/api/embed`, {
+  method: 'POST',
+  headers: { 
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({ 
+    documentText: "Test document",
+    metadata: { test: true }
+  })
+});
+```
+
+This configuration ensures secure, scalable, and efficient operation of the Medical RAG Vector Uploader system with comprehensive monitoring, real-time status updates, and detailed troubleshooting capabilities.
