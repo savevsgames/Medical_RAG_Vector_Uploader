@@ -272,6 +272,104 @@ try {
   process.exit(1);
 }
 
+// Add the missing /api/chat endpoint
+app.post('/api/chat', verifyToken, async (req, res) => {
+  try {
+    const { message, context } = req.body;
+    const userId = req.userId;
+    
+    if (!message || typeof message !== 'string') {
+      errorLogger.warn('Invalid chat request - missing message', { user_id: userId });
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    errorLogger.info('Processing chat request', {
+      user_id: userId,
+      message_length: message.length,
+      has_context: !!context
+    });
+
+    // Try RunPod TxAgent first if configured
+    if (process.env.RUNPOD_EMBEDDING_URL && process.env.RUNPOD_EMBEDDING_KEY) {
+      try {
+        errorLogger.info('Attempting RunPod TxAgent chat', {
+          user_id: userId,
+          runpod_url: process.env.RUNPOD_EMBEDDING_URL
+        });
+
+        const response = await axios.post(
+          `${process.env.RUNPOD_EMBEDDING_URL}/chat`,
+          { 
+            query: message,
+            user_id: userId,
+            context: context || null
+          },
+          { 
+            headers: { 
+              'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 60000
+          }
+        );
+
+        errorLogger.success('RunPod TxAgent chat completed', {
+          user_id: userId,
+          response_length: response.data.response?.length || 0,
+          sources_count: response.data.sources?.length || 0
+        });
+
+        return res.json({
+          response: response.data.response || response.data.answer || 'No response from TxAgent',
+          sources: response.data.sources || [],
+          agent_id: response.data.agent_id || 'txagent',
+          processing_time: response.data.processing_time,
+          timestamp: new Date().toISOString()
+        });
+
+      } catch (runpodError) {
+        errorLogger.warn('RunPod TxAgent failed, falling back to local chat', {
+          user_id: userId,
+          error: runpodError.message,
+          error_code: runpodError.code
+        });
+      }
+    }
+
+    // Fallback to local OpenAI chat service
+    errorLogger.info('Using local OpenAI chat service', {
+      user_id: userId
+    });
+
+    const result = await chatService.processQuery(userId, message);
+
+    errorLogger.success('Local chat service completed', {
+      user_id: userId,
+      response_length: result.response.length,
+      sources_count: result.sources.length
+    });
+
+    res.json({
+      response: result.response,
+      sources: result.sources,
+      agent_id: 'local',
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    errorLogger.error('Chat request failed', error, {
+      user_id: req.userId,
+      message_length: req.body?.message?.length,
+      error_stack: error.stack
+    });
+    
+    res.status(500).json({ 
+      error: 'Chat processing failed',
+      details: error.message
+    });
+  }
+});
+
 // Enhanced document upload endpoint with comprehensive logging
 app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
   const startTime = Date.now();
@@ -535,11 +633,11 @@ app.listen(port, () => {
   errorLogger.info('📚 Available endpoints:');
   errorLogger.info('  - GET  /health (Health check)');
   errorLogger.info('  - POST /upload (Document upload)');
+  errorLogger.info('  - POST /api/chat (Chat with TxAgent/OpenAI)');
   errorLogger.info('  - POST /api/agent/start (Start TxAgent)');
   errorLogger.info('  - POST /api/agent/stop (Stop TxAgent)');
   errorLogger.info('  - GET  /api/agent/status (Agent status)');
   errorLogger.info('  - POST /api/embed (RunPod embedding)');
-  errorLogger.info('  - POST /api/chat (RunPod chat)');
   errorLogger.info('  - POST /agent/* (Legacy endpoints - deprecated)');
   errorLogger.info('  - POST /chat (Legacy chat - deprecated)');
 });
