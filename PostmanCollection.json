@@ -1,0 +1,329 @@
+{
+  "info": {
+    "name": "TxAgent API Tests - Updated",
+    "description": "Test collection for TxAgent Hybrid Container with JWT audience fix",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://bjo5yophw94s7b-8000.proxy.runpod.net",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "eyJhbGciOiJIUzI1NiIsImtpZCI6Ilk5bUtXRE0wLzl4SU1aSVgiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2JmamZqeHpkamhyYWFicHV0a3FpLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI0OTZhNzE4MC01ZTc1LTQyYjAtOGE2MS1iOGNmOTJmZmUyODYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzQ5MzMwOTMwLCJpYXQiOjE3NDkzMjczMzAsImVtYWlsIjoiZ3JlZ2NiYXJrZXJAZ21haWwuY29tIiwicGhvbmUiOiIiLCJhcHBfbWV0YWRhdGEiOnsicHJvdmlkZXIiOiJlbWFpbCIsInByb3ZpZGVycyI6WyJlbWFpbCJdfSwidXNlcl9tZXRhZGF0YSI6eyJlbWFpbCI6ImdyZWdjYmFya2VyQGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJwaG9uZV92ZXJpZmllZCI6ZmFsc2UsInN1YiI6IjQ5NmE3MTgwLTVlNzUtNDJiMC04YTYxLWI4Y2Y5MmZmZTI4NiJ9LCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImFhbCI6ImFhbDEiLCJhbXIiOlt7Im1ldGhvZCI6InBhc3N3b3JkIiwidGltZXN0YW1wIjoxNzQ5MzIxMTkwfV0sInNlc3Npb25faWQiOiI5MGY5Y2M1NS05OTg3LTRhNTQtOGQ0OS0zYmIwYjk5ZTVhNTciLCJpc19hbm9ueW1vdXMiOmZhbHNlfQ.bXcfdKHQrA_RHwOQwHK5OXgYxF1iQmpj_5dRDivUATU",
+      "type": "string"
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has status field\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('status');",
+              "    pm.expect(jsonData.status).to.eql('healthy');",
+              "});",
+              "",
+              "pm.test(\"Response has model info\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('model');",
+              "    pm.expect(jsonData).to.have.property('device');",
+              "    pm.expect(jsonData).to.have.property('version');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "2. Test GET Endpoint",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has message\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('message');",
+              "    pm.expect(jsonData.message).to.include('GET endpoint working');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test",
+          "host": ["{{base_url}}"],
+          "path": ["test"]
+        }
+      }
+    },
+    {
+      "name": "3. Test POST Endpoint",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has message\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('message');",
+              "    pm.expect(jsonData.message).to.include('POST endpoint working');",
+              "});",
+              "",
+              "pm.test(\"Response echoes sent data\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('received_data');",
+              "    pm.expect(jsonData.received_data.test).to.eql('data');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"test\": \"data\",\n  \"timestamp\": \"2025-01-01T00:00:00Z\",\n  \"user\": \"postman_test\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/test",
+          "host": ["{{base_url}}"],
+          "path": ["test"]
+        }
+      }
+    },
+    {
+      "name": "4. Chat Query (POST - Correct Method)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test(\"Response has answer\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('response');",
+              "    pm.expect(jsonData).to.have.property('status');",
+              "});",
+              "",
+              "pm.test(\"Response has sources array\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('sources');",
+              "    pm.expect(jsonData.sources).to.be.an('array');",
+              "});",
+              "",
+              "pm.test(\"JWT authentication successful\", function () {",
+              "    // If we get a 200, JWT validation passed",
+              "    pm.response.to.have.status(200);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"What are the main findings in the medical research?\",\n  \"history\": [],\n  \"top_k\": 5,\n  \"temperature\": 0.7,\n  \"stream\": false\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/chat",
+          "host": ["{{base_url}}"],
+          "path": ["chat"]
+        }
+      }
+    },
+    {
+      "name": "5. Embed Document (POST - Correct Method)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 or 202\", function () {",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 202]);",
+              "});",
+              "",
+              "pm.test(\"Response has job_id\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('job_id');",
+              "    pm.collectionVariables.set('job_id', jsonData.job_id);",
+              "});",
+              "",
+              "pm.test(\"Response has status\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('status');",
+              "    pm.expect(jsonData.status).to.be.oneOf(['pending', 'processing', 'completed']);",
+              "});",
+              "",
+              "pm.test(\"JWT authentication successful\", function () {",
+              "    // If we get a 200/202, JWT validation passed",
+              "    pm.expect(pm.response.code).to.be.oneOf([200, 202]);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"file_path\": \"test-documents/sample-medical-paper.pdf\",\n  \"metadata\": {\n    \"title\": \"Sample Medical Research Paper\",\n    \"author\": \"Dr. Test Author\",\n    \"category\": \"cardiology\",\n    \"year\": \"2024\",\n    \"source\": \"postman_test\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/embed",
+          "host": ["{{base_url}}"],
+          "path": ["embed"]
+        }
+      }
+    },
+    {
+      "name": "6. Test Authentication Failure",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 401\", function () {",
+              "    pm.response.to.have.status(401);",
+              "});",
+              "",
+              "pm.test(\"Response has error message\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('detail');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer invalid_token"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"This should fail due to invalid token\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/chat",
+          "host": ["{{base_url}}"],
+          "path": ["chat"]
+        }
+      }
+    },
+    {
+      "name": "7. Test GET to Chat (Should Return 405)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 405 Method Not Allowed\", function () {",
+              "    pm.response.to.have.status(405);",
+              "});",
+              "",
+              "pm.test(\"This confirms POST-only endpoint is working correctly\", function () {",
+              "    // A 405 for GET request to POST endpoint is the expected behavior",
+              "    pm.response.to.have.status(405);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/chat",
+          "host": ["{{base_url}}"],
+          "path": ["chat"]
+        }
+      }
+    }
+  ]
+}

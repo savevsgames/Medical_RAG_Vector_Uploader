@@ -1,326 +1,198 @@
-# TxAgent Container Troubleshooting Guide
+# TxAgent Container Troubleshooting Guide - Updated
 
 ## Current Status Summary
 
 ### ✅ What's Working
 - **Container Health**: `/health` endpoint responds correctly with BioBERT model info
-- **Authentication**: Supabase JWT tokens are being generated and sent properly
 - **Network Connectivity**: Container is reachable from Node.js backend
-- **CORS**: Recently fixed to allow WebContainer domains
+- **CORS**: Fixed to allow WebContainer domains
 - **OpenAI Fallback**: Working perfectly as backup system
+- **POST Method Detection**: Container correctly rejects GET requests to POST endpoints with 405
 
 ### ❌ What's Failing
-- **POST Endpoints**: All POST requests to TxAgent return `405 Method Not Allowed`
-- **Chat Functionality**: `/chat` endpoint not responding to POST requests
-- **Embedding Processing**: `/embed` endpoint not accepting document uploads
-- **Agent Session Management**: Cannot create agent sessions due to RLS policy issues
+- **JWT Audience Validation**: Container rejecting Supabase JWT tokens due to "Invalid audience" error
+- **Authentication**: All authenticated endpoints failing due to JWT validation
 
-## Critical Questions for TxAgent Container
+## Root Cause Analysis
 
-### 1. Endpoint Verification
-**Question**: What endpoints are actually available and what HTTP methods do they support?
+Based on the container logs, the issue is **JWT audience validation**:
 
-**Expected Response**: 
+```
+❌ JWT InvalidTokenError: Invalid audience
+```
+
+The Supabase JWT token contains:
 ```json
 {
-  "endpoints": {
-    "/health": ["GET"],
-    "/chat": ["POST"],
-    "/embed": ["POST"],
-    "/docs": ["GET"]
-  }
+  "aud": "authenticated",
+  "iss": "https://bfjfjxzdjhraabputkqi.supabase.co/auth/v1",
+  "sub": "496a7180-5e75-42b0-8a61-b8cf92ffe286",
+  "role": "authenticated"
 }
 ```
 
-**How to Test**:
-```bash
-# Inside container
-curl -X OPTIONS http://localhost:8000/chat -v
-curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" -d '{"query":"test"}' -v
-```
+But the TxAgent container's JWT validation is not configured to accept `"authenticated"` as a valid audience.
 
-### 2. FastAPI Configuration
-**Question**: Is FastAPI properly configured to handle POST requests?
+## Required Fix for TxAgent Container
 
-**Expected Verification**:
-- Uvicorn startup logs show all routes being registered
-- No middleware blocking POST methods
-- CORS configured to allow all origins and methods
+### Update JWT Validation in `hybrid-agent/auth.py`
 
-**Debug Commands**:
+The container needs this specific change:
+
 ```python
-# Add to main.py for debugging
-@app.middleware("http")
-async def debug_requests(request: Request, call_next):
-    print(f"Method: {request.method}, URL: {request.url}")
-    response = await call_next(request)
-    print(f"Response status: {response.status_code}")
-    return response
+import jwt
+from jwt.exceptions import InvalidAudienceError, ExpiredSignatureError, DecodeError
+from fastapi import HTTPException
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+def validate_token(token: str) -> dict:
+    """
+    Validate Supabase JWT token with correct audience handling
+    """
+    try:
+        secret = os.getenv('SUPABASE_JWT_SECRET')
+        if not secret:
+            raise HTTPException(status_code=500, detail="JWT secret not configured")
+        
+        # CRITICAL FIX: Add audience="authenticated" for Supabase tokens
+        decoded_token = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            audience="authenticated",  # <-- THIS IS THE KEY FIX
+            issuer=os.getenv('SUPABASE_URL', '').rstrip('/') + '/auth/v1',
+            options={
+                "verify_aud": True,
+                "verify_iss": True,
+                "verify_exp": True,
+                "verify_signature": True
+            }
+        )
+        
+        logger.info(f"✅ JWT validation successful for user: {decoded_token.get('sub')}")
+        return decoded_token
+        
+    except InvalidAudienceError as e:
+        logger.error(f"❌ JWT Invalid Audience: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token: Audience mismatch")
+    except ExpiredSignatureError as e:
+        logger.error(f"❌ JWT Expired: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token: Token expired")
+    except DecodeError as e:
+        logger.error(f"❌ JWT Decode Error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid token: Could not decode")
+    except Exception as e:
+        logger.error(f"❌ JWT Validation Error: {e}")
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 ```
 
-### 3. Authentication Flow
-**Question**: How is the Supabase JWT being validated and processed?
+## Client-Side Verification ✅ CONFIRMED
 
-**What We're Sending**:
+Our Node.js backend and React frontend are correctly using POST methods:
+
+### Backend (`runpodService.js`):
 ```javascript
-headers: {
-  'Authorization': 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
-  'Content-Type': 'application/json'
-}
+// ✅ Correctly using POST for chat
+const response = await axios.post(
+  `${process.env.RUNPOD_EMBEDDING_URL}/chat`,
+  requestPayload,
+  { 
+    headers: { 
+      'Authorization': userJWT,
+      'Content-Type': 'application/json'
+    },
+    timeout: this.chatTimeout
+  }
+);
+
+// ✅ Correctly using POST for embed
+const response = await axios.post(
+  `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
+  requestPayload,
+  { 
+    headers: { 
+      'Authorization': userJWT,
+      'Content-Type': 'application/json'
+    },
+    timeout: this.defaultTimeout
+  }
+);
 ```
 
-**Expected Process**:
-1. Extract JWT from Authorization header
-2. Verify signature using `SUPABASE_JWT_SECRET`
-3. Extract `user_id` from `sub` claim
-4. Use for RLS enforcement in database queries
+### Frontend (`Chat.tsx`):
+```javascript
+// ✅ Correctly using POST for chat
+const response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
+  method: 'POST', // Explicitly specified
+  headers: {
+    'Authorization': `Bearer ${session.access_token}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ 
+    message: messageContent,
+    context: messages.slice(-5)
+  }),
+});
+```
 
-**Debug Questions**:
-- Is `SUPABASE_JWT_SECRET` set correctly in container?
-- Is JWT validation middleware working?
-- Are authentication errors being logged?
+## Environment Variables Required
 
-### 4. Environment Variables
-**Question**: Are all required environment variables properly set?
+Ensure these are set in the TxAgent container:
 
-**Required Variables**:
 ```bash
 SUPABASE_URL=https://bfjfjxzdjhraabputkqi.supabase.co
-SUPABASE_KEY=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...  # anon key
-SUPABASE_SERVICE_ROLE_KEY=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...  # service role
-SUPABASE_JWT_SECRET=your-jwt-secret-here
-SUPABASE_STORAGE_BUCKET=documents
-MODEL_NAME=dmis-lab/biobert-v1.1
-DEVICE=cuda
+SUPABASE_JWT_SECRET=your-jwt-secret-here  # CRITICAL for JWT validation
+SUPABASE_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
-**Verification Command**:
+## Testing Plan
+
+### 1. Test Current Behavior (Should Fail)
 ```bash
-env | grep SUPABASE
+# This should return 401 due to JWT audience validation
+curl -X POST https://bjo5yophw94s7b-8000.proxy.runpod.net/chat \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsImtpZCI6Ilk5bUtXRE0wLzl4SU1aSVgiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL2JmamZqeHpkamhyYWFicHV0a3FpLnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiI0OTZhNzE4MC01ZTc1LTQyYjAtOGE2MS1iOGNmOTJmZmUyODYiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzQ5MzMwOTMwLCJpYXQiOjE3NDkzMjczMzAsImVtYWlsIjoiZ3JlZ2NiYXJrZXJAZ21haWwuY29tIiwicGhvbmUiOiIiLCJhcHBfbWV0YWRhdGEiOnsicHJvdmlkZXIiOiJlbWFpbCIsInByb3ZpZGVycyI6WyJlbWFpbCJdfSwidXNlcl9tZXRhZGF0YSI6eyJlbWFpbCI6ImdyZWdjYmFya2VyQGdtYWlsLmNvbSIsImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJwaG9uZV92ZXJpZmllZCI6ZmFsc2UsInN1YiI6IjQ5NmE3MTgwLTVlNzUtNDJiMC04YTYxLWI4Y2Y5MmZmZTI4NiJ9LCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImFhbCI6ImFhbDEiLCJhbXIiOlt7Im1ldGhvZCI6InBhc3N3b3JkIiwidGltZXN0YW1wIjoxNzQ5MzIxMTkwfV0sInNlc3Npb25faWQiOiI5MGY5Y2M1NS05OTg3LTRhNTQtOGQ0OS0zYmIwYjk5ZTVhNTciLCJpc19hbm9ueW1vdXMiOmZhbHNlfQ.bXcfdKHQrA_RHwOQwHK5OXgYxF1iQmpj_5dRDivUATU" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "test message"}'
 ```
 
-### 5. Database Connectivity
-**Question**: Can the container successfully connect to Supabase and perform operations?
+### 2. After JWT Fix (Should Work)
+Same command should return 200 with chat response.
 
-**Test Queries**:
-```python
-# Test basic connection
-supabase.table('documents').select('count').execute()
-
-# Test RLS with user context
-supabase.table('documents').select('*').eq('user_id', user_id).execute()
-```
-
-## What We're Expecting the Container to Do
-
-### 1. Chat Endpoint (`POST /chat`)
-**Input Payload**:
-```json
-{
-  "query": "What are the key findings in my documents?",
-  "history": [],
-  "top_k": 5,
-  "temperature": 0.7
-}
-```
-
-**Expected Process**:
-1. Authenticate user via JWT
-2. Generate embedding for query using BioBERT
-3. Perform vector similarity search in Supabase
-4. Filter results by user_id (RLS)
-5. Generate response using retrieved context
-6. Return response with sources
-
-**Expected Response**:
-```json
-{
-  "response": "Based on your documents, the key findings are...",
-  "sources": [
-    {
-      "filename": "medical_report.pdf",
-      "similarity": 0.85,
-      "content": "relevant excerpt..."
-    }
-  ],
-  "processing_time": 1.23,
-  "status": "success"
-}
-```
-
-### 2. Embed Endpoint (`POST /embed`)
-**Input Payload**:
-```json
-{
-  "file_path": "upload_12345",
-  "metadata": {
-    "file_size": 75227,
-    "mime_type": "application/pdf",
-    "inline_text": "extracted document text...",
-    "user_id": "496a7180-5e75-42b0-8a61-b8cf92ffe286"
-  }
-}
-```
-
-**Expected Process**:
-1. Authenticate user via JWT
-2. Extract/receive document text
-3. Generate BioBERT embeddings
-4. Store in Supabase documents table with user_id
-5. Return document IDs and processing info
-
-**Expected Response**:
-```json
-{
-  "document_ids": ["uuid-1", "uuid-2"],
-  "chunk_count": 15,
-  "embedding": [0.1, 0.2, ...],  // 768 dimensions
-  "dimensions": 768,
-  "processing_time": 2.45,
-  "status": "success"
-}
-```
-
-## Debugging Steps for Container
-
-### 1. Enable Verbose Logging
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-
-# Add request/response logging
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    print(f"🔍 {request.method} {request.url}")
-    print(f"🔍 Headers: {dict(request.headers)}")
-    
-    response = await call_next(request)
-    
-    process_time = time.time() - start_time
-    print(f"✅ Response: {response.status_code} ({process_time:.2f}s)")
-    return response
-```
-
-### 2. Test Endpoints Directly
+### 3. Verify GET Still Returns 405 (Correct Behavior)
 ```bash
-# Test health (should work)
-curl http://localhost:8000/health
-
-# Test chat with minimal payload
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"query":"test"}'
-
-# Test with authentication
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_JWT_HERE" \
-  -d '{"query":"test"}'
+# This should still return 405 - this is correct
+curl -X GET https://bjo5yophw94s7b-8000.proxy.runpod.net/chat \
+  -H "Authorization: Bearer [token]"
 ```
 
-### 3. Verify FastAPI Route Registration
-```python
-# Add to startup
-@app.on_event("startup")
-async def startup_event():
-    print("🚀 TxAgent FastAPI starting up...")
-    print("📋 Registered routes:")
-    for route in app.routes:
-        if hasattr(route, 'methods'):
-            print(f"  {route.methods} {route.path}")
-```
+## Expected Results After Fix
 
-### 4. Check Supabase Connection
-```python
-# Add health check for database
-@app.get("/health/db")
-async def health_db():
-    try:
-        result = supabase.table('documents').select('count').limit(1).execute()
-        return {"status": "connected", "result": result.data}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
-```
+- ✅ POST `/chat` with valid JWT returns 200 with chat response
+- ✅ POST `/embed` with valid JWT returns 200/202 with job info
+- ✅ Invalid JWT returns 401 with clear error message
+- ✅ GET requests to POST endpoints still return 405 (correct behavior)
+- ✅ Health endpoint continues to work without authentication
 
-## Expected Container Behavior
+## Implementation Steps
 
-### On Startup
-1. Load BioBERT model on CUDA
-2. Initialize Supabase client with provided credentials
-3. Register all FastAPI routes (GET /health, POST /chat, POST /embed)
-4. Start Uvicorn server on port 8000
-5. Log successful initialization
-
-### On POST /chat Request
-1. Receive and validate JSON payload
-2. Extract and verify JWT token
-3. Get user_id from JWT claims
-4. Generate query embedding using BioBERT
-5. Search user's documents in Supabase
-6. Generate contextual response
-7. Return JSON response with sources
-
-### On POST /embed Request
-1. Receive document data and metadata
-2. Extract and verify JWT token
-3. Process document text through BioBERT
-4. Store embeddings in Supabase with user_id
-5. Return processing results
-
-## Common Issues to Check
-
-### 1. RunPod Proxy Issues
-- **Problem**: RunPod proxy might be blocking POST requests
-- **Test**: Try accessing container directly if possible
-- **Workaround**: Use GET requests with query parameters for testing
-
-### 2. FastAPI/Uvicorn Configuration
-- **Problem**: Server not configured to handle POST methods
-- **Check**: Uvicorn startup parameters and middleware configuration
-- **Fix**: Ensure no middleware is blocking POST requests
-
-### 3. CORS Configuration
-- **Problem**: Container rejecting requests due to CORS
-- **Fix**: Ensure CORS allows all origins and methods:
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
-
-### 4. Authentication Middleware
-- **Problem**: JWT validation failing silently
-- **Debug**: Add logging to authentication middleware
-- **Test**: Try endpoints without authentication first
-
-## Next Steps
-
-1. **Container Logs**: Check RunPod container logs for FastAPI startup messages
-2. **Direct Testing**: Test endpoints directly within container using curl
-3. **Environment Verification**: Confirm all environment variables are set
-4. **Route Debugging**: Add verbose logging to see which routes are registered
-5. **Authentication Testing**: Test with and without JWT tokens
-6. **Minimal Reproduction**: Create simple test endpoints that just return success
+1. **Update `hybrid-agent/auth.py`** with the JWT audience fix
+2. **Rebuild the TxAgent container** with the updated code
+3. **Test with the updated Postman collection**
+4. **Verify end-to-end flow** from frontend through backend to container
 
 ## Success Criteria
 
-- [ ] POST /chat returns valid JSON response (not 405)
-- [ ] POST /embed accepts document data successfully
-- [ ] JWT authentication works correctly
-- [ ] User-specific data filtering via RLS
-- [ ] BioBERT embeddings generated and stored
-- [ ] End-to-end document upload → embedding → chat query workflow
+- [ ] JWT tokens with `"aud": "authenticated"` are accepted
+- [ ] POST `/chat` endpoint works with authentication
+- [ ] POST `/embed` endpoint works with authentication
+- [ ] Container logs show "✅ JWT validation successful"
+- [ ] Frontend chat interface connects to TxAgent successfully
+- [ ] Document embedding through TxAgent works
+- [ ] Agent status shows "ACTIVE" in Monitor page
 
-## Contact Information
-
-If you need to test specific scenarios or have questions about the expected behavior, the Node.js backend is running at:
-- **Health Check**: `https://medical-rag-vector-uploader-1.onrender.com/health`
-- **Test User**: `gregcbarker@gmail.com`
-- **Expected JWT Format**: Supabase JWT with `sub` claim containing user UUID
-
-The frontend is expecting the container to behave as a standard FastAPI service with proper CORS, authentication, and JSON responses.
+The fix is straightforward - just adding `audience="authenticated"` to the JWT decode call in the container's authentication code.

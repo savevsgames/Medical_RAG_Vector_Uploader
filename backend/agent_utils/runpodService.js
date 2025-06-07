@@ -44,7 +44,8 @@ class RunPodService {
         text_length: textToEmbed.length,
         text_preview: textToEmbed.substring(0, 100),
         has_jwt: !!userJWT,
-        has_metadata: !!metadata
+        has_metadata: !!metadata,
+        request_method: 'POST'
       });
 
       // Prepare request payload matching your FastAPI endpoint
@@ -62,6 +63,14 @@ class RunPodService {
         requestPayload.metadata.inline_text = documentText;
       }
 
+      errorLogger.debug('Sending POST request to TxAgent /embed', {
+        user_id: userId,
+        endpoint: `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
+        method: 'POST',
+        payload: requestPayload,
+        has_auth: !!userJWT
+      });
+
       const response = await axios.post(
         `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
         requestPayload,
@@ -78,7 +87,8 @@ class RunPodService {
         user_id: userId,
         document_ids: response.data.document_ids?.length || 0,
         chunk_count: response.data.chunk_count || 0,
-        status: response.data.status
+        status: response.data.status,
+        response_status: response.status
       });
 
       res.json({
@@ -132,7 +142,7 @@ class RunPodService {
         temperature: temperature
       };
 
-      errorLogger.debug('Sending POST request to TxAgent', {
+      errorLogger.debug('Sending POST request to TxAgent /chat', {
         user_id: userId,
         endpoint: `${process.env.RUNPOD_EMBEDDING_URL}${chatEndpoint}`,
         method: 'POST',
@@ -257,6 +267,13 @@ class RunPodService {
       if (userJWT) {
         headers['Authorization'] = userJWT;
       }
+
+      errorLogger.debug('Testing RunPod connection', {
+        url: process.env.RUNPOD_EMBEDDING_URL,
+        method: 'GET',
+        endpoint: '/health',
+        has_auth: !!userJWT
+      });
 
       const response = await axios.get(
         `${process.env.RUNPOD_EMBEDDING_URL}/health`,

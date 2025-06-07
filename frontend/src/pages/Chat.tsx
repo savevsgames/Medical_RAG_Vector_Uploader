@@ -83,8 +83,9 @@ export function Chat() {
       });
 
       try {
-        // Check agent status
+        // Check agent status using GET method (this is correct for status endpoint)
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/agent/status`, {
+          method: 'GET', // Explicitly specify GET method for status check
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
           },
@@ -222,8 +223,9 @@ export function Chat() {
         component: 'Chat'
       });
 
+      // CRITICAL: Ensure we're using POST method for chat requests
       const response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
-        method: 'POST',
+        method: 'POST', // Explicitly specify POST method
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
