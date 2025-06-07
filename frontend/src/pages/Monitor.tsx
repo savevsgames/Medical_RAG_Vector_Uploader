@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Activity, Clock, CheckCircle, XCircle, AlertCircle, Container, Cpu, RefreshCw, Play, Square, Zap, Terminal, Eye, EyeOff, Copy, ExternalLink } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -53,123 +53,103 @@ export function Monitor() {
   const [showLogs, setShowLogs] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  // Auto-refresh interval
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (autoRefresh) {
-      interval = setInterval(() => {
-        fetchAgentStatus();
-        if (agentStatus?.agent_active) {
-          performDetailedStatusCheck();
-        }
-      }, 10000); // Refresh every 10 seconds
+  const fetchAgentStatus = useCallback(async () => {
+    if (!session) {
+      logger.warn('No session available for agent status check', {
+        component: 'Monitor'
+      });
+      return;
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [autoRefresh, agentStatus?.agent_active]);
 
-  useEffect(() => {
-    const fetchAgentStatus = async () => {
-      if (!session) {
-        logger.warn('No session available for agent status check', {
-          component: 'Monitor'
-        });
-        return;
-      }
+    const userEmail = user?.email;
 
-      const userEmail = user?.email;
+    logger.debug('Fetching agent status', {
+      component: 'Monitor',
+      user: userEmail
+    });
 
-      logger.debug('Fetching agent status', {
-        component: 'Monitor',
-        user: userEmail
+    try {
+      let response;
+      let endpoint = '/api/agent/status';
+      let isLegacyFallback = false;
+
+      logApiCall(endpoint, 'GET', userEmail, 'initiated', {
+        component: 'Monitor'
       });
 
       try {
-        let response;
-        let endpoint = '/api/agent/status';
-        let isLegacyFallback = false;
+        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+      } catch (apiError) {
+        logger.warn('Primary API failed, trying legacy endpoint', {
+          component: 'Monitor',
+          user: userEmail,
+          error: apiError instanceof Error ? apiError.message : 'Unknown error',
+          fallbackEndpoint: '/agent/status'
+        });
 
+        endpoint = '/agent/status';
+        isLegacyFallback = true;
+        
         logApiCall(endpoint, 'GET', userEmail, 'initiated', {
+          isLegacyFallback: true,
           component: 'Monitor'
         });
 
-        try {
-          response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${session.access_token}`,
-            },
-          });
-        } catch (apiError) {
-          logger.warn('Primary API failed, trying legacy endpoint', {
-            component: 'Monitor',
-            user: userEmail,
-            error: apiError instanceof Error ? apiError.message : 'Unknown error',
-            fallbackEndpoint: '/agent/status'
-          });
-
-          endpoint = '/agent/status';
-          isLegacyFallback = true;
-          
-          logApiCall(endpoint, 'GET', userEmail, 'initiated', {
-            isLegacyFallback: true,
-            component: 'Monitor'
-          });
-
-          response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${session.access_token}`,
-            },
-          });
-        }
-
-        if (response.ok) {
-          const data = await response.json();
-          
-          logApiCall(endpoint, 'GET', userEmail, 'success', {
-            status: response.status,
-            agentActive: data.agent_active,
-            containerStatus: data.container_status,
-            isLegacyFallback,
-            component: 'Monitor'
-          });
-
-          setAgentStatus(data);
-          
-          // Extract TxAgent health if available
-          if (data.container_health && typeof data.container_health === 'object') {
-            setTxAgentHealth(data.container_health);
-          }
-          
-          setLastRefresh(new Date());
-        } else {
-          const errorData = await response.json().catch(() => ({}));
-          
-          logApiCall(endpoint, 'GET', userEmail, 'error', {
-            status: response.status,
-            statusText: response.statusText,
-            errorData,
-            isLegacyFallback,
-            component: 'Monitor'
-          });
-        }
-      } catch (error) {
-        logger.error('Failed to fetch agent status', {
-          component: 'Monitor',
-          user: userEmail,
-          error: error instanceof Error ? error.message : 'Unknown error'
+        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
         });
-      } finally {
-        setLoading(false);
       }
-    };
 
-    fetchAgentStatus();
+      if (response.ok) {
+        const data = await response.json();
+        
+        logApiCall(endpoint, 'GET', userEmail, 'success', {
+          status: response.status,
+          agentActive: data.agent_active,
+          containerStatus: data.container_status,
+          isLegacyFallback,
+          component: 'Monitor'
+        });
+
+        setAgentStatus(data);
+        
+        // Extract TxAgent health if available
+        if (data.container_health && typeof data.container_health === 'object') {
+          setTxAgentHealth(data.container_health);
+        }
+        
+        setLastRefresh(new Date());
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        
+        logApiCall(endpoint, 'GET', userEmail, 'error', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+          isLegacyFallback,
+          component: 'Monitor'
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to fetch agent status', {
+        component: 'Monitor',
+        user: userEmail,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    } finally {
+      setLoading(false);
+    }
   }, [session, user]);
 
-  const performDetailedStatusCheck = async () => {
+  const performDetailedStatusCheck = useCallback(async () => {
     if (!session || !agentStatus?.agent_active) return;
 
     const userEmail = user?.email;
@@ -310,7 +290,27 @@ export function Monitor() {
     } finally {
       setStatusTesting(false);
     }
-  };
+  }, [session, user, agentStatus]);
+
+  // Auto-refresh interval
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (autoRefresh) {
+      interval = setInterval(() => {
+        fetchAgentStatus();
+        if (agentStatus?.agent_active) {
+          performDetailedStatusCheck();
+        }
+      }, 10000); // Refresh every 10 seconds
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [autoRefresh, agentStatus?.agent_active, fetchAgentStatus, performDetailedStatusCheck]);
+
+  useEffect(() => {
+    fetchAgentStatus();
+  }, [fetchAgentStatus]);
 
   const handleStartAgent = async () => {
     if (!session) return;
