@@ -63,13 +63,13 @@ class AgentController {
     };
   }
 
-  // New API: Start TxAgent container
+  // New API: Activate TxAgent session (container is already running)
   async startAgent(req, res) {
     try {
       const userId = req.userId;
       const { RUNPOD_EMBEDDING_URL, RUNPOD_EMBEDDING_KEY } = process.env;
 
-      errorLogger.info('Starting TxAgent container', { user_id: userId });
+      errorLogger.info('Activating TxAgent session', { user_id: userId });
 
       // Check if user already has an active agent
       const existingStatus = await this.agentManager.getAgentStatus(userId);
@@ -82,41 +82,44 @@ class AgentController {
         return res.json({
           agent_id: existingStatus.agent_id,
           status: 'already_running',
-          message: 'TxAgent container is already active'
+          message: 'TxAgent session is already active'
         });
       }
 
-      // Start container via RunPod
-      const response = await axios.post(
-        `${RUNPOD_EMBEDDING_URL}/agent/start`,
-        { 
-          user_id: userId,
-          config: {
-            memory_limit: '2GB',
-            timeout: 3600, // 1 hour
-            capabilities: ['embedding', 'chat', 'document_analysis']
-          }
-        },
+      // Verify TxAgent container is healthy
+      const healthResponse = await axios.get(
+        `${RUNPOD_EMBEDDING_URL}/health`,
         { 
           headers: { 
             'Authorization': `Bearer ${RUNPOD_EMBEDDING_KEY}`,
             'Content-Type': 'application/json'
           },
-          timeout: 30000
+          timeout: 10000
         }
       );
 
+      if (healthResponse.data.status !== 'healthy') {
+        throw new Error(`TxAgent container unhealthy: ${healthResponse.data.status}`);
+      }
+
+      // Extract container ID from RunPod URL for tracking
+      const urlMatch = RUNPOD_EMBEDDING_URL.match(/https:\/\/([^-]+)/);
+      const containerId = urlMatch ? urlMatch[1] : 'unknown';
+
       // Create agent session in database
-      await this.agentManager.createAgentSession(userId, {
-        container_id: response.data.container_id,
-        endpoint_url: response.data.endpoint_url
+      const sessionData = await this.agentManager.createAgentSession(userId, {
+        container_id: containerId,
+        endpoint_url: RUNPOD_EMBEDDING_URL,
+        health_status: healthResponse.data
       });
 
       res.json({
-        agent_id: response.data.container_id,
-        endpoint_url: response.data.endpoint_url,
-        status: 'started',
-        message: 'TxAgent container initialized successfully'
+        agent_id: sessionData.id,
+        container_id: containerId,
+        endpoint_url: RUNPOD_EMBEDDING_URL,
+        status: 'activated',
+        message: 'TxAgent session activated successfully',
+        health: healthResponse.data
       });
 
     } catch (error) {
@@ -124,61 +127,50 @@ class AgentController {
       
       if (error.code === 'ECONNABORTED') {
         return res.status(504).json({ 
-          error: 'TxAgent startup timeout',
-          details: 'Container is taking longer than expected to start'
+          error: 'TxAgent health check timeout',
+          details: 'Container may be starting up or overloaded'
+        });
+      }
+      
+      if (error.response?.status === 404) {
+        return res.status(503).json({
+          error: 'TxAgent container not found',
+          details: 'Verify RUNPOD_EMBEDDING_URL is correct and container is running'
         });
       }
       
       res.status(500).json({ 
-        error: 'Failed to start TxAgent container',
+        error: 'Failed to activate TxAgent session',
         details: error.response?.data?.error || error.message
       });
     }
   }
 
-  // New API: Stop TxAgent container
+  // New API: Deactivate TxAgent session (container remains running)
   async stopAgent(req, res) {
     try {
       const userId = req.userId;
-      const { RUNPOD_EMBEDDING_URL, RUNPOD_EMBEDDING_KEY } = process.env;
 
-      if (!RUNPOD_EMBEDDING_URL || !RUNPOD_EMBEDDING_KEY) {
-        return res.status(503).json({ error: 'RunPod service not configured' });
-      }
-
-      errorLogger.info('Stopping TxAgent container', { user_id: userId });
-
-      // Stop container via RunPod
-      const response = await axios.post(
-        `${RUNPOD_EMBEDDING_URL}/agent/stop`,
-        { user_id: userId },
-        { 
-          headers: { 
-            'Authorization': `Bearer ${RUNPOD_EMBEDDING_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
-        }
-      );
+      errorLogger.info('Deactivating TxAgent session', { user_id: userId });
 
       // Update agent session in database
       await this.agentManager.terminateAgentSession(userId);
 
       res.json({
-        status: 'stopped',
-        message: 'TxAgent container terminated successfully'
+        status: 'deactivated',
+        message: 'TxAgent session deactivated successfully'
       });
 
     } catch (error) {
       errorLogger.agentError(req.userId, 'stop', error);
       res.status(500).json({ 
-        error: 'Failed to stop TxAgent container',
-        details: error.response?.data?.error || error.message
+        error: 'Failed to deactivate TxAgent session',
+        details: error.message
       });
     }
   }
 
-  // New API: Get agent status with RunPod health check
+  // New API: Get agent status with TxAgent health check
   async getAgentStatus(req, res) {
     try {
       const userId = req.userId;
@@ -189,20 +181,19 @@ class AgentController {
       if (!localStatus.agent_active) {
         return res.json({
           ...localStatus,
-          container_status: 'not_found'
+          container_status: 'not_active'
         });
       }
 
-      // Check RunPod container status if configured
+      // Check TxAgent container health if configured
       if (process.env.RUNPOD_EMBEDDING_URL && process.env.RUNPOD_EMBEDDING_KEY) {
         try {
           const response = await axios.get(
-            `${process.env.RUNPOD_EMBEDDING_URL}/agent/status`,
+            `${process.env.RUNPOD_EMBEDDING_URL}/health`,
             { 
               headers: { 
                 'Authorization': `Bearer ${process.env.RUNPOD_EMBEDDING_KEY}`
               },
-              params: { user_id: userId },
               timeout: 10000
             }
           );
@@ -210,24 +201,30 @@ class AgentController {
           res.json({
             ...localStatus,
             container_status: response.data.status,
-            container_health: response.data.health
+            container_health: {
+              status: response.data.status,
+              model: response.data.model,
+              device: response.data.device,
+              version: response.data.version
+            }
           });
 
         } catch (runpodError) {
-          errorLogger.warn('RunPod status check failed', {
+          errorLogger.warn('TxAgent health check failed', {
             user_id: userId,
             error: runpodError.message
           });
           
           res.json({
             ...localStatus,
-            container_status: 'unknown'
+            container_status: 'unreachable',
+            container_health: 'health_check_failed'
           });
         }
       } else {
         res.json({
           ...localStatus,
-          container_status: 'local_only'
+          container_status: 'not_configured'
         });
       }
 

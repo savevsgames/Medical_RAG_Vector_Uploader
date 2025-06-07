@@ -58,13 +58,13 @@ class RunPodService {
 
       errorLogger.success('RunPod embedding completed', {
         user_id: userId,
-        dimensions: response.data.dimensions,
+        dimensions: response.data.dimensions || response.data.embedding?.length,
         processing_time: response.data.processing_time
       });
 
       res.json({
-        embedding: response.data.embedding,
-        dimensions: response.data.dimensions,
+        embedding: response.data.embedding || response.data,
+        dimensions: response.data.dimensions || response.data.embedding?.length,
         processing_time: response.data.processing_time,
         user_id: userId
       });
@@ -113,15 +113,15 @@ class RunPodService {
 
       errorLogger.success('RunPod chat completed', {
         user_id: userId,
-        agent_id: response.data.agent_id,
+        agent_id: response.data.agent_id || 'txagent',
         processing_time: response.data.processing_time,
         sources_count: response.data.sources?.length || 0
       });
 
       res.json({
-        response: response.data.response,
+        response: response.data.response || response.data.answer || response.data,
         sources: response.data.sources || [],
-        agent_id: response.data.agent_id,
+        agent_id: response.data.agent_id || 'txagent',
         processing_time: response.data.processing_time,
         timestamp: new Date().toISOString()
       });
