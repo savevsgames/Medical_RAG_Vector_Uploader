@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import toast from 'react-hot-toast';
+import { logger, logUserAction, logSupabaseOperation } from '../utils/logger';
 
 export function Login() {
   const [email, setEmail] = useState('');
@@ -11,23 +12,79 @@ export function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    logger.info(`${isSignUp ? 'Sign up' : 'Sign in'} attempt`, {
+      component: 'Login',
+      email,
+      isSignUp
+    });
+
     try {
       if (isSignUp) {
+        logUserAction('Sign Up Initiated', email, {
+          component: 'Login'
+        });
+
         const { error } = await supabase.auth.signUp({
           email,
           password,
         });
-        if (error) throw error;
+        
+        if (error) {
+          logSupabaseOperation('signUp', email, 'error', {
+            error: error.message,
+            code: error.status,
+            component: 'Login'
+          });
+          throw error;
+        }
+
+        logSupabaseOperation('signUp', email, 'success', {
+          component: 'Login'
+        });
+
         toast.success('Account created! Please check your email to verify your account.');
       } else {
+        logUserAction('Sign In Initiated', email, {
+          component: 'Login'
+        });
+
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (error) throw error;
-        navigate('/dashboard');
+        
+        if (error) {
+          logSupabaseOperation('signIn', email, 'error', {
+            error: error.message,
+            code: error.status,
+            component: 'Login'
+          });
+          throw error;
+        }
+
+        logSupabaseOperation('signIn', email, 'success', {
+          component: 'Login'
+        });
+
+        logUserAction('Sign In Success - Redirecting', email, {
+          component: 'Login',
+          redirectTo: '/'
+        });
+
+        // Navigate to root path, which will redirect to /chat for authenticated users
+        navigate('/');
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Authentication failed';
+      
+      logger.error(`${isSignUp ? 'Sign up' : 'Sign in'} failed`, {
+        component: 'Login',
+        email,
+        error: errorMessage,
+        isSignUp
+      });
+
       toast.error(isSignUp ? 'Failed to sign up' : 'Failed to sign in');
       console.error('Auth error:', error);
     }
