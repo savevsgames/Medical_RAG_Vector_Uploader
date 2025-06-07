@@ -399,6 +399,62 @@ try {
   process.exit(1);
 }
 
+// OpenAI Chat endpoint - dedicated endpoint for OpenAI RAG
+app.post('/api/openai-chat', verifyToken, async (req, res) => {
+  try {
+    const { message } = req.body;
+    const userId = req.userId;
+    
+    if (!message || typeof message !== 'string') {
+      errorLogger.warn('Invalid OpenAI chat request - missing message', { user_id: userId });
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      errorLogger.warn('OpenAI chat service not configured', { user_id: userId });
+      return res.status(503).json({ error: 'OpenAI chat service not configured' });
+    }
+
+    errorLogger.info('Processing OpenAI chat request', {
+      user_id: userId,
+      message_length: message.length,
+      message_preview: message.substring(0, 100)
+    });
+
+    // Use ChatService for OpenAI RAG processing
+    const result = await chatService.processQuery(userId, message);
+
+    errorLogger.success('OpenAI chat completed', {
+      user_id: userId,
+      response_length: result.response.length,
+      sources_count: result.sources.length
+    });
+
+    res.json({
+      response: result.response,
+      sources: result.sources,
+      agent_id: 'openai',
+      processing_time: null,
+      timestamp: new Date().toISOString(),
+      status: 'success'
+    });
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    errorLogger.error('OpenAI chat request failed', error, {
+      user_id: req.userId,
+      error_message: errorMessage,
+      error_stack: error.stack
+    });
+    
+    res.status(500).json({ 
+      error: 'OpenAI chat processing failed',
+      details: errorMessage
+    });
+  }
+});
+
 // Enhanced document upload endpoint with comprehensive logging
 app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
   const startTime = Date.now();
@@ -688,7 +744,8 @@ app.listen(port, () => {
   errorLogger.info('📚 Available endpoints:');
   errorLogger.info('  - GET  /health (Health check)');
   errorLogger.info('  - POST /upload (Document upload)');
-  errorLogger.info('  - POST /api/chat (Chat with TxAgent/OpenAI)');
+  errorLogger.info('  - POST /api/chat (Chat with TxAgent)');
+  errorLogger.info('  - POST /api/openai-chat (Chat with OpenAI RAG)');
   errorLogger.info('  - POST /chat (Legacy chat - deprecated)');
   errorLogger.info('  - POST /api/agent/start (Start TxAgent)');
   errorLogger.info('  - POST /api/agent/stop (Stop TxAgent)');

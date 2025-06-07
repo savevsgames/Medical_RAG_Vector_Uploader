@@ -95,7 +95,8 @@ export class EmbeddingService {
         {
           model: 'text-embedding-3-small',
           input: text,
-          encoding_format: 'float'
+          encoding_format: 'float',
+          dimensions: 768 // Force 768 dimensions to match Supabase documents table
         },
         {
           headers: {

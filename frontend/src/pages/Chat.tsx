@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Send, Bot, User, Loader2, FileText } from 'lucide-react';
+import { Send, Bot, User, Loader2, FileText, Cpu, Brain, ChevronDown } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { logger, logUserAction, logApiCall, logAgentOperation } from '../utils/logger';
@@ -16,18 +16,78 @@ interface Message {
   agent_id?: string;
 }
 
+type AgentType = 'txagent' | 'openai';
+
+interface AgentConfig {
+  id: AgentType;
+  name: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  endpoint: string;
+  color: string;
+  bgColor: string;
+}
+
+const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
+  txagent: {
+    id: 'txagent',
+    name: 'TxAgent',
+    description: 'BioBERT-powered medical AI running on RunPod containers',
+    icon: Cpu,
+    endpoint: '/api/chat',
+    color: 'text-blue-600',
+    bgColor: 'bg-blue-100'
+  },
+  openai: {
+    id: 'openai',
+    name: 'OpenAI',
+    description: 'GPT-powered assistant with medical document RAG',
+    icon: Brain,
+    endpoint: '/api/openai-chat',
+    color: 'text-green-600',
+    bgColor: 'bg-green-100'
+  }
+};
+
 export function Chat() {
   const { session, user } = useAuth();
+  const [selectedAgent, setSelectedAgent] = useState<AgentType>('txagent');
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       type: 'assistant',
-      content: 'Hello! I\'m your TxAgent-powered medical research assistant. I can help you analyze your uploaded documents and answer questions about medical topics. Upload some documents first, then ask me anything!',
+      content: 'Hello! I\'m your AI-powered medical research assistant. You can choose between TxAgent (specialized BioBERT model) or OpenAI (GPT with RAG) using the dropdown above. Upload some documents first, then ask me anything!',
       timestamp: new Date()
     }
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  const currentAgent = AGENT_CONFIGS[selectedAgent];
+
+  const handleAgentChange = (newAgent: AgentType) => {
+    const userEmail = user?.email;
+    
+    logUserAction('Agent Selection Changed', userEmail, {
+      previousAgent: selectedAgent,
+      newAgent: newAgent,
+      component: 'Chat'
+    });
+
+    setSelectedAgent(newAgent);
+    
+    // Add a system message about the agent change
+    const systemMessage: Message = {
+      id: Date.now().toString(),
+      type: 'assistant',
+      content: `Switched to ${AGENT_CONFIGS[newAgent].name}. ${AGENT_CONFIGS[newAgent].description}`,
+      timestamp: new Date(),
+      agent_id: newAgent
+    };
+    
+    setMessages(prev => [...prev, systemMessage]);
+    toast.success(`Switched to ${AGENT_CONFIGS[newAgent].name}`);
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +99,7 @@ export function Chat() {
     logUserAction('Chat Message Sent', userEmail, {
       messageLength: messageContent.length,
       messagePreview: messageContent.substring(0, 100),
+      selectedAgent: selectedAgent,
       component: 'Chat'
     });
 
@@ -54,56 +115,26 @@ export function Chat() {
     setIsLoading(true);
 
     try {
-      // Try RunPod TxAgent API first
-      let response;
-      let endpoint = '/api/chat';
-      let isLegacyFallback = false;
-
+      const endpoint = currentAgent.endpoint;
+      
       logApiCall(endpoint, 'POST', userEmail, 'initiated', {
         messageLength: messageContent.length,
         contextMessages: messages.slice(-5).length,
+        selectedAgent: selectedAgent,
         component: 'Chat'
       });
 
-      try {
-        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ 
-            message: messageContent,
-            context: messages.slice(-5) // Send last 5 messages for context
-          }),
-        });
-      } catch (runpodError) {
-        logger.warn('Primary API failed, falling back to legacy chat', {
-          component: 'Chat',
-          user: userEmail,
-          error: runpodError instanceof Error ? runpodError.message : 'Unknown error',
-          fallbackEndpoint: '/chat'
-        });
-
-        // Fallback to legacy chat endpoint
-        endpoint = '/chat';
-        isLegacyFallback = true;
-        
-        logApiCall(endpoint, 'POST', userEmail, 'initiated', {
-          messageLength: messageContent.length,
-          isLegacyFallback: true,
-          component: 'Chat'
-        });
-
-        response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ message: messageContent }),
-        });
-      }
+      const response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          message: messageContent,
+          context: messages.slice(-5) // Send last 5 messages for context
+        }),
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -112,7 +143,7 @@ export function Chat() {
           status: response.status,
           statusText: response.statusText,
           errorData,
-          isLegacyFallback,
+          selectedAgent: selectedAgent,
           component: 'Chat'
         });
 
@@ -126,7 +157,7 @@ export function Chat() {
         agentId: data.agent_id,
         sourcesCount: data.sources?.length || 0,
         responseLength: data.response?.length || 0,
-        isLegacyFallback,
+        selectedAgent: selectedAgent,
         component: 'Chat'
       });
 
@@ -141,21 +172,22 @@ export function Chat() {
 
       setMessages(prev => [...prev, assistantMessage]);
 
-      // Show success toast if using TxAgent
-      if (data.agent_id && data.agent_id !== 'legacy') {
-        logAgentOperation('Response Received', userEmail, {
+      // Show success toast based on agent used
+      if (data.agent_id === 'txagent') {
+        logAgentOperation('TxAgent Response Received', userEmail, {
           agentId: data.agent_id,
           sourcesCount: data.sources?.length || 0,
           processingTime: data.processing_time,
           component: 'Chat'
         });
         toast.success('Response from TxAgent container');
-      } else if (isLegacyFallback) {
-        logger.info('Legacy chat response received', {
-          component: 'Chat',
-          user: userEmail,
-          responseLength: data.response?.length || 0
+      } else if (data.agent_id === 'openai') {
+        logAgentOperation('OpenAI Response Received', userEmail, {
+          agentId: data.agent_id,
+          sourcesCount: data.sources?.length || 0,
+          component: 'Chat'
         });
+        toast.success('Response from OpenAI with RAG');
       }
 
     } catch (error) {
@@ -165,7 +197,8 @@ export function Chat() {
         component: 'Chat',
         user: userEmail,
         error: errorMessage,
-        messageLength: messageContent.length
+        messageLength: messageContent.length,
+        selectedAgent: selectedAgent
       });
 
       toast.error(errorMessage);
@@ -174,7 +207,7 @@ export function Chat() {
       const errorMessage_obj: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: 'I apologize, but I encountered an error processing your request. Please make sure the TxAgent container is running and try again.',
+        content: `I apologize, but I encountered an error processing your request with ${currentAgent.name}. Please try again or switch to a different agent.`,
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMessage_obj]);
@@ -185,14 +218,40 @@ export function Chat() {
 
   return (
     <div className="h-[calc(100vh-200px)] flex flex-col bg-white rounded-lg shadow">
-      {/* Chat Header */}
-      <div className="flex items-center space-x-3 p-4 border-b border-gray-200">
-        <div className="flex items-center justify-center w-10 h-10 bg-blue-100 rounded-full">
-          <Bot className="w-6 h-6 text-blue-600" />
+      {/* Chat Header with Agent Selector */}
+      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+        <div className="flex items-center space-x-3">
+          <div className={`flex items-center justify-center w-10 h-10 ${currentAgent.bgColor} rounded-full`}>
+            <currentAgent.icon className={`w-6 h-6 ${currentAgent.color}`} />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Medical AI Assistant</h2>
+            <p className="text-sm text-gray-500">{currentAgent.description}</p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">TxAgent Medical Assistant</h2>
-          <p className="text-sm text-gray-500">Powered by RunPod containerized agents</p>
+
+        {/* Agent Selector Dropdown */}
+        <div className="relative">
+          <div className="flex items-center space-x-2">
+            <label htmlFor="agent-select" className="text-sm font-medium text-gray-700">
+              AI Agent:
+            </label>
+            <div className="relative">
+              <select
+                id="agent-select"
+                value={selectedAgent}
+                onChange={(e) => handleAgentChange(e.target.value as AgentType)}
+                className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-8 text-sm font-medium text-gray-900 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+              >
+                {Object.values(AGENT_CONFIGS).map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -208,10 +267,14 @@ export function Chat() {
             <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
               message.type === 'user' 
                 ? 'bg-gray-100' 
+                : message.agent_id === 'openai'
+                ? 'bg-green-100'
                 : 'bg-blue-100'
             }`}>
               {message.type === 'user' ? (
                 <User className="w-4 h-4 text-gray-600" />
+              ) : message.agent_id === 'openai' ? (
+                <Brain className="w-4 h-4 text-green-600" />
               ) : (
                 <Bot className="w-4 h-4 text-blue-600" />
               )}
@@ -233,7 +296,10 @@ export function Chat() {
                   </p>
                   {message.agent_id && (
                     <p className="text-xs font-mono">
-                      TxAgent: {message.agent_id.substring(0, 8)}...
+                      {message.agent_id === 'txagent' ? 'TxAgent' : 'OpenAI'}
+                      {message.agent_id === 'txagent' && message.agent_id.length > 8 && 
+                        `: ${message.agent_id.substring(0, 8)}...`
+                      }
                     </p>
                   )}
                 </div>
@@ -258,13 +324,15 @@ export function Chat() {
         
         {isLoading && (
           <div className="flex items-start space-x-3">
-            <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full">
-              <Bot className="w-4 h-4 text-blue-600" />
+            <div className={`flex items-center justify-center w-8 h-8 ${currentAgent.bgColor} rounded-full`}>
+              <currentAgent.icon className={`w-4 h-4 ${currentAgent.color}`} />
             </div>
             <div className="bg-gray-100 px-4 py-2 rounded-lg">
               <div className="flex items-center space-x-2">
                 <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
-                <span className="text-sm text-gray-500">TxAgent is analyzing your documents...</span>
+                <span className="text-sm text-gray-500">
+                  {currentAgent.name} is analyzing your documents...
+                </span>
               </div>
             </div>
           </div>
@@ -278,7 +346,7 @@ export function Chat() {
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Ask your TxAgent about your medical documents..."
+            placeholder={`Ask ${currentAgent.name} about your medical documents...`}
             className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             disabled={isLoading}
           />
@@ -290,9 +358,17 @@ export function Chat() {
             <Send className="w-5 h-5" />
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          💡 Try asking: "What are the key findings in my documents?" or "Summarize the main points"
-        </p>
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-xs text-gray-500">
+            💡 Try asking: "What are the key findings in my documents?" or "Summarize the main points"
+          </p>
+          <div className="flex items-center space-x-1 text-xs text-gray-500">
+            <span>Using:</span>
+            <span className={`font-medium ${currentAgent.color}`}>
+              {currentAgent.name}
+            </span>
+          </div>
+        </div>
       </form>
     </div>
   );
