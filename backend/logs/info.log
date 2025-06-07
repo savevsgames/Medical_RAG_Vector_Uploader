@@ -10,3 +10,5 @@
 [2025-06-07T05:28:39.857Z] [INFO] === END DIAGNOSTIC === 
 [2025-06-07T05:28:39.862Z] [INFO] SUCCESS: DocumentProcessor initialized 
 [2025-06-07T05:28:39.863Z] [INFO] SUCCESS: EmbeddingService initialized 
+[2025-06-07T19:01:26.256Z] [INFO] 🚀 Medical RAG Server starting up... 
+[2025-06-07T19:01:26.257Z] [INFO] Environment check {"node_version":"v20.19.1","port":8000,"working_directory":"/home/project/backend"}
