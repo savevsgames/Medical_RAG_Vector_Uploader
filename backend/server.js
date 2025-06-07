@@ -36,6 +36,46 @@ errorLogger.info('Environment check', {
   working_directory: __dirname
 });
 
+// Environment variable validation
+const requiredEnvVars = [
+  'SUPABASE_URL',
+  'SUPABASE_KEY', 
+  'SUPABASE_JWT_SECRET'
+];
+
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingEnvVars.length > 0) {
+  errorLogger.error('Missing required environment variables', null, {
+    missing_variables: missingEnvVars,
+    available_variables: Object.keys(process.env).filter(key => key.startsWith('SUPABASE')),
+    env_file_exists: fs.existsSync(path.join(__dirname, '.env'))
+  });
+  
+  console.error('\n❌ CRITICAL ERROR: Missing required environment variables:');
+  missingEnvVars.forEach(varName => {
+    console.error(`   - ${varName}`);
+  });
+  console.error('\n📝 Please update your backend/.env file with the correct Supabase credentials.');
+  console.error('   You can find these in your Supabase project dashboard under Settings > API');
+  console.error('\n🔧 Required format:');
+  console.error('   SUPABASE_URL=https://your-project.supabase.co');
+  console.error('   SUPABASE_KEY=your_service_role_key_here');
+  console.error('   SUPABASE_JWT_SECRET=your_jwt_secret_here\n');
+  
+  process.exit(1);
+}
+
+// Log environment variable status
+errorLogger.info('Environment variables validated', {
+  supabase_url_set: !!process.env.SUPABASE_URL,
+  supabase_key_set: !!process.env.SUPABASE_KEY,
+  jwt_secret_set: !!process.env.SUPABASE_JWT_SECRET,
+  runpod_url_set: !!process.env.RUNPOD_EMBEDDING_URL,
+  openai_key_set: !!process.env.OPENAI_API_KEY,
+  supabase_url_preview: process.env.SUPABASE_URL ? process.env.SUPABASE_URL.substring(0, 30) + '...' : 'not set'
+});
+
 // Diagnostic checks for file existence
 errorLogger.info('=== DIAGNOSTIC CHECKS ===');
 const libDir = path.join(__dirname, 'lib');
@@ -86,10 +126,6 @@ try {
 
 // Initialize Supabase client with connection verification
 try {
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
-    throw new Error('Missing Supabase configuration');
-  }
-
   supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_KEY
@@ -244,9 +280,17 @@ const upload = multer({
   }
 });
 
-// JWT verification middleware with enhanced logging
+// Enhanced JWT verification middleware with detailed logging
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
+  
+  errorLogger.debug('JWT verification attempt', {
+    has_auth_header: !!authHeader,
+    auth_header_format: authHeader ? authHeader.substring(0, 20) + '...' : 'none',
+    ip: req.ip,
+    path: req.path,
+    method: req.method
+  });
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     errorLogger.warn('Authentication failed - no token provided', {
@@ -261,6 +305,13 @@ const verifyToken = (req, res, next) => {
   
   const token = authHeader.substring(7);
   
+  errorLogger.debug('Attempting JWT decode', {
+    token_length: token.length,
+    token_preview: token.substring(0, 20) + '...',
+    jwt_secret_available: !!process.env.SUPABASE_JWT_SECRET,
+    jwt_secret_length: process.env.SUPABASE_JWT_SECRET?.length || 0
+  });
+  
   try {
     const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
     req.userId = decoded.sub;
@@ -270,7 +321,9 @@ const verifyToken = (req, res, next) => {
       path: req.path,
       method: req.method,
       token_exp: decoded.exp,
-      token_iat: decoded.iat
+      token_iat: decoded.iat,
+      token_role: decoded.role,
+      token_email: decoded.email
     });
     
     next();
@@ -280,7 +333,8 @@ const verifyToken = (req, res, next) => {
       path: req.path,
       error: error.message,
       error_name: error.name,
-      token_preview: token.substring(0, 20) + '...'
+      token_preview: token.substring(0, 20) + '...',
+      jwt_secret_preview: process.env.SUPABASE_JWT_SECRET?.substring(0, 10) + '...'
     });
     return res.status(401).json({ error: 'Invalid token' });
   }
