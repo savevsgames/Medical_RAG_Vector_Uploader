@@ -14,3 +14,9 @@
 [2025-06-07T19:01:26.257Z] [INFO] Environment check {"node_version":"v20.19.1","port":8000,"working_directory":"/home/project/backend"}
 [2025-06-07T20:23:40.817Z] [INFO] 🚀 Medical RAG Server starting up... 
 [2025-06-07T20:23:40.817Z] [INFO] Environment check {"node_version":"v20.19.1","port":8000,"working_directory":"/home/project/backend"}
+[2025-06-07T23:02:42.122Z] [INFO] 🚀 Medical RAG Server starting up... 
+[2025-06-07T23:02:42.122Z] [INFO] Environment check {
+  "node_version": "v20.19.1",
+  "port": 8000,
+  "working_directory": "/home/project/backend"
+}
