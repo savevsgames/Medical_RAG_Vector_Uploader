@@ -10,6 +10,9 @@ import { Documents } from './pages/Documents';
 import { Monitor } from './pages/Monitor';
 
 function App() {
+  // Add this line for debugging
+  console.log('Frontend VITE_API_URL:', import.meta.env.VITE_API_URL);
+
   return (
     <AuthProvider>
       <BrowserRouter>
