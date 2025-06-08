@@ -29,6 +29,8 @@ function App() {
             <Route path="documents" element={<Documents />} />
             <Route path="monitor" element={<Monitor />} />
           </Route>
+          {/* Catch-all route for any unmatched paths */}
+          <Route path="*" element={<Navigate to="/\" replace />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
