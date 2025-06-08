@@ -41,7 +41,7 @@ export class DocumentSearchService {
         return await this.fallbackDocumentSearch(userId);
       }
 
-      loerrorLoggerger.success('Vector search completed', {
+      errorLogger.success('Vector search completed', {
         user_id: userId,
         results_count: data?.length || 0,
         results_preview: data?.slice(0, 3).map(d => ({
