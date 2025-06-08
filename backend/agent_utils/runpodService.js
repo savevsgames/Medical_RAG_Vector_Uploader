@@ -1,6 +1,3 @@
-// RunPod Service - Handles all RunPod API interactions
-// Manages embedding and chat requests to TxAgent containers
-
 import express from 'express';
 import axios from 'axios';
 import { errorLogger } from './errorLogger.js';
@@ -183,40 +180,49 @@ class RunPodService {
         request_method: 'POST'
       });
 
-      // Based on your TxAgent FastAPI code, use the correct endpoint and payload format
-      const chatEndpoint = '/chat';
+      // CRITICAL FIX: Ensure we have a proper request body that axios won't convert to GET
       const requestPayload = {
         query: message,
         history: history || context || [],
         top_k: top_k,
-        temperature: temperature
+        temperature: temperature,
+        // CRITICAL: Add a timestamp to ensure body is never empty/null
+        timestamp: new Date().toISOString(),
+        user_id: userId
       };
 
-      // CRITICAL DEBUG: Log exact axios configuration before sending
+      // CRITICAL FIX: Use explicit axios configuration to force POST method
       const axiosConfig = {
-        method: 'POST',
-        url: `${process.env.RUNPOD_EMBEDDING_URL}${chatEndpoint}`,
-        data: requestPayload,
+        method: 'POST', // Explicitly set method
+        url: `${process.env.RUNPOD_EMBEDDING_URL}/chat`, // Clean URL without double slashes
+        data: requestPayload, // Use 'data' property for POST body
         headers: { 
-          'Authorization': userJWT, // Send user's Supabase JWT
-          'Content-Type': 'application/json'
+          'Authorization': userJWT,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         },
-        timeout: this.chatTimeout
+        timeout: this.chatTimeout,
+        // CRITICAL: Force axios to use POST even with redirects
+        maxRedirects: 0,
+        validateStatus: function (status) {
+          return status >= 200 && status < 500; // Accept 4xx as valid to handle our own errors
+        }
       };
 
       errorLogger.debug('🚀 AXIOS CONFIG - About to send request', {
         user_id: userId,
         method: axiosConfig.method,
         url: axiosConfig.url,
-        endpoint: chatEndpoint,
         has_auth: !!userJWT,
         payload_size: JSON.stringify(requestPayload).length,
-        axios_method: 'POST',
+        axios_method: axiosConfig.method,
         axios_url: axiosConfig.url,
         axios_timeout: axiosConfig.timeout,
+        request_body_keys: Object.keys(requestPayload),
         component: 'RunPodService.handleChat'
       });
 
+      // CRITICAL FIX: Use axios() with explicit config instead of axios.post()
       const response = await axios(axiosConfig);
 
       // CRITICAL DEBUG: Log what axios actually sent and received
@@ -234,7 +240,6 @@ class RunPodService {
 
       errorLogger.success('RunPod chat completed', {
         user_id: userId,
-        endpoint: chatEndpoint,
         response_length: response.data.response?.length || response.data.answer?.length || 0,
         sources_count: response.data.sources?.length || 0,
         status: response.data.status,
@@ -253,7 +258,7 @@ class RunPodService {
         processing_time: response.data.processing_time,
         timestamp: new Date().toISOString(),
         status: response.data.status || 'success',
-        endpoint_used: chatEndpoint
+        endpoint_used: '/chat'
       });
 
     } catch (error) {
@@ -348,7 +353,8 @@ class RunPodService {
       debug_info: {
         runpod_url: process.env.RUNPOD_EMBEDDING_URL,
         error_message: error.message,
-        method: 'POST'
+        method: 'POST',
+        sent_method: error.config?.method?.toUpperCase() || 'UNKNOWN'
       }
     });
   }
