@@ -1,20 +1,24 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
+import { Button } from './Button';
 
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   closeOnOverlayClick?: boolean;
+  showCloseButton?: boolean;
+  footer?: React.ReactNode;
 }
 
 const sizes = {
   sm: 'max-w-md',
   md: 'max-w-2xl',
   lg: 'max-w-4xl',
-  xl: 'max-w-6xl'
+  xl: 'max-w-6xl',
+  full: 'max-w-full mx-4'
 };
 
 export function Modal({
@@ -23,7 +27,9 @@ export function Modal({
   title,
   children,
   size = 'md',
-  closeOnOverlayClick = true
+  closeOnOverlayClick = true,
+  showCloseButton = true,
+  footer
 }: ModalProps) {
   // Handle escape key
   useEffect(() => {
@@ -59,22 +65,34 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        {title && (
+        {(title || showCloseButton) && (
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-500" />
-            </button>
+            {title && (
+              <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
+            )}
+            {showCloseButton && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClose}
+                icon={<X className="w-5 h-5" />}
+                className="p-2"
+              />
+            )}
           </div>
         )}
 
         {/* Content */}
-        <div className="max-h-[calc(90vh-80px)] overflow-y-auto">
+        <div className="max-h-[calc(90vh-140px)] overflow-y-auto">
           {children}
         </div>
+
+        {/* Footer */}
+        {footer && (
+          <div className="p-6 border-t border-gray-200 bg-gray-50">
+            {footer}
+          </div>
+        )}
       </div>
 
       {/* Overlay */}

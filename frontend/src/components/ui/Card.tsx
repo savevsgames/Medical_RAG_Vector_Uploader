@@ -5,6 +5,8 @@ interface CardProps {
   className?: string;
   padding?: 'none' | 'sm' | 'md' | 'lg';
   hover?: boolean;
+  border?: boolean;
+  shadow?: 'none' | 'sm' | 'md' | 'lg';
 }
 
 const paddings = {
@@ -14,17 +16,28 @@ const paddings = {
   lg: 'p-8'
 };
 
+const shadows = {
+  none: '',
+  sm: 'shadow-sm',
+  md: 'shadow-md',
+  lg: 'shadow-lg'
+};
+
 export function Card({ 
   children, 
   className = '', 
   padding = 'md',
-  hover = false 
+  hover = false,
+  border = true,
+  shadow = 'sm'
 }: CardProps) {
-  const baseClasses = 'bg-white rounded-lg border border-gray-200 shadow-sm';
+  const baseClasses = 'bg-white rounded-lg';
+  const borderClasses = border ? 'border border-gray-200' : '';
+  const shadowClasses = shadows[shadow];
   const hoverClasses = hover ? 'hover:border-gray-300 hover:shadow-md transition-all duration-200' : '';
   const paddingClasses = paddings[padding];
   
-  const classes = `${baseClasses} ${hoverClasses} ${paddingClasses} ${className}`;
+  const classes = `${baseClasses} ${borderClasses} ${shadowClasses} ${hoverClasses} ${paddingClasses} ${className}`;
 
   return (
     <div className={classes}>
