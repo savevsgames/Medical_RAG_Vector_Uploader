@@ -1,35 +1,12 @@
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { errorLogger } from '../agent_utils/shared/logger.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Load .env file if it exists
+// Load environment variables from .env file if it exists
 try {
-  dotenv.config({ path: join(__dirname, '../.env') });
-  console.log('✅ Loaded .env file');
+  dotenv.config();
+  errorLogger.info('Environment variables loaded from .env file');
 } catch (error) {
-  console.log('⚠️  No .env file found, using system environment variables');
-}
-
-// Helper function to get environment variable with fallbacks
-function getEnvVar(primary, fallbacks = [], required = false) {
-  let value = process.env[primary];
-  
-  if (!value) {
-    for (const fallback of fallbacks) {
-      value = process.env[fallback];
-      if (value) break;
-    }
-  }
-  
-  if (required && !value) {
-    const allKeys = [primary, ...fallbacks];
-    throw new Error(`Required environment variable not found. Tried: ${allKeys.join(', ')}`);
-  }
-  
-  return value;
+  errorLogger.warn('No .env file found, using system environment variables');
 }
 
 export const config = {
@@ -37,65 +14,74 @@ export const config = {
   port: parseInt(process.env.PORT || '8000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   isDevelopment: process.env.NODE_ENV !== 'production',
-  
+
   // Supabase configuration
   supabase: {
-    url: getEnvVar('SUPABASE_URL'),
-    serviceKey: getEnvVar('SUPABASE_KEY', ['SUPABASE_SERVICE_ROLE_KEY']),
-    jwtSecret: getEnvVar('SUPABASE_JWT_SECRET', ['JWT_SECRET']),
-    anonKey: getEnvVar('SUPABASE_ANON_KEY')
+    url: process.env.SUPABASE_URL,
+    serviceKey: process.env.SUPABASE_KEY, // Service role key for backend operations
+    jwtSecret: process.env.SUPABASE_JWT_SECRET
   },
-  
-  // RunPod configuration
-  runpod: {
-    url: getEnvVar('RUNPOD_EMBEDDING_URL'),
-    apiKey: getEnvVar('RUNPOD_EMBEDDING_KEY', ['RUNPOD_API_KEY'])
-  },
-  
+
   // OpenAI configuration
   openai: {
-    apiKey: getEnvVar('OPENAI_API_KEY')
+    apiKey: process.env.OPENAI_API_KEY
   },
-  
-  // Logging configuration
-  logging: {
-    debug: process.env.BACKEND_DEBUG_LOGGING === 'true' || process.env.NODE_ENV === 'development'
+
+  // RunPod configuration
+  runpod: {
+    url: process.env.RUNPOD_EMBEDDING_URL,
+    apiKey: process.env.RUNPOD_EMBEDDING_KEY
+  },
+
+  // Debug configuration
+  debug: {
+    logging: process.env.BACKEND_DEBUG_LOGGING === 'true'
   }
 };
 
-// Validate critical configuration on startup
+// Validation function for critical configuration
 export function validateConfig() {
   const errors = [];
-  
+
+  // Check critical environment variables
   if (!config.supabase.url) {
     errors.push('SUPABASE_URL is required');
   }
-  
+
   if (!config.supabase.serviceKey) {
     errors.push('SUPABASE_KEY (service role key) is required');
   }
-  
-  if (errors.length > 0) {
-    console.error('❌ Configuration validation failed:');
-    errors.forEach(error => console.error(`   - ${error}`));
-    console.error('\n📋 Available environment variables:');
-    Object.keys(process.env)
-      .filter(key => key.includes('SUPABASE') || key.includes('DATABASE') || key.includes('RUNPOD') || key.includes('OPENAI'))
-      .forEach(key => console.error(`   - ${key}: ${process.env[key] ? '✅ Set' : '❌ Not set'}`));
-    
-    throw new Error(`Configuration validation failed: ${errors.join(', ')}`);
-  }
-  
-  console.log('✅ Configuration validation passed');
-}
 
-// Log configuration status (without sensitive values)
-console.log('🔧 Environment Configuration:');
-console.log(`   - Node Environment: ${config.nodeEnv}`);
-console.log(`   - Port: ${config.port}`);
-console.log(`   - Supabase URL: ${config.supabase.url ? '✅ Set' : '❌ Missing'}`);
-console.log(`   - Supabase Service Key: ${config.supabase.serviceKey ? '✅ Set' : '❌ Missing'}`);
-console.log(`   - Supabase JWT Secret: ${config.supabase.jwtSecret ? '✅ Set' : '❌ Missing'}`);
-console.log(`   - RunPod URL: ${config.runpod.url ? '✅ Set' : '❌ Missing'}`);
-console.log(`   - OpenAI API Key: ${config.openai.apiKey ? '✅ Set' : '❌ Missing'}`);
-console.log(`   - Debug Logging: ${config.logging.debug ? '✅ Enabled' : '❌ Disabled'}`);
+  if (!config.supabase.jwtSecret) {
+    errors.push('SUPABASE_JWT_SECRET is required');
+  }
+
+  // Validate URL formats
+  if (config.supabase.url && !config.supabase.url.startsWith('https://')) {
+    errors.push('SUPABASE_URL must be a valid HTTPS URL');
+  }
+
+  if (config.runpod.url && !config.runpod.url.startsWith('https://')) {
+    errors.push('RUNPOD_EMBEDDING_URL must be a valid HTTPS URL');
+  }
+
+  // Validate port
+  if (isNaN(config.port) || config.port < 1 || config.port > 65535) {
+    errors.push('PORT must be a valid port number between 1 and 65535');
+  }
+
+  if (errors.length > 0) {
+    const errorMessage = `Configuration validation failed:\n${errors.map(e => `  - ${e}`).join('\n')}`;
+    throw new Error(errorMessage);
+  }
+
+  // Log configuration status (without sensitive values)
+  errorLogger.info('Configuration validated', {
+    port: config.port,
+    nodeEnv: config.nodeEnv,
+    supabase_configured: !!config.supabase.url && !!config.supabase.serviceKey,
+    openai_configured: !!config.openai.apiKey,
+    runpod_configured: !!config.runpod.url,
+    debug_logging: config.debug.logging
+  });
+}

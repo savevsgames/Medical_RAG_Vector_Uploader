@@ -26,6 +26,15 @@ try {
   process.exit(1);
 }
 
+// Initialize database connection
+try {
+  database.initialize();
+  errorLogger.success('Database client initialized');
+} catch (error) {
+  errorLogger.error('Failed to initialize database client', error);
+  process.exit(1);
+}
+
 // Test database connection
 try {
   const healthCheck = await database.healthCheck();
@@ -107,7 +116,7 @@ app.listen(config.port, () => {
   });
   
   errorLogger.info('🔧 Services configured:');
-  errorLogger.connectionCheck('Database', true);
+  errorLogger.connectionCheck('Database', database.isInitialized());
   
   errorLogger.info('📚 Available endpoints:');
   errorLogger.info('  - GET  /health (Health check)');

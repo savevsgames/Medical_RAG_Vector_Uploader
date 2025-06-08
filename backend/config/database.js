@@ -2,99 +2,134 @@ import { createClient } from '@supabase/supabase-js';
 import { config } from './environment.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 
-let supabaseClient = null;
-let initializationError = null;
+// Lazy-loaded Supabase client
+let supabase = null;
+let initialized = false;
 
-function initializeSupabase() {
-  if (supabaseClient) {
-    return supabaseClient;
-  }
-
-  if (initializationError) {
-    throw initializationError;
-  }
-
-  try {
-    // Check for required environment variables
-    if (!config.supabase.url) {
-      throw new Error('SUPABASE_URL environment variable is required');
+const database = {
+  // Initialize the Supabase client with proper error handling
+  initialize() {
+    if (initialized) {
+      return supabase;
     }
 
-    if (!config.supabase.serviceKey) {
-      throw new Error('SUPABASE_KEY (service role key) environment variable is required');
-    }
-
-    errorLogger.info('Initializing Supabase client', {
-      url: config.supabase.url,
-      hasServiceKey: !!config.supabase.serviceKey,
-      component: 'Database'
-    });
-
-    supabaseClient = createClient(
-      config.supabase.url,
-      config.supabase.serviceKey,
-      {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false
-        }
+    try {
+      // Validate required environment variables
+      if (!config.supabase.url) {
+        throw new Error('SUPABASE_URL is required but not configured');
       }
-    );
 
-    errorLogger.success('Supabase client initialized successfully', {
-      component: 'Database'
-    });
+      if (!config.supabase.serviceKey) {
+        throw new Error('SUPABASE_KEY (service role key) is required but not configured');
+      }
 
-    return supabaseClient;
+      // Create the Supabase client
+      supabase = createClient(
+        config.supabase.url,
+        config.supabase.serviceKey,
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false
+          }
+        }
+      );
 
-  } catch (error) {
-    initializationError = error;
-    errorLogger.error('Failed to initialize Supabase client', error, {
-      component: 'Database',
-      hasUrl: !!config.supabase.url,
-      hasServiceKey: !!config.supabase.serviceKey,
-      availableEnvVars: Object.keys(process.env).filter(key => 
-        key.includes('SUPABASE') || key.includes('DATABASE')
-      )
-    });
-    throw error;
-  }
-}
+      initialized = true;
+      errorLogger.success('Supabase client initialized successfully', {
+        url: config.supabase.url,
+        hasServiceKey: !!config.supabase.serviceKey
+      });
 
-// Lazy-loaded getter for the Supabase client
-export const database = {
-  getClient() {
-    return initializeSupabase();
+      return supabase;
+    } catch (error) {
+      errorLogger.error('Failed to initialize Supabase client', error, {
+        url: config.supabase.url,
+        hasServiceKey: !!config.supabase.serviceKey,
+        component: 'database'
+      });
+      throw error;
+    }
   },
-  
-  // Health check method
+
+  // Get the Supabase client (initialize if needed)
+  getClient() {
+    if (!initialized) {
+      return this.initialize();
+    }
+    return supabase;
+  },
+
+  // Health check for database connection
   async healthCheck() {
     try {
-      const client = this.getClient();
-      const { data, error } = await client.from('documents').select('count').limit(1);
-      
-      if (error) {
-        throw error;
+      // Initialize client if not already done
+      if (!initialized) {
+        this.initialize();
       }
-      
-      return { healthy: true, message: 'Database connection successful' };
+
+      if (!supabase) {
+        return {
+          healthy: false,
+          message: 'Supabase client not initialized'
+        };
+      }
+
+      // Perform a simple query to test the connection
+      const { data, error } = await supabase
+        .from('documents')
+        .select('count')
+        .limit(1)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 is "no rows returned" which is fine
+        errorLogger.warn('Database health check query failed', {
+          error: error.message,
+          code: error.code,
+          component: 'database'
+        });
+        return {
+          healthy: false,
+          message: `Database query failed: ${error.message}`
+        };
+      }
+
+      errorLogger.debug('Database health check passed', {
+        component: 'database'
+      });
+
+      return {
+        healthy: true,
+        message: 'Database connection successful'
+      };
+
     } catch (error) {
       errorLogger.error('Database health check failed', error, {
-        component: 'Database'
+        component: 'database'
       });
-      return { 
-        healthy: false, 
-        message: error.message,
-        error: error.message 
+
+      return {
+        healthy: false,
+        message: error.message || 'Unknown database error'
       };
     }
+  },
+
+  // Check if the client is initialized
+  isInitialized() {
+    return initialized;
   }
 };
 
-// Export the lazy-loaded client for backward compatibility
+// Export the database object and the supabase client getter
+export { database };
+
+// Export a getter function for the supabase client
 export const supabase = new Proxy({}, {
   get(target, prop) {
-    const client = initializeSupabase();
-    return client[prop];
+    if (!initialized) {
+      database.initialize();
+    }
+    return supabase[prop];
   }
 });
