@@ -77,7 +77,7 @@ export class DocumentSearchService {
         .limit(limit);
 
       if (error) {
-        logger.error('Fallback document search failed', error, {
+        errorLogger.error('Fallback document search failed', error, {
           user_id: userId,
           error_code: error.code,
           component: 'DocumentSearchService'
