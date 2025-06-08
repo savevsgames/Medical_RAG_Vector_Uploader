@@ -90,6 +90,18 @@ class AgentController {
         });
       }
 
+      if (!userJWT) {
+        errorLogger.warn('Start agent called without JWT token', {
+          user_id: userId,
+          path: req.path,
+          ip: req.ip
+        });
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          details: 'JWT token not found in request'
+        });
+      }
+
       if (!RUNPOD_EMBEDDING_URL) {
         errorLogger.error('RunPod service not configured', {
           user_id: userId,
@@ -114,7 +126,7 @@ class AgentController {
         component: 'AgentController.startAgent'
       });
 
-      const existingStatus = await this.agentManager.getAgentStatus(userId);
+      const existingStatus = await this.agentManager.getAgentStatus(userId, userJWT);
       
       errorLogger.debug('Existing agent status retrieved', {
         user_id: userId,
@@ -184,12 +196,12 @@ class AgentController {
         component: 'AgentController.startAgent'
       });
 
-      // Create agent session in database
+      // Create agent session in database with user's JWT
       const sessionData = await this.agentManager.createAgentSession(userId, {
         container_id: containerId,
         endpoint_url: RUNPOD_EMBEDDING_URL,
         health_status: healthResponse.data
-      });
+      }, userJWT);
 
       errorLogger.success('TxAgent session created successfully', {
         user_id: userId,
@@ -253,9 +265,11 @@ class AgentController {
   async stopAgent(req, res) {
     try {
       const userId = req.userId;
+      const userJWT = req.headers.authorization; // Get user's Supabase JWT
 
       errorLogger.debug('Stop agent request initiated', {
         user_id: userId,
+        has_jwt: !!userJWT,
         component: 'AgentController.stopAgent'
       });
 
@@ -266,10 +280,17 @@ class AgentController {
         });
       }
 
+      if (!userJWT) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          details: 'JWT token not found in request'
+        });
+      }
+
       errorLogger.info('Deactivating TxAgent session', { user_id: userId });
 
-      // Update agent session in database
-      await this.agentManager.terminateAgentSession(userId);
+      // Update agent session in database with user's JWT
+      await this.agentManager.terminateAgentSession(userId, userJWT);
 
       errorLogger.success('TxAgent session deactivated successfully', {
         user_id: userId,
@@ -318,14 +339,26 @@ class AgentController {
           details: 'User ID not found in request'
         });
       }
+
+      if (!userJWT) {
+        errorLogger.warn('Agent status called without JWT token', {
+          user_id: userId,
+          path: req.path,
+          ip: req.ip
+        });
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          details: 'JWT token not found in request'
+        });
+      }
       
-      // Get local database status
+      // Get local database status with user's JWT
       errorLogger.debug('Fetching local agent status from database', {
         user_id: userId,
         component: 'AgentController.getAgentStatus'
       });
 
-      const localStatus = await this.agentManager.getAgentStatus(userId);
+      const localStatus = await this.agentManager.getAgentStatus(userId, userJWT);
       
       errorLogger.debug('Local agent status retrieved', {
         user_id: userId,
@@ -424,12 +457,22 @@ class AgentController {
   // Get agent statistics
   async getAgentStats(req, res) {
     try {
+      const userJWT = req.headers.authorization; // Get user's Supabase JWT
+
       errorLogger.debug('Agent stats request initiated', {
         user_id: req.userId,
+        has_jwt: !!userJWT,
         component: 'AgentController.getAgentStats'
       });
 
-      const stats = await this.agentManager.getAgentStats();
+      if (!userJWT) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          details: 'JWT token not found in request'
+        });
+      }
+
+      const stats = await this.agentManager.getAgentStats(userJWT);
       
       errorLogger.debug('Agent stats retrieved successfully', {
         user_id: req.userId,

@@ -1,21 +1,48 @@
 // Agent Manager - Handles agent lifecycle and Supabase operations
 // Manages agent sessions, container tracking, and database operations
 
+import { createClient } from '@supabase/supabase-js';
 import { errorLogger } from './errorLogger.js';
 
 class AgentManager {
   constructor(supabaseClient) {
-    this.supabase = supabaseClient;
+    this.supabase = supabaseClient; // Service role client for admin operations
+  }
+
+  // Create a user-authenticated Supabase client for RLS operations
+  createUserClient(userJWT) {
+    if (!userJWT) {
+      throw new Error('User JWT is required for authenticated operations');
+    }
+
+    // Extract the token from "Bearer <token>" format
+    const token = userJWT.startsWith('Bearer ') ? userJWT.substring(7) : userJWT;
+
+    // Create a new Supabase client with the user's JWT
+    const userClient = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_KEY, // Use anon key for user operations
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      }
+    );
+
+    return userClient;
   }
 
   // Create or update agent session in database
-  async createAgentSession(userId, containerData) {
+  async createAgentSession(userId, containerData, userJWT) {
     try {
       errorLogger.debug('Creating agent session - input validation', {
         user_id: userId,
         container_id: containerData.container_id,
         endpoint_url: containerData.endpoint_url,
         has_health_status: !!containerData.health_status,
+        has_jwt: !!userJWT,
         component: 'AgentManager.createAgentSession'
       });
 
@@ -33,12 +60,15 @@ class AgentManager {
         component: 'AgentManager.createAgentSession'
       });
 
-      errorLogger.info('Inserting agent session into Supabase', {
+      // Use user-authenticated client for RLS compliance
+      const userClient = this.createUserClient(userJWT);
+
+      errorLogger.info('Inserting agent session into Supabase with user authentication', {
         user_id: userId,
         session_data: sessionData
       });
 
-      const { data, error } = await this.supabase
+      const { data, error } = await userClient
         .from('agents')
         .upsert({
           user_id: userId,
@@ -93,10 +123,11 @@ class AgentManager {
   }
 
   // Terminate agent session
-  async terminateAgentSession(userId) {
+  async terminateAgentSession(userId, userJWT) {
     try {
       errorLogger.debug('Terminating agent session - starting process', {
         user_id: userId,
+        has_jwt: !!userJWT,
         component: 'AgentManager.terminateAgentSession'
       });
 
@@ -104,7 +135,10 @@ class AgentManager {
         user_id: userId 
       });
 
-      const { data, error } = await this.supabase
+      // Use user-authenticated client for RLS compliance
+      const userClient = this.createUserClient(userJWT);
+
+      const { data, error } = await userClient
         .from('agents')
         .update({
           status: 'terminated',
@@ -154,15 +188,19 @@ class AgentManager {
   }
 
   // Get current agent status - REDUCED LOGGING FOR STATUS CHECKS
-  async getAgentStatus(userId) {
+  async getAgentStatus(userId, userJWT) {
     try {
       // Only log debug info, not info level for status checks
       errorLogger.debug('Fetching agent status - starting query', {
         user_id: userId,
+        has_jwt: !!userJWT,
         component: 'AgentManager.getAgentStatus'
       });
 
-      const { data: agent, error } = await this.supabase
+      // Use user-authenticated client for RLS compliance
+      const userClient = this.createUserClient(userJWT);
+
+      const { data: agent, error } = await userClient
         .from('agents')
         .select('*')
         .eq('user_id', userId)
@@ -207,8 +245,7 @@ class AgentManager {
         component: 'AgentManager.getAgentStatus'
       });
 
-      // REMOVED: Frequent info logging for status checks
-      // Only log when agent is actually active or there's an issue
+      // REDUCED: Only log when agent is actually active or there's an issue
       if (status.agent_active) {
         errorLogger.debug('Agent status retrieved - active agent found', {
           user_id: userId,
@@ -230,14 +267,18 @@ class AgentManager {
   }
 
   // Update agent last active timestamp
-  async updateLastActive(userId) {
+  async updateLastActive(userId, userJWT) {
     try {
       errorLogger.debug('Updating agent last active timestamp', {
         user_id: userId,
+        has_jwt: !!userJWT,
         component: 'AgentManager.updateLastActive'
       });
 
-      const { error } = await this.supabase
+      // Use user-authenticated client for RLS compliance
+      const userClient = this.createUserClient(userJWT);
+
+      const { error } = await userClient
         .from('agents')
         .update({ last_active: new Date().toISOString() })
         .eq('user_id', userId)
@@ -269,7 +310,7 @@ class AgentManager {
     }
   }
 
-  // Clean up stale agent sessions (utility method)
+  // Clean up stale agent sessions (utility method) - Uses service role for admin operations
   async cleanupStaleAgents(maxAgeHours = 24) {
     try {
       const cutoffTime = new Date();
@@ -286,6 +327,7 @@ class AgentManager {
         cutoff_time: cutoffTime.toISOString()
       });
 
+      // Use service role client for admin cleanup operations
       const { data, error } = await this.supabase
         .from('agents')
         .update({
@@ -341,15 +383,17 @@ class AgentManager {
     }
   }
 
-  // Get agent statistics (for monitoring)
-  async getAgentStats() {
+  // Get agent statistics (for monitoring) - Uses service role for admin operations
+  async getAgentStats(userJWT = null) {
     try {
       errorLogger.debug('Fetching agent statistics', {
+        has_jwt: !!userJWT,
         component: 'AgentManager.getAgentStats'
       });
 
       errorLogger.info('Fetching agent statistics');
 
+      // Use service role client for admin stats operations
       const { data: activeAgents, error: activeError } = await this.supabase
         .from('agents')
         .select('user_id, id, created_at, last_active')
