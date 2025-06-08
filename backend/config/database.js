@@ -11,7 +11,7 @@ class Database {
   async initialize() {
     try {
       if (!config.supabase.url || !config.supabase.serviceKey) {
-        throw new Error('Supabase configuration missing');
+        throw new Error('Supabase configuration is missing');
       }
 
       this.client = createClient(
@@ -25,8 +25,9 @@ class Database {
         }
       );
 
-      this.initialized = true;
       errorLogger.success('Supabase client initialized successfully');
+      this.initialized = true;
+      return this.client;
     } catch (error) {
       errorLogger.error('Failed to initialize Supabase client', error);
       throw error;
@@ -34,20 +35,23 @@ class Database {
   }
 
   getClient() {
-    if (!this.initialized || !this.client) {
+    if (!this.client) {
       throw new Error('Database not initialized. Call initialize() first.');
     }
     return this.client;
   }
 
   isInitialized() {
-    return this.initialized && this.client !== null;
+    return this.initialized;
   }
 
   async healthCheck() {
     try {
-      if (!this.isInitialized()) {
-        return { healthy: false, message: 'Database not initialized' };
+      if (!this.client) {
+        return {
+          healthy: false,
+          message: 'Database client not initialized'
+        };
       }
 
       // Simple health check - try to query a system table
@@ -57,29 +61,31 @@ class Database {
         .limit(1);
 
       if (error) {
-        return { 
-          healthy: false, 
-          message: `Database query failed: ${error.message}` 
+        errorLogger.error('Database health check failed', error);
+        return {
+          healthy: false,
+          message: error.message
         };
       }
 
-      return { healthy: true, message: 'Database connection successful' };
+      errorLogger.success('Database connection test passed');
+      return {
+        healthy: true,
+        message: 'Database connection successful'
+      };
     } catch (error) {
-      return { 
-        healthy: false, 
-        message: `Database health check failed: ${error.message}` 
+      errorLogger.error('Database health check error', error);
+      return {
+        healthy: false,
+        message: error.message
       };
     }
   }
 }
 
 // Create singleton instance
-export const database = new Database();
+const database = new Database();
 
-// Export the client getter for backward compatibility
-export const supabase = new Proxy({}, {
-  get(target, prop) {
-    const client = database.getClient();
-    return client[prop];
-  }
-});
+// Export both the instance and the client getter for backward compatibility
+export { database };
+export const supabase = database.getClient.bind(database);
