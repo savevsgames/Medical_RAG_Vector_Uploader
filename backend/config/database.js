@@ -2,20 +2,19 @@ import { createClient } from '@supabase/supabase-js';
 import { config } from './environment.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 
-// Internal client variable
-let supabaseClient = null;
-let isInitialized = false;
+class Database {
+  constructor() {
+    this.client = null;
+    this.initialized = false;
+  }
 
-// Database service object
-export const database = {
-  // Initialize the client (called during server startup)
   initialize() {
     try {
       if (!config.supabase.url || !config.supabase.serviceKey) {
-        throw new Error('Supabase configuration is missing. Please check SUPABASE_URL and SUPABASE_KEY environment variables.');
+        throw new Error('Supabase configuration missing');
       }
 
-      supabaseClient = createClient(
+      this.client = createClient(
         config.supabase.url,
         config.supabase.serviceKey,
         {
@@ -26,61 +25,61 @@ export const database = {
         }
       );
 
-      isInitialized = true;
+      this.initialized = true;
       errorLogger.success('Supabase client initialized successfully');
-      return supabaseClient;
     } catch (error) {
       errorLogger.error('Failed to initialize Supabase client', error);
       throw error;
     }
-  },
+  }
 
-  // Get the client (throws if not initialized)
   getClient() {
-    if (!isInitialized || !supabaseClient) {
-      throw new Error('Database client not initialized. Call database.initialize() first.');
+    if (!this.initialized || !this.client) {
+      throw new Error('Database not initialized. Call initialize() first.');
     }
-    return supabaseClient;
-  },
+    return this.client;
+  }
 
-  // Check if client is initialized
   isInitialized() {
-    return isInitialized && !!supabaseClient;
-  },
+    return this.initialized && this.client !== null;
+  }
 
-  // Health check
   async healthCheck() {
     try {
       if (!this.isInitialized()) {
-        return { healthy: false, message: 'Database client not initialized' };
+        return { healthy: false, message: 'Database not initialized' };
       }
 
-      // Simple query to test connection
-      const { data, error } = await supabaseClient
+      // Simple health check - try to query a system table
+      const { data, error } = await this.client
         .from('documents')
         .select('count')
         .limit(1);
 
       if (error) {
-        return { healthy: false, message: error.message };
+        return { 
+          healthy: false, 
+          message: `Database query failed: ${error.message}` 
+        };
       }
 
       return { healthy: true, message: 'Database connection successful' };
     } catch (error) {
       return { 
         healthy: false, 
-        message: error instanceof Error ? error.message : 'Unknown database error' 
+        message: `Database health check failed: ${error.message}` 
       };
     }
   }
-};
+}
 
-// Export the client through a proxy for backward compatibility
+// Create singleton instance
+export const database = new Database();
+
+// Export the client getter for backward compatibility
 export const supabase = new Proxy({}, {
   get(target, prop) {
-    if (!isInitialized || !supabaseClient) {
-      throw new Error('Database client not initialized. Call database.initialize() first.');
-    }
-    return supabaseClient[prop];
+    const client = database.getClient();
+    return client[prop];
   }
 });

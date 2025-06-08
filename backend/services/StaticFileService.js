@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 
@@ -9,47 +8,58 @@ const __dirname = path.dirname(__filename);
 
 class StaticFileService {
   constructor() {
-    this.frontendDistPath = path.join(__dirname, '..', '..', 'frontend', 'dist');
+    this.frontendDistPath = path.join(__dirname, '../../frontend/dist');
   }
 
   setupStaticFiles(app) {
-    // CRITICAL: Serve static files from frontend/dist BEFORE API routes
-    if (fs.existsSync(this.frontendDistPath)) {
-      errorLogger.info('Serving static files from frontend/dist', {
-        path: this.frontendDistPath,
-        files: fs.readdirSync(this.frontendDistPath)
-      });
-      
-      // Serve static files
+    try {
+      // Serve static files from frontend/dist
       app.use(express.static(this.frontendDistPath));
-    } else {
-      errorLogger.warn('Frontend dist directory not found', {
-        expected_path: this.frontendDistPath,
-        current_dir: __dirname
-      });
+      
+      // Log available files for debugging
+      const fs = await import('fs');
+      if (fs.existsSync(this.frontendDistPath)) {
+        const files = fs.readdirSync(this.frontendDistPath);
+        errorLogger.info('Serving static files from frontend/dist', {
+          path: this.frontendDistPath,
+          files: files
+        });
+      } else {
+        errorLogger.warn('Frontend dist directory not found', {
+          path: this.frontendDistPath
+        });
+      }
+    } catch (error) {
+      errorLogger.error('Failed to setup static file serving', error);
     }
   }
 
   setupSPAFallback(app) {
-    // CRITICAL: SPA Fallback Route - Must be LAST
-    app.get('*', (req, res) => {
-      // Don't serve index.html for API routes
-      if (req.path.startsWith('/api/') || req.path.startsWith('/health')) {
-        return res.status(404).json({ error: 'API endpoint not found' });
-      }
-      
-      const indexPath = path.join(this.frontendDistPath, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        // REDUCED LOGGING: Don't log every SPA fallback
-        res.sendFile(indexPath);
-      } else {
-        errorLogger.error('index.html not found for SPA fallback', {
-          requested_path: req.path,
-          index_path: indexPath
+    try {
+      // SPA fallback - serve index.html for all non-API routes
+      app.get('*', (req, res, next) => {
+        // Skip API routes
+        if (req.path.startsWith('/api/') || 
+            req.path.startsWith('/health') || 
+            req.path.startsWith('/upload') ||
+            req.path.startsWith('/agent/') ||
+            req.path.startsWith('/chat/')) {
+          return next();
+        }
+
+        const indexPath = path.join(this.frontendDistPath, 'index.html');
+        res.sendFile(indexPath, (err) => {
+          if (err) {
+            errorLogger.error('Failed to serve SPA fallback', err);
+            res.status(500).send('Server Error');
+          }
         });
-        res.status(404).send('Application not found');
-      }
-    });
+      });
+
+      errorLogger.info('SPA fallback configured for frontend routing');
+    } catch (error) {
+      errorLogger.error('Failed to setup SPA fallback', error);
+    }
   }
 }
 

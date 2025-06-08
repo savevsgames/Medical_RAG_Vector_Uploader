@@ -6,7 +6,7 @@ dotenv.config();
 
 export const config = {
   // Server configuration
-  port: parseInt(process.env.PORT || '8000', 10),
+  port: parseInt(process.env.PORT) || 8000,
   nodeEnv: process.env.NODE_ENV || 'development',
   isDevelopment: process.env.NODE_ENV !== 'production',
 
@@ -28,56 +28,33 @@ export const config = {
     apiKey: process.env.RUNPOD_EMBEDDING_KEY
   },
 
-  // Debug configuration
-  debug: {
-    logging: process.env.BACKEND_DEBUG_LOGGING === 'true'
+  // Logging configuration
+  logging: {
+    debug: process.env.BACKEND_DEBUG_LOGGING === 'true'
   }
 };
 
-// Configuration validation function
 export function validateConfig() {
-  const errors = [];
-
-  // Required environment variables
   const required = [
     { key: 'SUPABASE_URL', value: config.supabase.url },
     { key: 'SUPABASE_KEY', value: config.supabase.serviceKey },
     { key: 'SUPABASE_JWT_SECRET', value: config.supabase.jwtSecret }
   ];
 
-  for (const { key, value } of required) {
-    if (!value) {
-      errors.push(`Missing required environment variable: ${key}`);
-    }
+  const missing = required.filter(({ value }) => !value);
+  
+  if (missing.length > 0) {
+    const missingKeys = missing.map(({ key }) => key).join(', ');
+    throw new Error(`Missing required environment variables: ${missingKeys}`);
   }
 
-  // Optional but recommended
-  const recommended = [
-    { key: 'OPENAI_API_KEY', value: config.openai.apiKey, service: 'OpenAI chat' },
-    { key: 'RUNPOD_EMBEDDING_URL', value: config.runpod.url, service: 'RunPod embeddings' }
-  ];
-
-  for (const { key, value, service } of recommended) {
-    if (!value) {
-      errorLogger.warn(`Missing optional environment variable: ${key} (${service} will not be available)`);
-    }
-  }
-
-  if (errors.length > 0) {
-    throw new Error(`Configuration validation failed:\n${errors.join('\n')}`);
-  }
-
-  return true;
-}
-
-// Log configuration status (without sensitive values)
-if (config.debug.logging) {
+  // Log configuration status
   errorLogger.info('Configuration loaded', {
     port: config.port,
     nodeEnv: config.nodeEnv,
-    supabase_configured: !!config.supabase.url && !!config.supabase.serviceKey,
+    supabase_configured: !!config.supabase.url,
     openai_configured: !!config.openai.apiKey,
     runpod_configured: !!config.runpod.url,
-    debug_logging: config.debug.logging
+    debug_logging: config.logging.debug
   });
 }
