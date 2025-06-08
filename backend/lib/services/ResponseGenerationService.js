@@ -29,7 +29,7 @@ Instructions:
 - Be concise but thorough
 - Use medical terminology appropriately but explain complex terms`;
 
-      logger.info('Calling OpenAI chat completion', {
+      errorLogger.info('Calling OpenAI chat completion', {
         query_length: query.length,
         context_length: context.length,
         documents_count: relevantDocs.length,
