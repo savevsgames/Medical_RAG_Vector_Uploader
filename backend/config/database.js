@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 import { config } from './environment.js';
-import { errorLogger } from '../agent_utils/shared/logger.js';
 
 class Database {
   constructor() {
@@ -8,7 +7,8 @@ class Database {
     this.initialized = false;
   }
 
-  async initialize() {
+  // Synchronous initialization - just creates the client
+  initialize() {
     try {
       if (!config.supabase.url || !config.supabase.serviceKey) {
         throw new Error('Supabase configuration is missing');
@@ -25,13 +25,51 @@ class Database {
         }
       );
 
-      errorLogger.success('Supabase client initialized successfully');
       this.initialized = true;
-      return this.client;
+      return { success: true, message: 'Database client initialized' };
     } catch (error) {
-      errorLogger.error('Failed to initialize Supabase client', error);
-      throw error;
+      this.initialized = false;
+      throw new Error(`Failed to initialize database: ${error.message}`);
     }
+  }
+
+  // Async health check - can be called after initialization
+  async healthCheck() {
+    if (!this.client) {
+      return { 
+        healthy: false, 
+        message: 'Database client not initialized' 
+      };
+    }
+
+    try {
+      // Simple query to test connection
+      const { data, error } = await this.client
+        .from('documents')
+        .select('count')
+        .limit(1);
+
+      if (error) {
+        return { 
+          healthy: false, 
+          message: `Database connection failed: ${error.message}` 
+        };
+      }
+
+      return { 
+        healthy: true, 
+        message: 'Database connection successful' 
+      };
+    } catch (error) {
+      return { 
+        healthy: false, 
+        message: `Database health check failed: ${error.message}` 
+      };
+    }
+  }
+
+  isInitialized() {
+    return this.initialized;
   }
 
   getClient() {
@@ -40,52 +78,10 @@ class Database {
     }
     return this.client;
   }
-
-  isInitialized() {
-    return this.initialized;
-  }
-
-  async healthCheck() {
-    try {
-      if (!this.client) {
-        return {
-          healthy: false,
-          message: 'Database client not initialized'
-        };
-      }
-
-      // Simple health check - try to query a system table
-      const { data, error } = await this.client
-        .from('documents')
-        .select('count')
-        .limit(1);
-
-      if (error) {
-        errorLogger.error('Database health check failed', error);
-        return {
-          healthy: false,
-          message: error.message
-        };
-      }
-
-      errorLogger.success('Database connection test passed');
-      return {
-        healthy: true,
-        message: 'Database connection successful'
-      };
-    } catch (error) {
-      errorLogger.error('Database health check error', error);
-      return {
-        healthy: false,
-        message: error.message
-      };
-    }
-  }
 }
 
-// Create singleton instance
-const database = new Database();
+// Create and export a singleton instance
+export const database = new Database();
 
-// Export both the instance and the client getter for backward compatibility
-export { database };
+// Also export the client directly for backward compatibility
 export const supabase = database.getClient.bind(database);

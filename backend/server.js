@@ -27,28 +27,29 @@ async function startServer() {
     process.exit(1);
   }
 
-  // Initialize database connection
+  // Initialize database connection (synchronous)
   try {
-    await database.initialize();
+    const result = database.initialize();
     errorLogger.success('Database client initialized');
   } catch (error) {
     errorLogger.error('Failed to initialize database client', error);
     process.exit(1);
   }
 
-  // Test database connection
-  try {
-    const healthCheck = await database.healthCheck();
-    if (healthCheck.healthy) {
-      errorLogger.success('Database connection test passed');
-    } else {
-      errorLogger.error('Database connection test failed', new Error(healthCheck.message));
+  // Test database connection (async, but non-blocking)
+  database.healthCheck()
+    .then(healthCheck => {
+      if (healthCheck.healthy) {
+        errorLogger.success('Database connection test passed');
+      } else {
+        errorLogger.error('Database connection test failed', new Error(healthCheck.message));
+        // Don't exit - let the server start but log the issue
+      }
+    })
+    .catch(error => {
+      errorLogger.error('Database connection test failed', error);
       // Don't exit - let the server start but log the issue
-    }
-  } catch (error) {
-    errorLogger.error('Database connection test failed', error);
-    // Don't exit - let the server start but log the issue
-  }
+    });
 
   // Middleware setup
   app.use(corsMiddleware);
