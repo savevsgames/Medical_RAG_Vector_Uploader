@@ -28,7 +28,7 @@ export function AgentSelector({
     <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <label htmlFor="agent-select" className="text-sm font-medium text-gray-700">
+          <label htmlFor="agent-select\" className="text-sm font-medium text-gray-700">
             AI Agent:
           </label>
           <div className="relative">
