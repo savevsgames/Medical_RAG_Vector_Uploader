@@ -407,8 +407,11 @@ app.get('/health', async (req, res) => {
   // Test RunPod connection if configured
   if (services.runpod_configured) {
     try {
+      // FIXED: Ensure clean URL without trailing slashes
+      const healthUrl = `${process.env.RUNPOD_EMBEDDING_URL.replace(/\/+$/, '')}/health`;
+      
       const response = await axios.get(
-        `${process.env.RUNPOD_EMBEDDING_URL}/health`,
+        healthUrl,
         { 
           timeout: 5000
         }
@@ -567,10 +570,15 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
           has_jwt: !!req.headers.authorization
         });
 
-        // CRITICAL FIX: Use TxAgent container directly with user's JWT
-        const txAgentResponse = await axios.post(
-          `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
-          { 
+        // CRITICAL FIX: Use TxAgent container directly with user's JWT and POST method
+        // FIXED: Ensure clean URL without trailing slashes
+        const embedUrl = `${process.env.RUNPOD_EMBEDDING_URL.replace(/\/+$/, '')}/embed`;
+        
+        // FIXED: Use explicit axios configuration to force POST method
+        const axiosConfig = {
+          method: 'POST', // Explicitly set method
+          url: embedUrl, // Clean URL without double slashes
+          data: { 
             file_path: `upload_${documentId}`,
             metadata: {
               ...metadata,
@@ -580,14 +588,29 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
               user_id: req.userId
             }
           },
-          { 
-            headers: { 
-              'Authorization': req.headers.authorization, // Forward user's JWT directly
-              'Content-Type': 'application/json'
-            },
-            timeout: 30000
+          headers: { 
+            'Authorization': req.headers.authorization, // Forward user's JWT directly
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          timeout: 30000,
+          // Force axios to use POST even with redirects
+          maxRedirects: 0,
+          validateStatus: function (status) {
+            return status >= 200 && status < 500; // Accept 4xx as valid to handle our own errors
           }
-        );
+        };
+        
+        errorLogger.debug('🚀 AXIOS CONFIG - About to send upload embedding request', {
+          user_id: req.userId,
+          method: axiosConfig.method,
+          url: axiosConfig.url,
+          has_auth: !!req.headers.authorization,
+          payload_size: JSON.stringify(axiosConfig.data).length,
+          component: 'UploadRoute'
+        });
+        
+        const txAgentResponse = await axios(axiosConfig);
         
         // Handle different response formats from TxAgent
         if (txAgentResponse.data.document_ids && txAgentResponse.data.document_ids.length > 0) {

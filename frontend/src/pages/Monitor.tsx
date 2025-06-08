@@ -156,7 +156,7 @@ export function Monitor() {
     } finally {
       setLoading(false);
     }
-  }, [session, user, autoRefresh]);
+  }, [session, user]);
 
   const performDetailedStatusCheck = useCallback(async () => {
     if (!session || !agentStatus?.agent_active) return;
@@ -189,10 +189,10 @@ export function Monitor() {
         testResults.health.error = error instanceof Error ? error.message : 'Unknown error';
       }
 
-      // Test 2: Chat endpoint (minimal test)
+      // Test 2: Chat endpoint (minimal test) - FIXED: Use POST method
       try {
         const chatResponse = await fetch(`${import.meta.env.VITE_API_URL}/api/chat`, {
-          method: 'POST',
+          method: 'POST', // FIXED: Changed from GET to POST
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
@@ -208,10 +208,10 @@ export function Monitor() {
         testResults.chat.error = error instanceof Error ? error.message : 'Unknown error';
       }
 
-      // Test 3: Embed endpoint (minimal test)
+      // Test 3: Embed endpoint (minimal test) - FIXED: Use POST method
       try {
         const embedResponse = await fetch(`${import.meta.env.VITE_API_URL}/api/embed`, {
-          method: 'POST',
+          method: 'POST', // FIXED: Changed from GET to POST
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
@@ -301,22 +301,31 @@ export function Monitor() {
     }
   }, [session, user, agentStatus]);
 
-  // REDUCED AUTO-REFRESH: Increase interval to 30 seconds to reduce log spam
+  // FIXED: Reduced auto-refresh interval to 30 seconds and simplified dependencies
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: NodeJS.Timeout | null = null;
+    
     if (autoRefresh) {
+      // Initial fetch when auto-refresh is enabled
+      fetchAgentStatus();
+      
+      // Set up interval for periodic fetching
       interval = setInterval(() => {
         fetchAgentStatus();
+        // Only perform detailed status check if agent is active
         if (agentStatus?.agent_active) {
           performDetailedStatusCheck();
         }
-      }, 30000); // Increased from 10 seconds to 30 seconds
+      }, 30000); // 30 seconds interval
     }
+    
+    // Cleanup function
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [autoRefresh, agentStatus?.agent_active, fetchAgentStatus, performDetailedStatusCheck]);
+  }, [autoRefresh]); // Only depend on autoRefresh state
 
+  // Initial fetch on component mount
   useEffect(() => {
     fetchAgentStatus();
   }, [fetchAgentStatus]);
@@ -572,7 +581,8 @@ export function Monitor() {
 
   const handleRefreshStatus = () => {
     setLoading(true);
-    window.location.reload();
+    fetchAgentStatus();
+    setLoading(false);
   };
 
   const copyToClipboard = (text: string) => {

@@ -89,17 +89,42 @@ class RunPodService {
         component: 'RunPodService.handleEmbedding'
       });
 
-      const response = await axios.post(
-        `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
-        requestPayload,
-        { 
-          headers: { 
-            'Authorization': userJWT, // Send user's Supabase JWT
-            'Content-Type': 'application/json'
-          },
-          timeout: this.defaultTimeout
+      // FIXED: Ensure we're using a clean URL without double slashes
+      const embedUrl = `${process.env.RUNPOD_EMBEDDING_URL.replace(/\/+$/, '')}/embed`;
+      
+      // FIXED: Use explicit axios configuration to force POST method
+      const axiosConfig = {
+        method: 'POST', // Explicitly set method
+        url: embedUrl, // Clean URL without double slashes
+        data: requestPayload, // Use 'data' property for POST body
+        headers: { 
+          'Authorization': userJWT, // Send user's Supabase JWT
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: this.defaultTimeout,
+        // Force axios to use POST even with redirects
+        maxRedirects: 0,
+        validateStatus: function (status) {
+          return status >= 200 && status < 500; // Accept 4xx as valid to handle our own errors
         }
-      );
+      };
+
+      errorLogger.debug('🚀 AXIOS CONFIG - About to send embed request', {
+        user_id: userId,
+        method: axiosConfig.method,
+        url: axiosConfig.url,
+        has_auth: !!userJWT,
+        payload_size: JSON.stringify(requestPayload).length,
+        axios_method: axiosConfig.method,
+        axios_url: axiosConfig.url,
+        axios_timeout: axiosConfig.timeout,
+        request_body_keys: Object.keys(requestPayload),
+        component: 'RunPodService.handleEmbedding'
+      });
+
+      // FIXED: Use axios() with explicit config instead of axios.post()
+      const response = await axios(axiosConfig);
 
       errorLogger.debug('TxAgent embedding response received', {
         user_id: userId,
@@ -180,6 +205,9 @@ class RunPodService {
         request_method: 'POST'
       });
 
+      // FIXED: Ensure we're using a clean URL without double slashes
+      const chatUrl = `${process.env.RUNPOD_EMBEDDING_URL.replace(/\/+$/, '')}/chat`;
+
       // CRITICAL FIX: Ensure we have a proper request body that axios won't convert to GET
       const requestPayload = {
         query: message,
@@ -194,7 +222,7 @@ class RunPodService {
       // CRITICAL FIX: Use explicit axios configuration to force POST method
       const axiosConfig = {
         method: 'POST', // Explicitly set method
-        url: `${process.env.RUNPOD_EMBEDDING_URL}/chat`, // Clean URL without double slashes
+        url: chatUrl, // Clean URL without double slashes
         data: requestPayload, // Use 'data' property for POST body
         headers: { 
           'Authorization': userJWT,
@@ -209,7 +237,7 @@ class RunPodService {
         }
       };
 
-      errorLogger.debug('🚀 AXIOS CONFIG - About to send request', {
+      errorLogger.debug('🚀 AXIOS CONFIG - About to send chat request', {
         user_id: userId,
         method: axiosConfig.method,
         url: axiosConfig.url,
@@ -384,7 +412,7 @@ class RunPodService {
       });
 
       const response = await axios.get(
-        `${process.env.RUNPOD_EMBEDDING_URL}/health`,
+        `${process.env.RUNPOD_EMBEDDING_URL.replace(/\/+$/, '')}/health`,
         { 
           headers,
           timeout: 5000

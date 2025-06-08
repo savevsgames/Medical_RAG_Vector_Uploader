@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Send, Bot, User, Loader2, FileText, Cpu, Brain, ChevronDown, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { logger, logUserAction, logApiCall, logAgentOperation } from '../utils/logger';
 
 interface Message {
   id: string;
   type: 'user' | 'assistant';
-  content: string;
+  content: React.ReactNode;
   timestamp: Date;
   sources?: Array<{
     filename: string;
@@ -96,33 +97,84 @@ export function Chat() {
           setTxAgentStatus(statusData);
           
           // Create connection status message
-          let statusMessage = '';
+          let statusMessage: React.ReactNode;
           let statusIcon = '';
           
           if (statusData.agent_active && statusData.container_status === 'running') {
             statusIcon = '🟢';
-            statusMessage = `TxAgent Connection: ACTIVE\n\n✅ Container Status: ${statusData.container_status}\n✅ Session ID: ${statusData.agent_id?.substring(0, 12)}...\n✅ BioBERT model ready for medical document analysis\n\nYou can now ask questions about your uploaded documents using the specialized medical AI model.`;
+            statusMessage = (
+              <>
+                <p><strong>TxAgent Connection: ACTIVE</strong></p>
+                <p>✅ Container Status: {statusData.container_status}</p>
+                <p>✅ Session ID: {statusData.agent_id?.substring(0, 12)}...</p>
+                <p>✅ BioBERT model ready for medical document analysis</p>
+                <p className="mt-2">You can now ask questions about your uploaded documents using the specialized medical AI model.</p>
+              </>
+            );
           } else if (statusData.agent_active && statusData.container_status === 'starting') {
             statusIcon = '🟡';
-            statusMessage = `TxAgent Connection: STARTING\n\n⏳ Container Status: ${statusData.container_status}\n⏳ Session ID: ${statusData.agent_id?.substring(0, 12)}...\n⏳ BioBERT model is initializing\n\nPlease wait a moment for the container to fully start up.`;
+            statusMessage = (
+              <>
+                <p><strong>TxAgent Connection: STARTING</strong></p>
+                <p>⏳ Container Status: {statusData.container_status}</p>
+                <p>⏳ Session ID: {statusData.agent_id?.substring(0, 12)}...</p>
+                <p>⏳ BioBERT model is initializing</p>
+                <p className="mt-2">Please wait a moment for the container to fully start up.</p>
+              </>
+            );
           } else if (statusData.container_status === 'unreachable') {
             statusIcon = '🔴';
-            statusMessage = `TxAgent Connection: UNREACHABLE\n\n❌ Container Status: ${statusData.container_status}\n❌ RunPod container is not responding\n❌ BioBERT model unavailable\n\nFalling back to OpenAI for document analysis. You can try starting the TxAgent from the Monitor page.`;
+            statusMessage = (
+              <>
+                <p><strong>TxAgent Connection: UNREACHABLE</strong></p>
+                <p>❌ Container Status: {statusData.container_status}</p>
+                <p>❌ RunPod container is not responding</p>
+                <p>❌ BioBERT model unavailable</p>
+                <p className="mt-2">Falling back to OpenAI for document analysis. You can try starting the TxAgent from the <Link to="/monitor" className="text-blue-600 underline">Monitor page</Link>.</p>
+              </>
+            );
           } else {
             statusIcon = '🔴';
-            statusMessage = `TxAgent Connection: INACTIVE\n\n❌ Container Status: ${statusData.container_status || 'stopped'}\n❌ No active session\n❌ BioBERT model not available\n\nYou can start the TxAgent from the Monitor page or use OpenAI as an alternative.`;
+            statusMessage = (
+              <>
+                <p><strong>TxAgent Connection: INACTIVE</strong></p>
+                <p>❌ Container Status: {statusData.container_status || 'stopped'}</p>
+                <p>❌ No active session</p>
+                <p>❌ BioBERT model not available</p>
+                <p className="mt-2">You can start the TxAgent from the <Link to="/monitor" className="text-blue-600 underline">Monitor page</Link> or use OpenAI as an alternative.</p>
+              </>
+            );
           }
 
           // Add container health details if available
           if (statusData.container_health && typeof statusData.container_health === 'object') {
             const health = statusData.container_health;
-            statusMessage += `\n\n📊 Container Health:\n• Model: ${health.model || 'Unknown'}\n• Device: ${health.device || 'Unknown'}\n• Version: ${health.version || 'Unknown'}`;
+            const healthDetails = (
+              <div className="mt-2">
+                <p><strong>📊 Container Health:</strong></p>
+                <ul className="list-disc pl-5">
+                  <li>Model: {health.model || 'Unknown'}</li>
+                  <li>Device: {health.device || 'Unknown'}</li>
+                  <li>Version: {health.version || 'Unknown'}</li>
+                </ul>
+              </div>
+            );
+            statusMessage = (
+              <>
+                {statusMessage}
+                {healthDetails}
+              </>
+            );
           }
 
           const connectionMessage: Message = {
             id: 'connection-status',
             type: 'assistant',
-            content: `${statusIcon} ${statusMessage}`,
+            content: (
+              <div>
+                {statusIcon} {statusMessage}
+              </div>
+            ),
             timestamp: new Date(),
             agent_id: 'system'
           };
@@ -150,7 +202,16 @@ export function Chat() {
         const errorMessage: Message = {
           id: 'connection-error',
           type: 'assistant',
-          content: `🔴 TxAgent Connection: ERROR\n\n❌ Failed to check container status\n❌ Backend communication error\n❌ BioBERT model status unknown\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}\n\nYou can try refreshing the page or use OpenAI as an alternative.`,
+          content: (
+            <div>
+              <p>🔴 <strong>TxAgent Connection: ERROR</strong></p>
+              <p>❌ Failed to check container status</p>
+              <p>❌ Backend communication error</p>
+              <p>❌ BioBERT model status unknown</p>
+              <p className="mt-2">Error: {error instanceof Error ? error.message : 'Unknown error'}</p>
+              <p className="mt-2">You can try refreshing the page or use OpenAI as an alternative.</p>
+            </div>
+          ),
           timestamp: new Date(),
           agent_id: 'system'
         };
@@ -307,7 +368,13 @@ export function Chat() {
       const errorMessage_obj: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: `I apologize, but I encountered an error processing your request with ${currentAgent.name}. Please try again or switch to a different agent.`,
+        content: (
+          <div>
+            <p>I apologize, but I encountered an error processing your request with {currentAgent.name}.</p>
+            <p className="mt-2">Error: {errorMessage}</p>
+            <p className="mt-2">Please try again or switch to a different agent.</p>
+          </div>
+        ),
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMessage_obj]);
@@ -421,7 +488,7 @@ export function Chat() {
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-100 text-gray-900'
               }`}>
-                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                <div className="text-sm whitespace-pre-wrap">{message.content}</div>
                 <div className={`flex items-center justify-between mt-1 ${
                   message.type === 'user' ? 'text-blue-100' : 'text-gray-500'
                 }`}>

@@ -57,7 +57,7 @@ export class EmbeddingService {
     }
   }
 
-  // CRITICAL FIX: New method for TxAgent container with proper JWT authentication
+  // CRITICAL FIX: New method for TxAgent container with proper JWT authentication and POST method
   async generateTxAgentEmbedding(text, userJWT) {
     try {
       console.log('🚀 Calling TxAgent container for BioBERT embedding');
@@ -65,10 +65,14 @@ export class EmbeddingService {
       console.log(`🔐 Using user JWT authentication: ${userJWT ? 'YES' : 'NO'}`);
       console.log(`📝 Text length: ${text.length} characters`);
 
-      // CRITICAL FIX: Use user's Supabase JWT instead of RunPod API key
-      const response = await axios.post(
-        `${this.runpodUrl}/embed`,
-        {
+      // CRITICAL FIX: Ensure clean URL without trailing slashes
+      const embedUrl = `${this.runpodUrl.replace(/\/+$/, '')}/embed`;
+
+      // CRITICAL FIX: Use explicit axios configuration to force POST method
+      const axiosConfig = {
+        method: 'POST', // Explicitly set method
+        url: embedUrl, // Clean URL without double slashes
+        data: {
           file_path: `inline_text_${Date.now()}`,
           metadata: {
             text_length: text.length,
@@ -77,14 +81,24 @@ export class EmbeddingService {
             timestamp: new Date().toISOString()
           }
         },
-        {
-          headers: {
-            'Authorization': userJWT, // CRITICAL: Use user's JWT, not RunPod key
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000 // 30 second timeout
+        headers: {
+          'Authorization': userJWT, // CRITICAL: Use user's JWT, not RunPod key
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: 30000, // 30 second timeout
+        // Force axios to use POST even with redirects
+        maxRedirects: 0,
+        validateStatus: function (status) {
+          return status >= 200 && status < 500; // Accept 4xx as valid to handle our own errors
         }
-      );
+      };
+
+      console.log('🚀 Sending POST request to TxAgent /embed endpoint');
+      console.log(`📊 Request payload size: ${JSON.stringify(axiosConfig.data).length} bytes`);
+
+      // CRITICAL FIX: Use axios() with explicit config instead of axios.post()
+      const response = await axios(axiosConfig);
 
       console.log('✅ TxAgent embedding response received');
       console.log(`📊 Response status: ${response.status}`);
