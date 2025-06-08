@@ -834,9 +834,6 @@ app.listen(port, () => {
   
   errorLogger.info('🔧 Services configured:');
   errorLogger.connectionCheck('Embedding', embeddingService.isConfigured());
-  errorLogger.connectionCheck('OpenAI Chat', !!process.env.OPENAI_API_KEY);
-  errorLogger.connectionCheck('Supabase', !!process.env.SUPABASE_URL);
-  errorLogger.connectionCheck('RunPod TxAgent', !!process.env.RUNPOD_EMBEDDING_URL);
   
   errorLogger.info('📚 Available endpoints:');
   errorLogger.info('  - GET  /health (Health check)');
