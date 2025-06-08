@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileText, Upload, Search, Filter, RefreshCw, Plus, Grid, List } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { UploadModal } from '../components/UploadModal';
+import { UploadModal } from '../components/upload';
 import { DocumentCard } from '../components/DocumentCard';
 import { DocumentViewModal } from '../components/DocumentViewModal';
 import { DocumentEditModal } from '../components/DocumentEditModal';
