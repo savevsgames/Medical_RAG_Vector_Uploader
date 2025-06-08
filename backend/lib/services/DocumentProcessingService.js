@@ -48,7 +48,7 @@ export class DocumentProcessingService {
 
       return result;
     } catch (error) {
-      loerrorLoggergger.error('Text extraction failed', error, {
+      errorLogger.error('Text extraction failed', error, {
         filename,
         extension,
         error_stack: error.stack,
