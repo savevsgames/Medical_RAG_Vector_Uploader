@@ -1,66 +1,36 @@
-# Monorepo Deployment Split: Contextual PDD
+The 404 Not Found error you're encountering for the /start endpoint, specifically with the URL https://medical-rag-vector-uploader.onrender.com/undefined/api/agent/start, indicates that the server receiving the request does not have a route defined for that specific path.
 
-## Purpose
-This document outlines the architectural refactor and deployment changes necessary to convert the current fullstack monorepo-based RAG document uploader into two independently deployed services: a backend (API) service deployed on Render, and a static frontend deployed to Vercel or Netlify.
+Here's a breakdown of the situation and how to address it:
 
-## Background
-Originally, the app was served as a unified monorepo where both backend and frontend were deployed under a single Render web service. However, this introduced routing and runtime issues (e.g., React frontend 404s, backend routes conflicting with static files). Splitting deployments avoids these issues.
+The /start Endpoint Does Not Exist on the TxAgent Container:
+I've reviewed the hybrid-agent/main.py file, which defines the API endpoints for your TxAgent container. The available endpoints are /health, /test (GET and POST), /embed, /chat, and /embedding-jobs/{job_id}. There is no /start endpoint defined in the TxAgent container's API. This is why you are getting a 404 Not Found when trying to access it directly on the TxAgent container.
 
-## Goals
-- Maintain monorepo architecture for local development.
-- Deploy backend (FastAPI) as a web service to Render.
-- Deploy frontend (React + Vite) as a static site to Vercel or Netlify.
-- Share environment variables across services as needed.
-- Use Supabase for user authentication, RLS, and vector storage.
-- Integrate optional RunPod LLM embedding agent endpoint.
+Role of the TxAgent Container vs. Agent Session Management:
+The TxAgent container is designed to perform specific, stateless tasks like generating BioBERT embeddings (/embed) and providing chat responses based on document context (/chat). It does not inherently manage "agent sessions" in the sense of creating or terminating long-lived connections or processes that are tied to a user's frontend session.
+The agents table in your Supabase schema is intended for managing these higher-level agent sessions (e.g., tracking if an agent is active, idle, or terminated). This session management logic should reside in your Node.js backend, not directly in the TxAgent container.
 
-## New Directory Summary
+The undefined in the URL:
+The presence of /undefined/ in the URL (https://medical-rag-vector-uploader.onrender.com/undefined/api/agent/start) is a critical clue. This typically happens when a variable that is supposed to hold a part of the URL (like a base path or a dynamic segment) is not correctly defined or is null/undefined in the code that constructs the request. Since you've consolidated the backend and frontend, this issue is likely originating from your Node.js backend's routing or proxy configuration, or from the frontend's API call construction.
 
-```
-/
-├── backend/           # FastAPI service (deployed to Render)
-├── frontend/          # React client (deployed to Vercel/Netlify)
-├── supabase/          # Supabase migrations, config
-├── package.json       # Dev tool scripts (npm run dev, lint, etc.)
-```
+The Plan
+To resolve this, you need to implement the /api/agent/start endpoint in your Node.js backend and ensure the frontend is calling the correct URL.
 
-## Services
+Implement /api/agent/start in your Node.js Backend:
 
-### Backend API Service (Render)
-- Framework: FastAPI
-- Containerized: Yes (optional)
-- Routes:
-  - `POST /upload`
-  - `GET /docs`
-  - `POST /chat`
-- Auth: Supabase JWT
-- Needs `.env` vars:
-  - `SUPABASE_URL`
-  - `SUPABASE_KEY`
-  - `SUPABASE_BUCKET`
-  - `SUPABASE_JWT_SECRET`
-  - `OPENAI_API_KEY` (optional)
-  - `RUNPOD_EMBEDDING_URL` (optional)
-  - `RUNPOD_EMBEDDING_KEY` (optional)
+This endpoint should be responsible for handling the "Activate TxAgent" action.
+Its primary function would be to interact with your Supabase agents table:
+It could create a new entry in the agents table for the current user, setting its status to initializing or active.
+Alternatively, if an agent entry already exists for the user, it could update its status to active and refresh the last_active timestamp.
+Within this Node.js endpoint, you could also include a health check call to your TxAgent container's /health endpoint (e.g., GET https://bjo5yophw94s7b-8000.proxy.runpod.net/health) to confirm the container is running and responsive. This check would be performed by the Node.js backend, not directly by the frontend.
+The Node.js backend would then return a success response to the frontend, indicating that the agent session has been activated or updated in the database.
+Correct Frontend API Call:
 
-### Frontend Static Site (Vercel)
-- Framework: React (Vite)
-- Pages:
-  - `/`: Landing / Login
-  - `/dashboard`: Upload & document list
-  - `/chat`: Query interface
-  - `/agent`: Health/monitor
-- Env vars:
-  - `VITE_SUPABASE_URL`
-  - `VITE_SUPABASE_ANON_KEY`
-  - `VITE_API_URL` (Render backend endpoint)
+Ensure your frontend code is making the POST request to the correct URL for your Node.js backend's new /api/agent/start endpoint.
+Specifically, you need to debug why undefined is appearing in the URL. This points to a variable that's not being properly initialized or passed when constructing the API request URL. Check your frontend's API client configuration or the specific code that builds the URL for the /start endpoint.
+Utilize Existing TxAgent Container Logging for Debugging:
 
-## Design Constraints
-- Maintain developer velocity through a unified monorepo with shared tools.
-- Avoid CORS errors by ensuring VITE_API_URL matches deployed backend.
-- Keep frontend backend-agnostic (talks only to API_URL).
-
-## Risks
-- Render cold-start latency for free-tier backends.
-- Supabase vector limits or bandwidth constraints.
-- RunPod must be reliable for long-lived pods (e.g. agent health monitoring).
+The hybrid-agent/main.py and hybrid-agent/auth.py files already include extensive logging. If a request does reach the TxAgent container, these logs will show:
+Incoming request details (method, path, headers).
+JWT token validation steps and any errors (e.g., ExpiredSignatureError, InvalidAudienceError).
+Processing times for various operations.
+Since the 404 is occurring before the request reaches the TxAgent container, you will need to examine the logs of your Node.js backend (on Render.com) to pinpoint where the undefined is being introduced and why the 404 is being returned.
