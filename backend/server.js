@@ -5,7 +5,7 @@ import { corsMiddleware, optionsHandler } from './middleware/cors.js';
 import { requestLogger } from './middleware/logging.js';
 import { setupRoutes } from './routes/index.js';
 import { staticFileService } from './services/StaticFileService.js';
-import { agentController } from './agent_utils/core/agentController.js';
+import { mountAgentRoutes } from './agent_utils/index.js';
 import { errorLogger } from './agent_utils/shared/logger.js';
 
 const app = express();
@@ -18,12 +18,12 @@ errorLogger.info('Environment check', {
   environment: config.nodeEnv
 });
 
-// Initialize agent controller with Supabase
+// Initialize database connection
 try {
-  agentController.initialize(database.getClient());
-  errorLogger.success('Agent controller initialized');
+  const supabaseClient = database.getClient();
+  errorLogger.success('Database connection initialized');
 } catch (error) {
-  errorLogger.error('Failed to initialize agent controller', error);
+  errorLogger.error('Failed to initialize database connection', error);
   process.exit(1);
 }
 
