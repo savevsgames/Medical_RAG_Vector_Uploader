@@ -5,8 +5,8 @@ import { corsMiddleware, optionsHandler } from './middleware/cors.js';
 import { requestLogger } from './middleware/logging.js';
 import { setupRoutes } from './routes/index.js';
 import { staticFileService } from './services/StaticFileService.js';
-import { agentController } from './agent_utils/agentController.js';
-import { errorLogger } from './agent_utils/errorLogger.js';
+import { agentController } from './agent_utils/core/agentController.js';
+import { errorLogger } from './agent_utils/shared/logger.js';
 
 const app = express();
 

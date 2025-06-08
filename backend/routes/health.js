@@ -1,7 +1,7 @@
 import express from 'express';
 import axios from 'axios';
 import { config } from '../config/environment.js';
-import { errorLogger } from '../agent_utils/errorLogger.js';
+import { errorLogger } from '../agent_utils/shared/logger.js';
 
 const router = express.Router();
 
