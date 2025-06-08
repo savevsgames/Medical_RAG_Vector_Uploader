@@ -125,12 +125,14 @@ export class ChatService {
         match_count: limit
       });
 
-      // Use Supabase's vector similarity search
+      // FIXED: Updated to use the new match_documents function signature
+      // The function now uses SECURITY INVOKER and relies on RLS policies
+      // to filter documents by the authenticated user's ID
       const { data, error } = await this.supabase.rpc('match_documents', {
         query_embedding: queryEmbedding,
         match_threshold: threshold,
-        match_count: limit,
-        user_id: userId
+        match_count: limit
+        // Removed user_id parameter - RLS will handle user filtering
       });
 
       if (error) {
