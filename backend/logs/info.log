@@ -103,3 +103,86 @@
 [2025-06-08T01:55:38.963Z] [INFO] SUCCESS: Supabase connection verified {
   "test_query": "success"
 }
+[2025-06-08T02:24:06.926Z] [INFO] 🚀 Medical RAG Server starting up... 
+[2025-06-08T02:24:06.927Z] [INFO] Environment check {
+  "node_version": "v20.19.1",
+  "port": "8000",
+  "working_directory": "/home/project/backend"
+}
+[2025-06-08T02:24:06.928Z] [INFO] Environment variables validated {
+  "supabase_url_set": true,
+  "supabase_key_set": true,
+  "jwt_secret_set": true,
+  "runpod_url_set": true,
+  "openai_key_set": true,
+  "supabase_url_preview": "https://bfjfjxzdjhraabputkqi.s..."
+}
+[2025-06-08T02:24:06.928Z] [INFO] === DIAGNOSTIC CHECKS === 
+[2025-06-08T02:24:06.928Z] [INFO] SUCCESS: DocumentProcessor connection verified {
+  "path": "/home/project/backend/lib/documentProcessor.js"
+}
+[2025-06-08T02:24:06.928Z] [INFO] SUCCESS: Embedder connection verified {
+  "path": "/home/project/backend/lib/embedder.js"
+}
+[2025-06-08T02:24:06.929Z] [INFO] SUCCESS: ChatService connection verified {
+  "path": "/home/project/backend/lib/chatService.js"
+}
+[2025-06-08T02:24:06.929Z] [INFO] SUCCESS: Agent Utils Directory connection verified {
+  "path": "/home/project/backend/agent_utils"
+}
+[2025-06-08T02:24:06.930Z] [INFO] Lib directory contents {
+  "files": [
+    "chatService.js",
+    "documentProcessor.js",
+    "embedder.js"
+  ]
+}
+[2025-06-08T02:24:06.930Z] [INFO] Agent utils directory contents {
+  "files": [
+    "agentController.js",
+    "agentManager.js",
+    "agentMiddleware.js",
+    "errorLogger.js",
+    "index.js",
+    "runpodService.js"
+  ]
+}
+[2025-06-08T02:24:06.931Z] [INFO] === END DIAGNOSTIC === 
+[2025-06-08T02:24:06.931Z] [INFO] SUCCESS: DocumentProcessor initialized 
+[2025-06-08T02:24:06.931Z] [INFO] SUCCESS: EmbeddingService initialized 
+[2025-06-08T02:24:06.934Z] [INFO] SUCCESS: Supabase client initialized 
+[2025-06-08T02:24:06.934Z] [INFO] ChatService initialized {
+  "openai_configured": true,
+  "supabase_configured": true
+}
+[2025-06-08T02:24:06.934Z] [INFO] SUCCESS: ChatService initialized 
+[2025-06-08T02:24:06.935Z] [INFO] SUCCESS: Agent controller initialized with Supabase client 
+[2025-06-08T02:24:06.935Z] [INFO] SUCCESS: Agent controller initialized 
+[2025-06-08T02:24:06.936Z] [INFO] Mounting agent routes... 
+[2025-06-08T02:24:06.937Z] [INFO] Agent routes mounted successfully 
+[2025-06-08T02:24:06.937Z] [INFO] SUCCESS: Agent routes mounted successfully with authentication 
+[2025-06-08T02:24:06.961Z] [INFO] SUCCESS: 🚀 Medical RAG Server running {
+  "port": "8000",
+  "health_check": "http://localhost:8000/health",
+  "environment": "development"
+}
+[2025-06-08T02:24:06.961Z] [INFO] 🔧 Services configured: 
+[2025-06-08T02:24:06.961Z] [INFO] SUCCESS: Embedding connection verified 
+[2025-06-08T02:24:06.961Z] [INFO] SUCCESS: OpenAI Chat connection verified 
+[2025-06-08T02:24:06.961Z] [INFO] SUCCESS: Supabase connection verified 
+[2025-06-08T02:24:06.961Z] [INFO] SUCCESS: RunPod TxAgent connection verified 
+[2025-06-08T02:24:06.961Z] [INFO] 📚 Available endpoints: 
+[2025-06-08T02:24:06.962Z] [INFO]   - GET  /health (Health check) 
+[2025-06-08T02:24:06.962Z] [INFO]   - POST /upload (Document upload) 
+[2025-06-08T02:24:06.962Z] [INFO]   - POST /api/chat (Chat with TxAgent) 
+[2025-06-08T02:24:06.962Z] [INFO]   - POST /api/openai-chat (Chat with OpenAI RAG) 
+[2025-06-08T02:24:06.962Z] [INFO]   - POST /chat (Legacy chat - deprecated) 
+[2025-06-08T02:24:06.962Z] [INFO]   - POST /api/agent/start (Start TxAgent) 
+[2025-06-08T02:24:06.962Z] [INFO]   - POST /api/agent/stop (Stop TxAgent) 
+[2025-06-08T02:24:06.963Z] [INFO]   - GET  /api/agent/status (Agent status) 
+[2025-06-08T02:24:06.963Z] [INFO]   - POST /api/embed (RunPod embedding) 
+[2025-06-08T02:24:06.963Z] [INFO]   - POST /agent/* (Legacy endpoints - deprecated) 
+[2025-06-08T02:24:06.963Z] [INFO]   - GET  /* (SPA fallback to index.html) 
+[2025-06-08T02:24:07.608Z] [INFO] SUCCESS: Supabase connection verified {
+  "test_query": "success"
+}
