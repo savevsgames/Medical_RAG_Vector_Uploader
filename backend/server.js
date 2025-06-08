@@ -553,20 +553,22 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
       metadata
     });
 
-    // Try RunPod embedding first, fallback to local embedding service
+    // CRITICAL FIX: Try TxAgent embedding first with proper JWT forwarding
     let embedding;
     let embeddingSource = 'local';
     
     try {
       if (process.env.RUNPOD_EMBEDDING_URL) {
-        errorLogger.info('Attempting RunPod embedding', {
+        errorLogger.info('Attempting TxAgent embedding with user JWT', {
           user_id: req.userId,
           document_id: documentId,
           text_length: text.length,
-          runpod_url: process.env.RUNPOD_EMBEDDING_URL
+          runpod_url: process.env.RUNPOD_EMBEDDING_URL,
+          has_jwt: !!req.headers.authorization
         });
 
-        const runpodResponse = await axios.post(
+        // CRITICAL FIX: Use TxAgent container directly with user's JWT
+        const txAgentResponse = await axios.post(
           `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
           { 
             file_path: `upload_${documentId}`,
@@ -580,7 +582,7 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
           },
           { 
             headers: { 
-              'Authorization': req.headers.authorization, // Forward user's JWT
+              'Authorization': req.headers.authorization, // Forward user's JWT directly
               'Content-Type': 'application/json'
             },
             timeout: 30000
@@ -588,38 +590,38 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
         );
         
         // Handle different response formats from TxAgent
-        if (runpodResponse.data.document_ids && runpodResponse.data.document_ids.length > 0) {
+        if (txAgentResponse.data.document_ids && txAgentResponse.data.document_ids.length > 0) {
           // Background processing response
           embeddingSource = 'runpod_processing';
-          errorLogger.info('RunPod background processing initiated', {
+          errorLogger.info('TxAgent background processing initiated', {
             user_id: req.userId,
             document_id: documentId,
-            document_ids: runpodResponse.data.document_ids,
-            chunk_count: runpodResponse.data.chunk_count
+            document_ids: txAgentResponse.data.document_ids,
+            chunk_count: txAgentResponse.data.chunk_count
           });
           
           // For background processing, use local embedding for immediate storage
-          embedding = await embeddingService.generateEmbedding(text);
+          embedding = await embeddingService.generateEmbedding(text, req.headers.authorization);
           embeddingSource = 'local_with_runpod_processing';
-        } else if (runpodResponse.data.embedding) {
+        } else if (txAgentResponse.data.embedding) {
           // Direct embedding response
-          embedding = runpodResponse.data.embedding;
+          embedding = txAgentResponse.data.embedding;
           embeddingSource = 'runpod';
           
-          errorLogger.success('RunPod embedding completed', {
+          errorLogger.success('TxAgent embedding completed', {
             user_id: req.userId,
             document_id: documentId,
             dimensions: embedding.length,
-            response_status: runpodResponse.status
+            response_status: txAgentResponse.status
           });
         } else {
-          throw new Error('Invalid RunPod response format');
+          throw new Error('Invalid TxAgent response format');
         }
       } else {
-        throw new Error('RunPod not configured');
+        throw new Error('TxAgent not configured');
       }
     } catch (embeddingError) {
-      errorLogger.warn('RunPod embedding failed, using local service', {
+      errorLogger.warn('TxAgent embedding failed, using local service', {
         user_id: req.userId,
         document_id: documentId,
         error: embeddingError.message,
@@ -627,7 +629,8 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
         status: embeddingError.response?.status
       });
       
-      embedding = await embeddingService.generateEmbedding(text);
+      // CRITICAL FIX: Pass user JWT to local embedding service
+      embedding = await embeddingService.generateEmbedding(text, req.headers.authorization);
       embeddingSource = 'local';
       
       errorLogger.info('Local embedding completed', {
