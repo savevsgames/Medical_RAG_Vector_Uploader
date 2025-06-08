@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Upload, Search, Filter, RefreshCw, Plus, Grid, List } from 'lucide-react';
+import { FileText, Upload, Plus } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { UploadModal } from '../components/upload';
@@ -9,6 +9,8 @@ import {
   DocumentEditModal 
 } from '../components/documents';
 import { Button, Input, Select, EmptyState } from '../components/ui';
+import { PageLayout, StatsLayout } from '../components/layouts';
+import { AsyncState } from '../components/feedback';
 import { logger, logSupabaseOperation, logUserAction } from '../utils/logger';
 import toast from 'react-hot-toast';
 
@@ -33,11 +35,9 @@ export function Documents() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
-  const [sortBy, setSortBy] = useState('created_at');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   
   // Modal states
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -53,10 +53,11 @@ export function Documents() {
     });
 
     try {
+      setError(null);
       const { data, error } = await supabase
         .from('documents')
         .select('*')
-        .order(sortBy, { ascending: sortOrder === 'asc' });
+        .order('created_at', { ascending: false });
 
       if (error) {
         logSupabaseOperation('fetchDocuments', userEmail, 'error', {
@@ -75,10 +76,12 @@ export function Documents() {
 
       setDocuments(data || []);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load documents';
+      setError(errorMessage);
       logger.error('Failed to fetch documents', {
         component: 'Documents',
         user: userEmail,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: errorMessage
       });
       toast.error('Failed to load documents');
     } finally {
@@ -109,7 +112,6 @@ export function Documents() {
         component: 'Documents'
       });
 
-      // Update local state
       setDocuments(prev => prev.filter(doc => doc.id !== documentId));
       
     } catch (error) {
@@ -138,7 +140,6 @@ export function Documents() {
   useEffect(() => {
     let filtered = documents;
 
-    // Apply search filter
     if (searchTerm) {
       filtered = filtered.filter(doc => 
         doc.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -146,7 +147,6 @@ export function Documents() {
       );
     }
 
-    // Apply type filter
     if (filterType !== 'all') {
       filtered = filtered.filter(doc => {
         const mimeType = doc.metadata.mime_type || '';
@@ -170,17 +170,34 @@ export function Documents() {
     if (user) {
       fetchDocuments();
     }
-  }, [user, sortBy, sortOrder]);
+  }, [user]);
 
   const getDocumentStats = () => {
     const totalDocs = documents.length;
     const totalSize = documents.reduce((sum, doc) => sum + (doc.metadata.file_size || 0), 0);
     const totalChars = documents.reduce((sum, doc) => sum + doc.metadata.char_count, 0);
     
-    return { totalDocs, totalSize, totalChars };
+    return [
+      {
+        label: 'Total Documents',
+        value: totalDocs,
+        icon: <FileText className="w-5 h-5" />,
+        color: 'blue' as const
+      },
+      {
+        label: 'Total Size',
+        value: `${(totalSize / 1024 / 1024).toFixed(1)} MB`,
+        icon: <Upload className="w-5 h-5" />,
+        color: 'green' as const
+      },
+      {
+        label: 'Total Content',
+        value: `${(totalChars / 1000).toFixed(0)}K chars`,
+        icon: <FileText className="w-5 h-5" />,
+        color: 'purple' as const
+      }
+    ];
   };
-
-  const stats = getDocumentStats();
 
   const filterOptions = [
     { value: 'all', label: 'All Types' },
@@ -189,80 +206,31 @@ export function Documents() {
     { value: 'text', label: 'Text' }
   ];
 
-  const sortOptions = [
-    { value: 'created_at-desc', label: 'Newest First' },
-    { value: 'created_at-asc', label: 'Oldest First' },
-    { value: 'filename-asc', label: 'Name A-Z' },
-    { value: 'filename-desc', label: 'Name Z-A' }
-  ];
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <PageLayout
+      title="Document Library"
+      subtitle="Manage your medical documents and embeddings"
+      icon={<FileText className="w-6 h-6 text-green-600" />}
+      actions={
+        <Button
+          onClick={() => setShowUploadModal(true)}
+          icon={<Plus className="w-5 h-5" />}
+        >
+          Upload Documents
+        </Button>
+      }
+    >
+      {/* Stats */}
+      <StatsLayout stats={getDocumentStats()} columns={3} />
+
+      {/* Controls */}
       <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center justify-center w-10 h-10 bg-green-100 rounded-lg">
-              <FileText className="w-6 h-6 text-green-600" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Document Library</h1>
-              <p className="text-gray-600">Manage your medical documents and embeddings</p>
-            </div>
-          </div>
-          <Button
-            onClick={() => setShowUploadModal(true)}
-            icon={<Plus className="w-5 h-5" />}
-          >
-            Upload Documents
-          </Button>
-        </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-blue-50 rounded-lg p-4">
-            <div className="flex items-center space-x-2">
-              <FileText className="w-5 h-5 text-blue-600" />
-              <span className="text-sm font-medium text-blue-900">Total Documents</span>
-            </div>
-            <p className="text-2xl font-bold text-blue-900 mt-1">{stats.totalDocs}</p>
-          </div>
-          <div className="bg-green-50 rounded-lg p-4">
-            <div className="flex items-center space-x-2">
-              <Upload className="w-5 h-5 text-green-600" />
-              <span className="text-sm font-medium text-green-900">Total Size</span>
-            </div>
-            <p className="text-2xl font-bold text-green-900 mt-1">
-              {(stats.totalSize / 1024 / 1024).toFixed(1)} MB
-            </p>
-          </div>
-          <div className="bg-purple-50 rounded-lg p-4">
-            <div className="flex items-center space-x-2">
-              <Search className="w-5 h-5 text-purple-600" />
-              <span className="text-sm font-medium text-purple-900">Total Content</span>
-            </div>
-            <p className="text-2xl font-bold text-purple-900 mt-1">
-              {(stats.totalChars / 1000).toFixed(0)}K chars
-            </p>
-          </div>
-        </div>
-
-        {/* Controls */}
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mb-6">
           <div className="flex flex-col sm:flex-row gap-3 flex-1">
             <Input
               placeholder="Search documents..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              leftIcon={<Search className="w-4 h-4" />}
               className="max-w-md"
             />
 
@@ -271,86 +239,60 @@ export function Documents() {
               onChange={(e) => setFilterType(e.target.value)}
               options={filterOptions}
             />
-
-            <Select
-              value={`${sortBy}-${sortOrder}`}
-              onChange={(e) => {
-                const [field, order] = e.target.value.split('-');
-                setSortBy(field);
-                setSortOrder(order as 'asc' | 'desc');
-              }}
-              options={sortOptions}
-            />
           </div>
 
-          <div className="flex items-center space-x-2">
-            {/* View Mode Toggle */}
-            <div className="flex border border-gray-300 rounded-lg">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 ${viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-500 hover:text-gray-700'} transition-colors`}
-              >
-                <Grid className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`p-2 ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-500 hover:text-gray-700'} transition-colors`}
-              >
-                <List className="w-4 h-4" />
-              </button>
-            </div>
-
-            <Button
-              variant="ghost"
-              onClick={fetchDocuments}
-              icon={<RefreshCw className="w-4 h-4" />}
-            />
-          </div>
+          <Button
+            variant="ghost"
+            onClick={fetchDocuments}
+          >
+            Refresh
+          </Button>
         </div>
-      </div>
 
-      {/* Documents Grid/List */}
-      <div className="bg-white rounded-lg shadow p-6">
-        {filteredDocuments.length === 0 ? (
-          <EmptyState
-            icon={<FileText className="w-16 h-16" />}
-            title={documents.length === 0 ? 'No documents yet' : 'No documents match your search'}
-            description={
-              documents.length === 0 
-                ? 'Upload your first medical document to get started with AI analysis'
-                : 'Try adjusting your search terms or filters'
-            }
-            action={documents.length === 0 ? {
-              label: 'Upload Your First Document',
-              onClick: () => setShowUploadModal(true),
-              icon: <Upload className="w-5 h-5" />
-            } : undefined}
-          />
-        ) : (
-          <div className={
-            viewMode === 'grid' 
-              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
-              : 'space-y-4'
-          }>
-            {filteredDocuments.map((document) => (
-              <DocumentCard
-                key={document.id}
-                document={document}
-                onDelete={handleDeleteDocument}
-                onEdit={setEditDocument}
-                onView={setViewDocument}
-              />
-            ))}
-          </div>
-        )}
+        {/* Documents Grid */}
+        <AsyncState
+          loading={loading}
+          error={error}
+          onRetry={fetchDocuments}
+          loadingText="Loading documents..."
+        >
+          {filteredDocuments.length === 0 ? (
+            <EmptyState
+              icon={<FileText className="w-16 h-16" />}
+              title={documents.length === 0 ? 'No documents yet' : 'No documents match your search'}
+              description={
+                documents.length === 0 
+                  ? 'Upload your first medical document to get started with AI analysis'
+                  : 'Try adjusting your search terms or filters'
+              }
+              action={documents.length === 0 ? {
+                label: 'Upload Your First Document',
+                onClick: () => setShowUploadModal(true),
+                icon: <Upload className="w-5 h-5" />
+              } : undefined}
+            />
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredDocuments.map((document) => (
+                  <DocumentCard
+                    key={document.id}
+                    document={document}
+                    onDelete={handleDeleteDocument}
+                    onEdit={setEditDocument}
+                    onView={setViewDocument}
+                  />
+                ))}
+              </div>
 
-        {/* Results Info */}
-        {filteredDocuments.length > 0 && (
-          <div className="mt-6 pt-6 border-t border-gray-200 text-sm text-gray-500 text-center">
-            Showing {filteredDocuments.length} of {documents.length} documents
-            {searchTerm && ` matching "${searchTerm}"`}
-          </div>
-        )}
+              {/* Results Info */}
+              <div className="mt-6 pt-6 border-t border-gray-200 text-sm text-gray-500 text-center">
+                Showing {filteredDocuments.length} of {documents.length} documents
+                {searchTerm && ` matching "${searchTerm}"`}
+              </div>
+            </>
+          )}
+        </AsyncState>
       </div>
 
       {/* Modals */}
@@ -372,6 +314,6 @@ export function Documents() {
         onClose={() => setEditDocument(null)}
         onSave={handleEditDocument}
       />
-    </div>
+    </PageLayout>
   );
 }
