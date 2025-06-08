@@ -1,4 +1,4 @@
-import { logger } from '../../agent_utils/shared/logger.js';
+import { errorLogger } from '../../agent_utils/shared/logger.js';
 import { EmbeddingService } from './EmbeddingService.js';
 import { DocumentSearchService } from './DocumentSearchService.js';
 import { ResponseGenerationService } from './ResponseGenerationService.js';
@@ -10,7 +10,7 @@ export class ChatService {
     this.searchService = new DocumentSearchService(supabaseClient);
     this.responseService = new ResponseGenerationService();
     
-    logger.info('ChatService initialized', {
+    errorLogger.info('ChatService initialized', {
       openai_configured: this.responseService.isConfigured(),
       supabase_configured: !!supabaseClient,
       component: 'ChatService'
@@ -19,14 +19,14 @@ export class ChatService {
 
   async processQuery(userId, query) {
     if (!this.responseService.isConfigured()) {
-      logger.error('OpenAI API key not configured for chat processing', null, {
+      errorLogger.error('OpenAI API key not configured for chat processing', null, {
         user_id: userId,
         component: 'ChatService'
       });
       throw new Error('OpenAI API key not configured');
     }
 
-    logger.info('Processing chat query', {
+    errorLogger.info('Processing chat query', {
       user_id: userId,
       query_length: query.length,
       query_preview: query.substring(0, 100),
@@ -59,7 +59,7 @@ export class ChatService {
       };
       
     } catch (error) {
-      logger.error('Query processing failed', error, {
+      errorLogger.error('Query processing failed', error, {
         user_id: userId,
         query_length: query.length,
         error_stack: error.stack,
