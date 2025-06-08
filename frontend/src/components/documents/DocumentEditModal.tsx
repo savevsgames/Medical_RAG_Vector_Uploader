@@ -1,6 +1,6 @@
 import React from 'react';
 import { DocumentModal } from './DocumentModal';
-import { DocumentForm } from './DocumentForm';
+import { DocumentMetadataForm } from '../forms';
 
 interface Document {
   id: string;
@@ -28,6 +28,22 @@ interface DocumentEditModalProps {
 export function DocumentEditModal({ document, isOpen, onClose, onSave }: DocumentEditModalProps) {
   if (!document) return null;
 
+  const handleSubmit = async (filename: string, metadata: Record<string, any>) => {
+    const updatedDocument = {
+      ...document,
+      filename,
+      metadata
+    };
+    
+    onSave(updatedDocument);
+  };
+
+  // Extract system metadata
+  const systemKeys = ['char_count', 'page_count', 'file_size', 'mime_type', 'embedding_source', 'processing_time_ms'];
+  const systemMetadata = Object.entries(document.metadata)
+    .filter(([key]) => systemKeys.includes(key))
+    .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
+
   return (
     <DocumentModal
       isOpen={isOpen}
@@ -36,9 +52,11 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
       size="lg"
     >
       <div className="p-6">
-        <DocumentForm
-          document={document}
-          onSave={onSave}
+        <DocumentMetadataForm
+          initialFilename={document.filename}
+          initialMetadata={document.metadata}
+          systemMetadata={systemMetadata}
+          onSubmit={handleSubmit}
           onCancel={onClose}
         />
       </div>

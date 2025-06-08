@@ -1,18 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { LoginForm } from '../components/forms';
 import toast from 'react-hot-toast';
 import { logger, logUserAction, logSupabaseOperation } from '../utils/logger';
 
 export function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+  const handleSubmit = async (email: string, password: string) => {
     logger.info(`${isSignUp ? 'Sign up' : 'Sign in'} attempt`, {
       component: 'Login',
       email,
@@ -72,7 +69,6 @@ export function Login() {
           redirectTo: '/'
         });
 
-        // Navigate to root path, which will redirect to /chat for authenticated users
         navigate('/');
       }
     } catch (error) {
@@ -86,7 +82,7 @@ export function Login() {
       });
 
       toast.error(isSignUp ? 'Failed to sign up' : 'Failed to sign in');
-      console.error('Auth error:', error);
+      throw error; // Re-throw to let the form handle the error state
     }
   };
 
@@ -98,51 +94,12 @@ export function Login() {
             {isSignUp ? 'Create your account' : 'Sign in to your account'}
           </h2>
         </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <input
-                type="email"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            <div>
-              <input
-                type="password"
-                required
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div>
-            <button
-              type="submit"
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              {isSignUp ? 'Sign up' : 'Sign in'}
-            </button>
-          </div>
-
-          <div className="text-center">
-            <button
-              type="button"
-              className="text-sm text-blue-600 hover:text-blue-500"
-              onClick={() => setIsSignUp(!isSignUp)}
-            >
-              {isSignUp
-                ? 'Already have an account? Sign in'
-                : "Don't have an account? Sign up"}
-            </button>
-          </div>
-        </form>
+        
+        <LoginForm
+          onSubmit={handleSubmit}
+          isSignUp={isSignUp}
+          onToggleMode={() => setIsSignUp(!isSignUp)}
+        />
       </div>
     </div>
   );
