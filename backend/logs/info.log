@@ -100,3 +100,6 @@
 [2025-06-08T01:55:37.967Z] [INFO]   - POST /api/embed (RunPod embedding) 
 [2025-06-08T01:55:37.967Z] [INFO]   - POST /agent/* (Legacy endpoints - deprecated) 
 [2025-06-08T01:55:37.967Z] [INFO]   - GET  /* (SPA fallback to index.html) 
+[2025-06-08T01:55:38.963Z] [INFO] SUCCESS: Supabase connection verified {
+  "test_query": "success"
+}
