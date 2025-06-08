@@ -19,3 +19,10 @@
 [2025-06-08T07:33:55.049Z] [WARN] CORS origin rejected {
   "origin": "http://localhost:8000"
 }
+[2025-06-08T07:52:02.316Z] [WARN] Frontend dist directory not found {
+  "expected_path": "/home/project/frontend/dist",
+  "current_dir": "/home/project/backend"
+}
+[2025-06-08T07:52:02.574Z] [WARN] CORS origin rejected {
+  "origin": "http://localhost:8000"
+}
