@@ -1,8 +1,8 @@
 import express from 'express';
-import { ChatService } from '../lib/chatService.js';
+import { ChatService } from '../lib/services/ChatService.js';
 import { supabase } from '../config/database.js';
 import { config } from '../config/environment.js';
-import { errorLogger } from '../agent_utils/errorLogger.js';
+import { errorLogger } from '../agent_utils/shared/logger.js';
 
 const router = express.Router();
 
@@ -16,19 +16,26 @@ router.post('/openai-chat', async (req, res) => {
     const userId = req.userId;
     
     if (!message || typeof message !== 'string') {
-      errorLogger.warn('Invalid OpenAI chat request - missing message', { user_id: userId });
+      errorLogger.warn('Invalid OpenAI chat request - missing message', { 
+        user_id: userId,
+        component: 'OpenAIChat'
+      });
       return res.status(400).json({ error: 'Message is required' });
     }
 
     if (!config.openai.apiKey) {
-      errorLogger.warn('OpenAI chat service not configured', { user_id: userId });
+      errorLogger.warn('OpenAI chat service not configured', { 
+        user_id: userId,
+        component: 'OpenAIChat'
+      });
       return res.status(503).json({ error: 'OpenAI chat service not configured' });
     }
 
     errorLogger.info('Processing OpenAI chat request', {
       user_id: userId,
       message_length: message.length,
-      message_preview: message.substring(0, 100)
+      message_preview: message.substring(0, 100),
+      component: 'OpenAIChat'
     });
 
     // Use ChatService for OpenAI RAG processing
@@ -37,7 +44,8 @@ router.post('/openai-chat', async (req, res) => {
     errorLogger.success('OpenAI chat completed', {
       user_id: userId,
       response_length: result.response.length,
-      sources_count: result.sources.length
+      sources_count: result.sources.length,
+      component: 'OpenAIChat'
     });
 
     res.json({
@@ -55,7 +63,8 @@ router.post('/openai-chat', async (req, res) => {
     errorLogger.error('OpenAI chat request failed', error, {
       user_id: req.userId,
       error_message: errorMessage,
-      error_stack: error.stack
+      error_stack: error.stack,
+      component: 'OpenAIChat'
     });
     
     res.status(500).json({ 

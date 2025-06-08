@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { logger } from '../../agent_utils/shared/logger.js';
 
 export class EmbeddingService {
   constructor() {
@@ -6,49 +7,59 @@ export class EmbeddingService {
     this.runpodKey = process.env.RUNPOD_EMBEDDING_KEY;
     this.openaiKey = process.env.OPENAI_API_KEY;
     
-    console.log('EmbeddingService initialized');
-    console.log(`RunPod configured: ${!!this.runpodUrl}`);
-    console.log(`OpenAI configured: ${!!this.openaiKey}`);
+    logger.info('EmbeddingService initialized', {
+      runpod_configured: !!this.runpodUrl,
+      openai_configured: !!this.openaiKey,
+      component: 'EmbeddingService'
+    });
   }
 
   isConfigured() {
     return !!(this.runpodUrl && this.runpodKey) || !!this.openaiKey;
   }
 
-  // CRITICAL FIX: Updated to accept userJWT parameter
   async generateEmbedding(text, userJWT = null) {
     if (!text || typeof text !== 'string') {
       throw new Error('Text input is required for embedding generation');
     }
 
-    // Clean and truncate text if needed
-    const cleanText = text.trim().substring(0, 8000); // Limit to prevent token overflow
+    const cleanText = text.trim().substring(0, 8000);
     
     try {
-      // CRITICAL FIX: Try TxAgent BioBERT first with user's JWT (medical-specific)
+      // Try TxAgent BioBERT first with user's JWT (medical-specific)
       if (this.runpodUrl && userJWT) {
-        console.log('🔧 Using TxAgent BioBERT with user JWT authentication');
+        logger.debug('Using TxAgent BioBERT with user JWT authentication', {
+          component: 'EmbeddingService'
+        });
         return await this.generateTxAgentEmbedding(cleanText, userJWT);
       }
       
       // Fallback to OpenAI if no JWT or TxAgent not available
       if (this.openaiKey) {
-        console.log('🔧 Falling back to OpenAI embedding service');
+        logger.debug('Using OpenAI embedding service', {
+          component: 'EmbeddingService'
+        });
         return await this.generateOpenAIEmbedding(cleanText);
       }
       
       throw new Error('No embedding service configured or JWT token missing');
       
     } catch (error) {
-      console.error('Embedding generation failed:', error);
+      logger.error('Embedding generation failed', error, {
+        component: 'EmbeddingService'
+      });
       
       // If TxAgent fails, try OpenAI as fallback
       if (this.runpodUrl && this.openaiKey && userJWT) {
-        console.log('TxAgent failed, trying OpenAI fallback...');
+        logger.info('TxAgent failed, trying OpenAI fallback', {
+          component: 'EmbeddingService'
+        });
         try {
           return await this.generateOpenAIEmbedding(cleanText);
         } catch (fallbackError) {
-          console.error('OpenAI fallback also failed:', fallbackError);
+          logger.error('OpenAI fallback also failed', fallbackError, {
+            component: 'EmbeddingService'
+          });
           throw new Error('All embedding services failed');
         }
       }
@@ -57,21 +68,62 @@ export class EmbeddingService {
     }
   }
 
-  // CRITICAL FIX: New method for TxAgent container with proper JWT authentication and POST method
+  async generateQueryEmbedding(query) {
+    try {
+      logger.info('Calling OpenAI embeddings API', {
+        query_length: query.length,
+        model: 'text-embedding-3-small',
+        component: 'EmbeddingService'
+      });
+
+      const response = await axios.post(
+        'https://api.openai.com/v1/embeddings',
+        {
+          model: 'text-embedding-3-small',
+          input: query,
+          encoding_format: 'float'
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.openaiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+
+      logger.success('OpenAI embedding generated', {
+        dimensions: response.data.data[0].embedding.length,
+        usage: response.data.usage,
+        component: 'EmbeddingService'
+      });
+
+      return response.data.data[0].embedding;
+    } catch (error) {
+      logger.error('Failed to generate query embedding', error, {
+        error_response: error.response?.data,
+        error_status: error.response?.status,
+        component: 'EmbeddingService'
+      });
+      throw new Error(`Failed to generate query embedding: ${error.message}`);
+    }
+  }
+
   async generateTxAgentEmbedding(text, userJWT) {
     try {
-      console.log('🚀 Calling TxAgent container for BioBERT embedding');
-      console.log(`📍 TxAgent URL: ${this.runpodUrl}`);
-      console.log(`🔐 Using user JWT authentication: ${userJWT ? 'YES' : 'NO'}`);
-      console.log(`📝 Text length: ${text.length} characters`);
+      logger.debug('Calling TxAgent container for BioBERT embedding', {
+        txagent_url: this.runpodUrl,
+        text_length: text.length,
+        component: 'EmbeddingService'
+      });
 
       // CRITICAL FIX: Ensure clean URL without trailing slashes
       const embedUrl = `${this.runpodUrl.replace(/\/+$/, '')}/embed`;
 
       // CRITICAL FIX: Use explicit axios configuration to force POST method
       const axiosConfig = {
-        method: 'POST', // Explicitly set method
-        url: embedUrl, // Clean URL without double slashes
+        method: 'POST',
+        url: embedUrl,
         data: {
           file_path: `inline_text_${Date.now()}`,
           metadata: {
@@ -82,45 +134,56 @@ export class EmbeddingService {
           }
         },
         headers: {
-          'Authorization': userJWT, // CRITICAL: Use user's JWT, not RunPod key
+          'Authorization': userJWT,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        timeout: 30000, // 30 second timeout
-        // Force axios to use POST even with redirects
+        timeout: 30000,
         maxRedirects: 0,
         validateStatus: function (status) {
-          return status >= 200 && status < 500; // Accept 4xx as valid to handle our own errors
+          return status >= 200 && status < 500;
         }
       };
 
-      console.log('🚀 Sending POST request to TxAgent /embed endpoint');
-      console.log(`📊 Request payload size: ${JSON.stringify(axiosConfig.data).length} bytes`);
+      logger.debug('Sending POST request to TxAgent /embed endpoint', {
+        url: embedUrl,
+        payload_size: JSON.stringify(axiosConfig.data).length,
+        component: 'EmbeddingService'
+      });
 
-      // CRITICAL FIX: Use axios() with explicit config instead of axios.post()
       const response = await axios(axiosConfig);
 
-      console.log('✅ TxAgent embedding response received');
-      console.log(`📊 Response status: ${response.status}`);
-      console.log(`📋 Response data keys: ${Object.keys(response.data)}`);
+      logger.success('TxAgent embedding response received', {
+        status: response.status,
+        response_keys: Object.keys(response.data),
+        component: 'EmbeddingService'
+      });
 
       // Handle different TxAgent response formats
       if (response.data.embedding && Array.isArray(response.data.embedding)) {
-        console.log(`🎯 Direct embedding received: ${response.data.embedding.length} dimensions`);
+        logger.success('Direct embedding received', {
+          dimensions: response.data.embedding.length,
+          component: 'EmbeddingService'
+        });
         return response.data.embedding;
       }
       
       if (response.data.document_ids && response.data.document_ids.length > 0) {
-        console.log(`📄 Background processing initiated: ${response.data.document_ids.length} documents`);
-        // For background processing, we need to return a placeholder embedding
-        // The actual embeddings will be stored in the database by the TxAgent
+        logger.info('Background processing initiated', {
+          document_ids: response.data.document_ids.length,
+          component: 'EmbeddingService'
+        });
         throw new Error('TxAgent background processing - use fallback embedding');
       }
       
       throw new Error('Invalid TxAgent response format - no embedding found');
       
     } catch (error) {
-      console.error('❌ TxAgent embedding failed:', error.message);
+      logger.error('TxAgent embedding failed', error, {
+        container_url: this.runpodUrl,
+        text_length: text?.length,
+        component: 'EmbeddingService'
+      });
       
       if (error.code === 'ECONNABORTED') {
         throw new Error('TxAgent request timeout - container may be starting up');
@@ -138,47 +201,12 @@ export class EmbeddingService {
     }
   }
 
-  // LEGACY: Keep RunPod method for backward compatibility (but not used with JWT)
-  async generateRunPodEmbedding(text) {
-    try {
-      console.log('⚠️  LEGACY: Using RunPod API key method (deprecated)');
-      
-      const response = await axios.post(
-        this.runpodUrl,
-        {
-          input: {
-            text: text,
-            normalize: true,
-            truncate: true
-          }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.runpodKey}`, // Legacy RunPod API key
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000 // 30 second timeout
-        }
-      );
-
-      if (response.data && response.data.output && response.data.output.embedding) {
-        return response.data.output.embedding;
-      }
-      
-      throw new Error('Invalid RunPod response format');
-      
-    } catch (error) {
-      if (error.code === 'ECONNABORTED') {
-        throw new Error('RunPod request timeout');
-      }
-      throw new Error(`RunPod embedding failed: ${error.message}`);
-    }
-  }
-
   async generateOpenAIEmbedding(text) {
     try {
-      console.log('🤖 Calling OpenAI embeddings API');
-      console.log(`📝 Text length: ${text.length} characters`);
+      logger.debug('Calling OpenAI embeddings API', {
+        text_length: text.length,
+        component: 'EmbeddingService'
+      });
       
       const response = await axios.post(
         'https://api.openai.com/v1/embeddings',
@@ -198,8 +226,11 @@ export class EmbeddingService {
       );
 
       if (response.data && response.data.data && response.data.data[0]) {
-        console.log(`✅ OpenAI embedding generated: ${response.data.data[0].embedding.length} dimensions`);
-        console.log(`📊 Usage: ${JSON.stringify(response.data.usage)}`);
+        logger.success('OpenAI embedding generated', {
+          dimensions: response.data.data[0].embedding.length,
+          usage: response.data.usage,
+          component: 'EmbeddingService'
+        });
         return response.data.data[0].embedding;
       }
       

@@ -1,30 +1,59 @@
 import pdfParse from 'pdf-parse-debugging-disabled';
 import mammoth from 'mammoth';
-import { marked } from 'marked';
+import { logger } from '../../agent_utils/shared/logger.js';
 
-export class DocumentProcessor {
+export class DocumentProcessingService {
   constructor() {
-    console.log('DocumentProcessor initialized');
+    logger.info('DocumentProcessingService initialized', {
+      component: 'DocumentProcessingService'
+    });
   }
 
   async extractText(buffer, filename) {
     const extension = this.getFileExtension(filename).toLowerCase();
     
     try {
+      logger.info('Starting text extraction', {
+        filename,
+        extension,
+        buffer_size: buffer.length,
+        component: 'DocumentProcessingService'
+      });
+
+      let result;
       switch (extension) {
         case '.pdf':
-          return await this.extractFromPDF(buffer);
+          result = await this.extractFromPDF(buffer);
+          break;
         case '.docx':
-          return await this.extractFromDOCX(buffer);
+          result = await this.extractFromDOCX(buffer);
+          break;
         case '.md':
-          return await this.extractFromMarkdown(buffer);
+          result = await this.extractFromMarkdown(buffer);
+          break;
         case '.txt':
-          return await this.extractFromTXT(buffer);
+          result = await this.extractFromTXT(buffer);
+          break;
         default:
           throw new Error(`Unsupported file type: ${extension}`);
       }
+
+      logger.success('Text extraction completed', {
+        filename,
+        extension,
+        text_length: result.text.length,
+        metadata: result.metadata,
+        component: 'DocumentProcessingService'
+      });
+
+      return result;
     } catch (error) {
-      console.error(`Error extracting text from ${filename}:`, error);
+      logger.error('Text extraction failed', error, {
+        filename,
+        extension,
+        error_stack: error.stack,
+        component: 'DocumentProcessingService'
+      });
       throw error;
     }
   }

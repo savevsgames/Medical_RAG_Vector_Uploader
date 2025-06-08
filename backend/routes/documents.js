@@ -1,15 +1,14 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../config/database.js';
-import { DocumentProcessor } from '../lib/documentProcessor.js';
-import { EmbeddingService } from '../lib/embedder.js';
+import { DocumentProcessingService, EmbeddingService } from '../lib/services/index.js';
 import { upload } from '../middleware/upload.js';
-import { errorLogger } from '../agent_utils/errorLogger.js';
+import { errorLogger } from '../agent_utils/shared/logger.js';
 
 const router = express.Router();
 
 // Initialize services
-const documentProcessor = new DocumentProcessor();
+const documentProcessor = new DocumentProcessingService();
 const embeddingService = new EmbeddingService();
 
 // Enhanced document upload endpoint with comprehensive logging
@@ -20,7 +19,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     if (!req.file) {
       errorLogger.warn('Upload failed - no file provided', { 
         user_id: req.userId,
-        ip: req.ip
+        ip: req.ip,
+        component: 'DocumentUpload'
       });
       return res.status(400).json({ error: 'No file provided' });
     }
@@ -30,18 +30,13 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       filename: req.file.originalname,
       size: req.file.size,
       mimetype: req.file.mimetype,
-      ip: req.ip
+      ip: req.ip,
+      component: 'DocumentUpload'
     });
 
     const documentId = uuidv4();
     
     // Extract text from document
-    errorLogger.info('Starting text extraction', {
-      user_id: req.userId,
-      document_id: documentId,
-      filename: req.file.originalname
-    });
-
     const { text, metadata } = await documentProcessor.extractText(
       req.file.buffer, 
       req.file.originalname
@@ -51,17 +46,11 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       errorLogger.warn('Upload failed - no text extracted', {
         user_id: req.userId,
         filename: req.file.originalname,
-        metadata
+        metadata,
+        component: 'DocumentUpload'
       });
       return res.status(400).json({ error: 'Could not extract text from document' });
     }
-
-    errorLogger.info('Text extraction completed', {
-      user_id: req.userId,
-      document_id: documentId,
-      text_length: text.length,
-      metadata
-    });
 
     // CRITICAL FIX: Try TxAgent embedding first with proper JWT forwarding
     let embedding;
@@ -74,7 +63,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
           document_id: documentId,
           text_length: text.length,
           runpod_url: process.env.RUNPOD_EMBEDDING_URL,
-          has_jwt: !!req.headers.authorization
+          has_jwt: !!req.headers.authorization,
+          component: 'DocumentUpload'
         });
 
         // CRITICAL FIX: Pass user JWT to embedding service
@@ -84,7 +74,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         errorLogger.success('TxAgent embedding completed', {
           user_id: req.userId,
           document_id: documentId,
-          dimensions: embedding.length
+          dimensions: embedding.length,
+          component: 'DocumentUpload'
         });
       } else {
         throw new Error('TxAgent not configured');
@@ -95,7 +86,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         document_id: documentId,
         error: embeddingError.message,
         error_code: embeddingError.code,
-        status: embeddingError.response?.status
+        status: embeddingError.response?.status,
+        component: 'DocumentUpload'
       });
       
       // CRITICAL FIX: Pass user JWT to local embedding service
@@ -105,18 +97,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       errorLogger.info('Local embedding completed', {
         user_id: req.userId,
         document_id: documentId,
-        dimensions: embedding?.length
+        dimensions: embedding?.length,
+        component: 'DocumentUpload'
       });
     }
 
     // Store in Supabase
-    errorLogger.info('Storing document in Supabase', {
-      user_id: req.userId,
-      document_id: documentId,
-      filename: req.file.originalname,
-      embedding_source: embeddingSource
-    });
-
     const { data, error } = await supabase
       .from('documents')
       .insert({
@@ -146,7 +132,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         error_hint: error.hint,
         error_message: error.message,
         supabase_operation: 'insert',
-        table: 'documents'
+        table: 'documents',
+        component: 'DocumentUpload'
       });
       throw error;
     }
@@ -161,7 +148,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       vector_dimensions: embedding?.length,
       embedding_source: embeddingSource,
       processing_time_ms: processingTime,
-      supabase_id: data.id
+      supabase_id: data.id,
+      component: 'DocumentUpload'
     });
 
     res.json({
@@ -183,7 +171,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       processing_time_ms: processingTime,
       error_stack: error.stack,
       error_type: error.constructor.name,
-      supabase_error_details: error.details || null
+      supabase_error_details: error.details || null,
+      component: 'DocumentUpload'
     });
     
     res.status(500).json({ 
