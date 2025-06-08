@@ -1,13 +1,8 @@
 import dotenv from 'dotenv';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 
-// Load environment variables from .env file if it exists
-try {
-  dotenv.config();
-  errorLogger.info('Environment variables loaded from .env file');
-} catch (error) {
-  errorLogger.warn('No .env file found, using system environment variables');
-}
+// Load environment variables
+dotenv.config();
 
 export const config = {
   // Server configuration
@@ -18,7 +13,7 @@ export const config = {
   // Supabase configuration
   supabase: {
     url: process.env.SUPABASE_URL,
-    serviceKey: process.env.SUPABASE_KEY, // Service role key for backend operations
+    serviceKey: process.env.SUPABASE_KEY,
     jwtSecret: process.env.SUPABASE_JWT_SECRET
   },
 
@@ -39,44 +34,45 @@ export const config = {
   }
 };
 
-// Validation function for critical configuration
+// Configuration validation function
 export function validateConfig() {
   const errors = [];
 
-  // Check critical environment variables
-  if (!config.supabase.url) {
-    errors.push('SUPABASE_URL is required');
+  // Required environment variables
+  const required = [
+    { key: 'SUPABASE_URL', value: config.supabase.url },
+    { key: 'SUPABASE_KEY', value: config.supabase.serviceKey },
+    { key: 'SUPABASE_JWT_SECRET', value: config.supabase.jwtSecret }
+  ];
+
+  for (const { key, value } of required) {
+    if (!value) {
+      errors.push(`Missing required environment variable: ${key}`);
+    }
   }
 
-  if (!config.supabase.serviceKey) {
-    errors.push('SUPABASE_KEY (service role key) is required');
-  }
+  // Optional but recommended
+  const recommended = [
+    { key: 'OPENAI_API_KEY', value: config.openai.apiKey, service: 'OpenAI chat' },
+    { key: 'RUNPOD_EMBEDDING_URL', value: config.runpod.url, service: 'RunPod embeddings' }
+  ];
 
-  if (!config.supabase.jwtSecret) {
-    errors.push('SUPABASE_JWT_SECRET is required');
-  }
-
-  // Validate URL formats
-  if (config.supabase.url && !config.supabase.url.startsWith('https://')) {
-    errors.push('SUPABASE_URL must be a valid HTTPS URL');
-  }
-
-  if (config.runpod.url && !config.runpod.url.startsWith('https://')) {
-    errors.push('RUNPOD_EMBEDDING_URL must be a valid HTTPS URL');
-  }
-
-  // Validate port
-  if (isNaN(config.port) || config.port < 1 || config.port > 65535) {
-    errors.push('PORT must be a valid port number between 1 and 65535');
+  for (const { key, value, service } of recommended) {
+    if (!value) {
+      errorLogger.warn(`Missing optional environment variable: ${key} (${service} will not be available)`);
+    }
   }
 
   if (errors.length > 0) {
-    const errorMessage = `Configuration validation failed:\n${errors.map(e => `  - ${e}`).join('\n')}`;
-    throw new Error(errorMessage);
+    throw new Error(`Configuration validation failed:\n${errors.join('\n')}`);
   }
 
-  // Log configuration status (without sensitive values)
-  errorLogger.info('Configuration validated', {
+  return true;
+}
+
+// Log configuration status (without sensitive values)
+if (config.debug.logging) {
+  errorLogger.info('Configuration loaded', {
     port: config.port,
     nodeEnv: config.nodeEnv,
     supabase_configured: !!config.supabase.url && !!config.supabase.serviceKey,

@@ -2,31 +2,19 @@ import { createClient } from '@supabase/supabase-js';
 import { config } from './environment.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 
+// Internal client variable
 let supabaseClient = null;
-let initialized = false;
+let isInitialized = false;
 
-const database = {
+// Database service object
+export const database = {
+  // Initialize the client (called during server startup)
   initialize() {
-    if (initialized) {
-      return supabaseClient;
-    }
-
     try {
-      // Validate required environment variables
-      if (!config.supabase.url) {
-        throw new Error('SUPABASE_URL is required but not provided');
-      }
-      
-      if (!config.supabase.serviceKey) {
-        throw new Error('SUPABASE_KEY (service role key) is required but not provided');
+      if (!config.supabase.url || !config.supabase.serviceKey) {
+        throw new Error('Supabase configuration is missing. Please check SUPABASE_URL and SUPABASE_KEY environment variables.');
       }
 
-      // Validate URL format
-      if (!config.supabase.url.startsWith('https://')) {
-        throw new Error('SUPABASE_URL must be a valid HTTPS URL');
-      }
-
-      // Create Supabase client
       supabaseClient = createClient(
         config.supabase.url,
         config.supabase.serviceKey,
@@ -38,40 +26,33 @@ const database = {
         }
       );
 
-      initialized = true;
-      errorLogger.success('Supabase client initialized successfully', {
-        url: config.supabase.url,
-        hasServiceKey: !!config.supabase.serviceKey
-      });
-
+      isInitialized = true;
+      errorLogger.success('Supabase client initialized successfully');
       return supabaseClient;
     } catch (error) {
-      errorLogger.error('Failed to initialize Supabase client', error, {
-        url: config.supabase.url,
-        hasServiceKey: !!config.supabase.serviceKey
-      });
+      errorLogger.error('Failed to initialize Supabase client', error);
       throw error;
     }
   },
 
+  // Get the client (throws if not initialized)
   getClient() {
-    if (!initialized) {
-      this.initialize();
+    if (!isInitialized || !supabaseClient) {
+      throw new Error('Database client not initialized. Call database.initialize() first.');
     }
     return supabaseClient;
   },
 
+  // Check if client is initialized
   isInitialized() {
-    return initialized;
+    return isInitialized && !!supabaseClient;
   },
 
+  // Health check
   async healthCheck() {
     try {
-      if (!initialized) {
-        return {
-          healthy: false,
-          message: 'Database client not initialized'
-        };
+      if (!this.isInitialized()) {
+        return { healthy: false, message: 'Database client not initialized' };
       }
 
       // Simple query to test connection
@@ -81,32 +62,25 @@ const database = {
         .limit(1);
 
       if (error) {
-        return {
-          healthy: false,
-          message: `Database query failed: ${error.message}`
-        };
+        return { healthy: false, message: error.message };
       }
 
-      return {
-        healthy: true,
-        message: 'Database connection successful'
-      };
+      return { healthy: true, message: 'Database connection successful' };
     } catch (error) {
-      return {
-        healthy: false,
-        message: `Database health check failed: ${error.message}`
+      return { 
+        healthy: false, 
+        message: error instanceof Error ? error.message : 'Unknown database error' 
       };
     }
   }
 };
 
-// Export the database object
-export { database };
-
-// Export a proxy for backward compatibility that auto-initializes
+// Export the client through a proxy for backward compatibility
 export const supabase = new Proxy({}, {
   get(target, prop) {
-    const client = database.getClient();
-    return client[prop];
+    if (!isInitialized || !supabaseClient) {
+      throw new Error('Database client not initialized. Call database.initialize() first.');
+    }
+    return supabaseClient[prop];
   }
 });

@@ -297,6 +297,13 @@ export function Chat() {
         }),
       });
 
+      // Check if response is HTML (error page) instead of JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const htmlText = await response.text();
+        throw new Error(`Server returned HTML instead of JSON. Status: ${response.status}. This usually indicates a server error.`);
+      }
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         
