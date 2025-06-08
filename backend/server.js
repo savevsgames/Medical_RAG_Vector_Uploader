@@ -7,7 +7,7 @@ import { setupRoutes } from './routes/index.js';
 import { staticFileService } from './services/StaticFileService.js';
 import { errorLogger } from './agent_utils/shared/logger.js';
 
-async function startServer() {
+function startServer() {
   const app = express();
 
   // Enhanced startup logging
@@ -135,8 +135,10 @@ async function startServer() {
   });
 }
 
-// Start the server
-startServer().catch((error) => {
+// Start the server (synchronous call)
+try {
+  startServer();
+} catch (error) {
   errorLogger.error('Failed to start server', error);
   process.exit(1);
-});
+}
