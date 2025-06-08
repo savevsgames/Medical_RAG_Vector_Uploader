@@ -1,18 +1,33 @@
 import express from 'express';
 import axios from 'axios';
 import { config } from '../config/environment.js';
+import { database } from '../config/database.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 
 const router = express.Router();
 
 // Health check endpoint with comprehensive status
 router.get('/', async (req, res) => {
-  // REDUCED LOGGING: Don't log every health check
   const services = {
-    supabase_connected: true,
+    server: true,
+    database: false,
+    supabase_configured: !!config.supabase.url && !!config.supabase.serviceKey,
     openai_configured: !!config.openai.apiKey,
     runpod_configured: !!config.runpod.url
   };
+
+  // Test database connection
+  try {
+    const dbHealth = await database.healthCheck();
+    services.database = dbHealth.healthy;
+    if (!dbHealth.healthy) {
+      services.database_error = dbHealth.message;
+    }
+  } catch (error) {
+    services.database = false;
+    services.database_error = error.message;
+    errorLogger.error('Health check database test failed', error);
+  }
 
   // Test RunPod connection if configured
   if (services.runpod_configured) {
@@ -34,10 +49,17 @@ router.get('/', async (req, res) => {
     }
   }
 
-  res.json({
-    status: 'healthy',
+  // Determine overall health status
+  const isHealthy = services.server && services.database && services.supabase_configured;
+
+  res.status(isHealthy ? 200 : 503).json({
+    status: isHealthy ? 'healthy' : 'degraded',
     timestamp: new Date().toISOString(),
-    services
+    services,
+    environment: {
+      node_env: config.nodeEnv,
+      port: config.port
+    }
   });
 });
 

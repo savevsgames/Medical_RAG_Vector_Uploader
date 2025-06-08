@@ -1,11 +1,10 @@
 import express from 'express';
-import { config } from './config/environment.js';
+import { config, validateConfig } from './config/environment.js';
 import { database } from './config/database.js';
 import { corsMiddleware, optionsHandler } from './middleware/cors.js';
 import { requestLogger } from './middleware/logging.js';
 import { setupRoutes } from './routes/index.js';
 import { staticFileService } from './services/StaticFileService.js';
-import { mountAgentRoutes } from './agent_utils/index.js';
 import { errorLogger } from './agent_utils/shared/logger.js';
 
 const app = express();
@@ -18,13 +17,27 @@ errorLogger.info('Environment check', {
   environment: config.nodeEnv
 });
 
-// Initialize database connection
+// Validate configuration first
 try {
-  const supabaseClient = database.getClient();
-  errorLogger.success('Database connection initialized');
+  validateConfig();
+  errorLogger.success('Configuration validation passed');
 } catch (error) {
-  errorLogger.error('Failed to initialize database connection', error);
+  errorLogger.error('Configuration validation failed', error);
   process.exit(1);
+}
+
+// Test database connection
+try {
+  const healthCheck = await database.healthCheck();
+  if (healthCheck.healthy) {
+    errorLogger.success('Database connection test passed');
+  } else {
+    errorLogger.error('Database connection test failed', new Error(healthCheck.message));
+    // Don't exit - let the server start but log the issue
+  }
+} catch (error) {
+  errorLogger.error('Database connection test failed', error);
+  // Don't exit - let the server start but log the issue
 }
 
 // Middleware setup
