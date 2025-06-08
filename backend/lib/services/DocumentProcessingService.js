@@ -1,10 +1,10 @@
 import pdfParse from 'pdf-parse-debugging-disabled';
 import mammoth from 'mammoth';
-import { logger } from '../../agent_utils/shared/logger.js';
+import { errorLogger } from '../../agent_utils/shared/logger.js';
 
 export class DocumentProcessingService {
   constructor() {
-    logger.info('DocumentProcessingService initialized', {
+    errorLogger.info('DocumentProcessingService initialized', {
       component: 'DocumentProcessingService'
     });
   }
@@ -13,7 +13,7 @@ export class DocumentProcessingService {
     const extension = this.getFileExtension(filename).toLowerCase();
     
     try {
-      logger.info('Starting text extraction', {
+      errorLogger.info('Starting text extraction', {
         filename,
         extension,
         buffer_size: buffer.length,
@@ -38,7 +38,7 @@ export class DocumentProcessingService {
           throw new Error(`Unsupported file type: ${extension}`);
       }
 
-      logger.success('Text extraction completed', {
+      errorLogger.success('Text extraction completed', {
         filename,
         extension,
         text_length: result.text.length,
@@ -48,7 +48,7 @@ export class DocumentProcessingService {
 
       return result;
     } catch (error) {
-      logger.error('Text extraction failed', error, {
+      loerrorLoggergger.error('Text extraction failed', error, {
         filename,
         extension,
         error_stack: error.stack,
