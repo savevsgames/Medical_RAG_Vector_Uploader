@@ -1,0 +1,50 @@
+# Ignore node_modules and build output
+**/node_modules/
+**/dist/
+**/.next/
+**/out/
+**/.vercel/
+**/.turbo/
+
+# Ignore environment-specific or user-specific files
+.env
+.env.*           # Except .env.example
+*.local
+
+# Ignore test output and coverage
+coverage/
+*.log
+logs/
+.vscode/
+.idea/
+
+# Ignore frontend build cache
+frontend/.cache/
+frontend/build/
+frontend/public/assets/
+
+# Ignore backend logs and cache
+backend/logs/
+backend/__pycache__/
+backend/*.pyc
+backend/tmp/
+backend/.mypy_cache/
+
+# Ignore lockfiles (optional if not debugging install issues)
+**/package-lock.json
+**/pnpm-lock.yaml
+**/yarn.lock
+
+# Ignore any generated static files
+public/media/
+public/uploads/
+docs/
+assets/
+
+# Keep source code, env examples, and key config
+!.env.example
+!frontend/src/
+!backend/lib/
+!backend/server.js
+!frontend/pages/
+!frontend/utils/

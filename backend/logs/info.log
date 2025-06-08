@@ -186,3 +186,9 @@
 [2025-06-08T02:24:07.608Z] [INFO] SUCCESS: Supabase connection verified {
   "test_query": "success"
 }
+[2025-06-08T07:24:46.413Z] [INFO] 🚀 Medical RAG Server starting up... 
+[2025-06-08T07:24:46.413Z] [INFO] Environment check {
+  "node_version": "v20.19.1",
+  "port": 8000,
+  "working_directory": "/home/savevsgames/Medical_RAG_Vector_Uploader/backend"
+}
