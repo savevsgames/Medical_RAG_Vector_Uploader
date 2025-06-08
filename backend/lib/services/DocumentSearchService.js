@@ -1,4 +1,4 @@
-import { logger } from '../../agent_utils/shared/logger.js';
+import { errorLogger } from '../../agent_utils/shared/logger.js';
 
 export class DocumentSearchService {
   constructor(supabaseClient) {
@@ -7,7 +7,7 @@ export class DocumentSearchService {
 
   async searchRelevantDocuments(userId, queryEmbedding, limit = 5, threshold = 0.7) {
     try {
-      logger.info('Executing vector similarity search', {
+      errorLogger.info('Executing vector similarity search', {
         user_id: userId,
         embedding_dimensions: queryEmbedding.length,
         match_threshold: threshold,
@@ -26,7 +26,7 @@ export class DocumentSearchService {
       });
 
       if (error) {
-        logger.error('Vector search error', error, {
+        errorLogger.error('Vector search error', error, {
           user_id: userId,
           error_code: error.code,
           error_details: error.details,
@@ -34,14 +34,14 @@ export class DocumentSearchService {
         });
         
         // Fallback to regular document search if vector search fails
-        logger.warn('Falling back to regular document search', {
+        errorLogger.warn('Falling back to regular document search', {
           user_id: userId,
           component: 'DocumentSearchService'
         });
         return await this.fallbackDocumentSearch(userId);
       }
 
-      logger.success('Vector search completed', {
+      loerrorLoggerger.success('Vector search completed', {
         user_id: userId,
         results_count: data?.length || 0,
         results_preview: data?.slice(0, 3).map(d => ({
@@ -53,7 +53,7 @@ export class DocumentSearchService {
 
       return data || [];
     } catch (error) {
-      logger.error('Document search failed', error, {
+      errorLogger.error('Document search failed', error, {
         user_id: userId,
         error_stack: error.stack,
         component: 'DocumentSearchService'
@@ -64,7 +64,7 @@ export class DocumentSearchService {
 
   async fallbackDocumentSearch(userId, limit = 3) {
     try {
-      logger.info('Executing fallback document search', {
+      errorLogger.info('Executing fallback document search', {
         user_id: userId,
         limit: limit,
         component: 'DocumentSearchService'
@@ -90,7 +90,7 @@ export class DocumentSearchService {
         similarity: 0.5 // Default similarity for fallback
       }));
 
-      logger.info('Fallback document search completed', {
+      errorLogger.info('Fallback document search completed', {
         user_id: userId,
         results_count: results.length,
         component: 'DocumentSearchService'
@@ -98,7 +98,7 @@ export class DocumentSearchService {
 
       return results;
     } catch (error) {
-      logger.error('Fallback document search failed', error, {
+      errorLogger.error('Fallback document search failed', error, {
         user_id: userId,
         error_stack: error.stack,
         component: 'DocumentSearchService'
