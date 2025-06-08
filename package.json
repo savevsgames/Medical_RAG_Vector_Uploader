@@ -14,7 +14,9 @@
     "lint:frontend": "cd frontend && npm run lint",
     "install:frontend": "cd frontend && npm install",
     "install:backend": "cd backend && npm install",
-    "postinstall": "npm run install:frontend && npm run install:backend"
+    "postinstall": "npm run install:frontend && npm run install:backend",
+    "render:build": "npm run install:backend && npm run install:frontend && npm run build:frontend",
+    "render:start": "cd backend && npm start"
   },
   "dependencies": {
     "concurrently": "^8.2.2"

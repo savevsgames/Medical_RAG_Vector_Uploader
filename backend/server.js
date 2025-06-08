@@ -256,6 +256,23 @@ app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
+// CRITICAL: Serve static files from frontend/dist BEFORE API routes
+const frontendDistPath = path.join(__dirname, '..', 'frontend', 'dist');
+if (fs.existsSync(frontendDistPath)) {
+  errorLogger.info('Serving static files from frontend/dist', {
+    path: frontendDistPath,
+    files: fs.readdirSync(frontendDistPath)
+  });
+  
+  // Serve static files
+  app.use(express.static(frontendDistPath));
+} else {
+  errorLogger.warn('Frontend dist directory not found', {
+    expected_path: frontendDistPath,
+    current_dir: __dirname
+  });
+}
+
 // Request logging middleware
 app.use((req, res, next) => {
   const startTime = Date.now();
@@ -697,6 +714,29 @@ app.post('/upload', verifyToken, upload.single('file'), async (req, res) => {
   }
 });
 
+// CRITICAL: SPA Fallback Route - Must be LAST
+app.get('*', (req, res) => {
+  // Don't serve index.html for API routes
+  if (req.path.startsWith('/api/') || req.path.startsWith('/health')) {
+    return res.status(404).json({ error: 'API endpoint not found' });
+  }
+  
+  const indexPath = path.join(frontendDistPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    errorLogger.info('Serving SPA fallback', {
+      requested_path: req.path,
+      serving: 'index.html'
+    });
+    res.sendFile(indexPath);
+  } else {
+    errorLogger.error('index.html not found for SPA fallback', {
+      requested_path: req.path,
+      index_path: indexPath
+    });
+    res.status(404).send('Application not found');
+  }
+});
+
 // Error handling middleware with enhanced logging
 app.use((error, req, res, next) => {
   errorLogger.error('Unhandled server error', error, {
@@ -711,22 +751,6 @@ app.use((error, req, res, next) => {
   res.status(500).json({
     error: 'Internal server error',
     details: process.env.NODE_ENV === 'development' ? error.message : 'Server error occurred'
-  });
-});
-
-// 404 handler with logging
-app.use((req, res) => {
-  errorLogger.warn('Route not found', {
-    method: req.method,
-    path: req.originalUrl,
-    ip: req.ip,
-    user_agent: req.get('User-Agent')?.substring(0, 100)
-  });
-  
-  res.status(404).json({
-    error: 'Route not found',
-    path: req.originalUrl,
-    method: req.method
   });
 });
 
@@ -781,4 +805,5 @@ app.listen(port, () => {
   errorLogger.info('  - GET  /api/agent/status (Agent status)');
   errorLogger.info('  - POST /api/embed (RunPod embedding)');
   errorLogger.info('  - POST /agent/* (Legacy endpoints - deprecated)');
+  errorLogger.info('  - GET  /* (SPA fallback to index.html)');
 });
