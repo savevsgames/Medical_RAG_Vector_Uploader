@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { logger } from '../../agent_utils/shared/logger.js';
+import { errorLogger } from '../../agent_utils/shared/logger.js';
 
 export class ResponseGenerationService {
   constructor() {
@@ -59,7 +59,7 @@ Instructions:
 
       const generatedResponse = response.data.choices[0].message.content;
 
-      logger.success('OpenAI chat completion generated', {
+      errorLogger.success('OpenAI chat completion generated', {
         response_length: generatedResponse.length,
         usage: response.data.usage,
         finish_reason: response.data.choices[0].finish_reason,
@@ -69,14 +69,14 @@ Instructions:
       return generatedResponse;
     } catch (error) {
       if (error.response?.status === 429) {
-        logger.error('OpenAI rate limit exceeded', error, {
+        errorLogger.error('OpenAI rate limit exceeded', error, {
           error_response: error.response?.data,
           component: 'ResponseGenerationService'
         });
         throw new Error('OpenAI rate limit exceeded. Please try again later.');
       }
       
-      logger.error('Failed to generate RAG response', error, {
+      errorLogger.error('Failed to generate RAG response', error, {
         error_response: error.response?.data,
         error_status: error.response?.status,
         error_stack: error.stack,
