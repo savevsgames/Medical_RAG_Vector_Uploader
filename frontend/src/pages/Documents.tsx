@@ -3,9 +3,12 @@ import { FileText, Upload, Search, Filter, RefreshCw, Plus, Grid, List } from 'l
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { UploadModal } from '../components/upload';
-import { DocumentCard } from '../components/DocumentCard';
-import { DocumentViewModal } from '../components/DocumentViewModal';
-import { DocumentEditModal } from '../components/DocumentEditModal';
+import { 
+  DocumentCard, 
+  DocumentViewModal, 
+  DocumentEditModal 
+} from '../components/documents';
+import { Button, Input, Select, EmptyState } from '../components/ui';
 import { logger, logSupabaseOperation, logUserAction } from '../utils/logger';
 import toast from 'react-hot-toast';
 
@@ -124,6 +127,7 @@ export function Documents() {
     setDocuments(prev => prev.map(doc => 
       doc.id === updatedDocument.id ? updatedDocument : doc
     ));
+    setEditDocument(null);
   };
 
   const handleUploadComplete = () => {
@@ -178,6 +182,20 @@ export function Documents() {
 
   const stats = getDocumentStats();
 
+  const filterOptions = [
+    { value: 'all', label: 'All Types' },
+    { value: 'pdf', label: 'PDF' },
+    { value: 'word', label: 'Word' },
+    { value: 'text', label: 'Text' }
+  ];
+
+  const sortOptions = [
+    { value: 'created_at-desc', label: 'Newest First' },
+    { value: 'created_at-asc', label: 'Oldest First' },
+    { value: 'filename-asc', label: 'Name A-Z' },
+    { value: 'filename-desc', label: 'Name Z-A' }
+  ];
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -200,13 +218,12 @@ export function Documents() {
               <p className="text-gray-600">Manage your medical documents and embeddings</p>
             </div>
           </div>
-          <button
+          <Button
             onClick={() => setShowUploadModal(true)}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+            icon={<Plus className="w-5 h-5" />}
           >
-            <Plus className="w-5 h-5" />
-            <span>Upload Documents</span>
-          </button>
+            Upload Documents
+          </Button>
         </div>
 
         {/* Stats */}
@@ -241,45 +258,29 @@ export function Documents() {
         {/* Controls */}
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div className="flex flex-col sm:flex-row gap-3 flex-1">
-            {/* Search */}
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search documents..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
+            <Input
+              placeholder="Search documents..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              leftIcon={<Search className="w-4 h-4" />}
+              className="max-w-md"
+            />
 
-            {/* Filter */}
-            <select
+            <Select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="all">All Types</option>
-              <option value="pdf">PDF</option>
-              <option value="word">Word</option>
-              <option value="text">Text</option>
-            </select>
+              options={filterOptions}
+            />
 
-            {/* Sort */}
-            <select
+            <Select
               value={`${sortBy}-${sortOrder}`}
               onChange={(e) => {
                 const [field, order] = e.target.value.split('-');
                 setSortBy(field);
                 setSortOrder(order as 'asc' | 'desc');
               }}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="created_at-desc">Newest First</option>
-              <option value="created_at-asc">Oldest First</option>
-              <option value="filename-asc">Name A-Z</option>
-              <option value="filename-desc">Name Z-A</option>
-            </select>
+              options={sortOptions}
+            />
           </div>
 
           <div className="flex items-center space-x-2">
@@ -299,13 +300,11 @@ export function Documents() {
               </button>
             </div>
 
-            {/* Refresh */}
-            <button
+            <Button
+              variant="ghost"
               onClick={fetchDocuments}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+              icon={<RefreshCw className="w-4 h-4" />}
+            />
           </div>
         </div>
       </div>
@@ -313,27 +312,20 @@ export function Documents() {
       {/* Documents Grid/List */}
       <div className="bg-white rounded-lg shadow p-6">
         {filteredDocuments.length === 0 ? (
-          <div className="text-center py-12">
-            <FileText className="w-16 h-16 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              {documents.length === 0 ? 'No documents yet' : 'No documents match your search'}
-            </h3>
-            <p className="text-gray-500 mb-6">
-              {documents.length === 0 
+          <EmptyState
+            icon={<FileText className="w-16 h-16" />}
+            title={documents.length === 0 ? 'No documents yet' : 'No documents match your search'}
+            description={
+              documents.length === 0 
                 ? 'Upload your first medical document to get started with AI analysis'
                 : 'Try adjusting your search terms or filters'
-              }
-            </p>
-            {documents.length === 0 && (
-              <button
-                onClick={() => setShowUploadModal(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors mx-auto"
-              >
-                <Upload className="w-5 h-5" />
-                <span>Upload Your First Document</span>
-              </button>
-            )}
-          </div>
+            }
+            action={documents.length === 0 ? {
+              label: 'Upload Your First Document',
+              onClick: () => setShowUploadModal(true),
+              icon: <Upload className="w-5 h-5" />
+            } : undefined}
+          />
         ) : (
           <div className={
             viewMode === 'grid' 
