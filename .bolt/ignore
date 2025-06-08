@@ -1,50 +1,30 @@
-# Ignore node_modules and build output
-**/node_modules/
-**/dist/
-**/.next/
-**/out/
-**/.vercel/
-**/.turbo/
+# Optimized and stable components - ignore unless specifically needed
+frontend/src/components/ui/
+frontend/src/components/forms/
+frontend/src/components/feedback/
+frontend/src/components/layouts/
+frontend/src/components/documents/
+frontend/src/components/upload/
 
-# Ignore environment-specific or user-specific files
-.env
-.env.*           # Except .env.example
-*.local
+# Stable backend services - ignore unless embedding issues
+backend/lib/services/
+backend/agent_utils/core/
+backend/agent_utils/middleware/
+backend/agent_utils/routes/
+backend/agent_utils/shared/
 
-# Ignore test output and coverage
-coverage/
-*.log
-logs/
-.vscode/
-.idea/
+# Configuration and setup files - stable
+backend/config/
+backend/middleware/
+backend/services/
+frontend/src/contexts/
+frontend/src/lib/
+frontend/src/utils/
 
-# Ignore frontend build cache
-frontend/.cache/
-frontend/build/
-frontend/public/assets/
-
-# Ignore backend logs and cache
-backend/logs/
-backend/__pycache__/
-backend/*.pyc
-backend/tmp/
-backend/.mypy_cache/
-
-# Ignore lockfiles (optional if not debugging install issues)
-**/package-lock.json
-**/pnpm-lock.yaml
-**/yarn.lock
-
-# Ignore any generated static files
-public/media/
-public/uploads/
-docs/
-assets/
-
-# Keep source code, env examples, and key config
-!.env.example
-!frontend/src/
-!backend/lib/
-!backend/server.js
-!frontend/pages/
-!frontend/utils/
+# Database and documentation - stable
+supabase/
+README.md
+SUPABASE_CONFIG.md
+package.json
+*.config.js
+*.config.ts
