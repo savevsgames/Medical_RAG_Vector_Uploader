@@ -28,7 +28,7 @@ function App() {
             }
           >
             <Route index element={<Navigate to="/chat\" replace />} />
-            <Route path="chat\" element={<Chat />} />
+            <Route path="chat" element={<Chat />} />
             <Route path="documents" element={<Documents />} />
             <Route path="monitor" element={<Monitor />} />
           </Route>
