@@ -43,7 +43,7 @@ export class ChatService {
       // Step 3: Generate response using RAG
       const response = await this.responseService.generateRAGResponse(query, relevantDocs);
       
-      logger.success('Chat query processed successfully', {
+      errorLogger.success('Chat query processed successfully', {
         user_id: userId,
         response_length: response.length,
         sources_count: relevantDocs.length,
