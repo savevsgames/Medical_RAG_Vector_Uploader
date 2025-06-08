@@ -192,34 +192,43 @@ class RunPodService {
         temperature: temperature
       };
 
-      errorLogger.debug('Sending POST request to TxAgent /chat', {
-        user_id: userId,
-        endpoint: `${process.env.RUNPOD_EMBEDDING_URL}${chatEndpoint}`,
+      // CRITICAL DEBUG: Log exact axios configuration before sending
+      const axiosConfig = {
         method: 'POST',
-        payload: requestPayload,
+        url: `${process.env.RUNPOD_EMBEDDING_URL}${chatEndpoint}`,
+        data: requestPayload,
+        headers: { 
+          'Authorization': userJWT, // Send user's Supabase JWT
+          'Content-Type': 'application/json'
+        },
+        timeout: this.chatTimeout
+      };
+
+      errorLogger.debug('🚀 AXIOS CONFIG - About to send request', {
+        user_id: userId,
+        method: axiosConfig.method,
+        url: axiosConfig.url,
+        endpoint: chatEndpoint,
         has_auth: !!userJWT,
         payload_size: JSON.stringify(requestPayload).length,
+        axios_method: 'POST',
+        axios_url: axiosConfig.url,
+        axios_timeout: axiosConfig.timeout,
         component: 'RunPodService.handleChat'
       });
 
-      const response = await axios.post(
-        `${process.env.RUNPOD_EMBEDDING_URL}${chatEndpoint}`,
-        requestPayload,
-        { 
-          headers: { 
-            'Authorization': userJWT, // Send user's Supabase JWT
-            'Content-Type': 'application/json'
-          },
-          timeout: this.chatTimeout
-        }
-      );
+      const response = await axios(axiosConfig);
 
-      errorLogger.debug('TxAgent chat response received', {
+      // CRITICAL DEBUG: Log what axios actually sent and received
+      errorLogger.debug('📨 AXIOS RESPONSE - Request completed', {
         user_id: userId,
-        status: response.status,
-        status_text: response.statusText,
-        response_data: response.data,
+        sent_method: response.config?.method?.toUpperCase() || 'UNKNOWN',
+        sent_url: response.config?.url || 'UNKNOWN',
+        response_status: response.status,
+        response_status_text: response.statusText,
         response_headers: response.headers,
+        request_method_from_config: response.config?.method,
+        request_method_from_request: response.request?.method,
         component: 'RunPodService.handleChat'
       });
 
@@ -229,7 +238,8 @@ class RunPodService {
         response_length: response.data.response?.length || response.data.answer?.length || 0,
         sources_count: response.data.sources?.length || 0,
         status: response.data.status,
-        response_status: response.status
+        response_status: response.status,
+        sent_method: response.config?.method?.toUpperCase()
       });
 
       // Handle TxAgent response format
@@ -254,6 +264,7 @@ class RunPodService {
   handleRunPodError(operation, error, req, res) {
     const userId = req.userId;
     
+    // CRITICAL DEBUG: Log detailed error information including method details
     errorLogger.runpodError(operation, error, {
       user_id: userId,
       error_code: error.code,
@@ -264,11 +275,20 @@ class RunPodService {
       has_jwt: !!req.headers.authorization,
       runpod_url: process.env.RUNPOD_EMBEDDING_URL,
       request_method: 'POST',
+      // ENHANCED: Log axios configuration details from error
       axios_config: error.config ? {
+        method: error.config.method?.toUpperCase(),
         url: error.config.url,
-        method: error.config.method,
         timeout: error.config.timeout,
-        headers: error.config.headers ? Object.keys(error.config.headers) : []
+        headers: error.config.headers ? Object.keys(error.config.headers) : [],
+        data_size: error.config.data ? JSON.stringify(error.config.data).length : 0
+      } : null,
+      // ENHANCED: Log request details if available
+      axios_request: error.request ? {
+        method: error.request.method,
+        path: error.request.path,
+        host: error.request.host,
+        protocol: error.request.protocol
       } : null,
       component: `RunPodService.handleRunPodError.${operation}`
     });
@@ -288,9 +308,16 @@ class RunPodService {
     }
     
     if (error.response?.status === 405) {
+      // ENHANCED: Provide more detailed 405 error information
       return res.status(502).json({
         error: `RunPod ${operation} method not allowed`,
-        details: 'TxAgent container endpoints may not be properly configured. Verify POST endpoints are available.'
+        details: 'TxAgent container endpoints may not be properly configured. Verify POST endpoints are available.',
+        debug_info: {
+          sent_method: error.config?.method?.toUpperCase() || 'UNKNOWN',
+          endpoint: error.config?.url || 'UNKNOWN',
+          expected_method: 'POST',
+          container_response: error.response?.data
+        }
       });
     }
 
@@ -309,7 +336,8 @@ class RunPodService {
           status: error.response.status,
           url: process.env.RUNPOD_EMBEDDING_URL,
           endpoint: `/${operation}`,
-          method: 'POST'
+          method: 'POST',
+          sent_method: error.config?.method?.toUpperCase() || 'UNKNOWN'
         }
       });
     }
