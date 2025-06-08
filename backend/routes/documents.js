@@ -102,23 +102,34 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       });
     }
 
-    // Store in Supabase
+    // CRITICAL FIX: Ensure user_id is properly set for RLS
+    const documentData = {
+      id: documentId,
+      filename: req.file.originalname,
+      content: text,
+      metadata: {
+        ...metadata,
+        file_size: req.file.size,
+        mime_type: req.file.mimetype,
+        embedding_source: embeddingSource,
+        processing_time_ms: Date.now() - startTime
+      },
+      embedding,
+      user_id: req.userId // CRITICAL: This must match the authenticated user's ID
+    };
+
+    errorLogger.debug('Inserting document into Supabase', {
+      user_id: req.userId,
+      document_id: documentId,
+      has_embedding: !!embedding,
+      embedding_dimensions: embedding?.length,
+      component: 'DocumentUpload'
+    });
+
+    // Store in Supabase with proper user context
     const { data, error } = await supabase
       .from('documents')
-      .insert({
-        id: documentId,
-        filename: req.file.originalname,
-        content: text,
-        metadata: {
-          ...metadata,
-          file_size: req.file.size,
-          mime_type: req.file.mimetype,
-          embedding_source: embeddingSource,
-          processing_time_ms: Date.now() - startTime
-        },
-        embedding,
-        user_id: req.userId
-      })
+      .insert(documentData)
       .select()
       .single();
 
@@ -135,6 +146,15 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         table: 'documents',
         component: 'DocumentUpload'
       });
+      
+      // Provide more specific error messages for common RLS issues
+      if (error.code === '42501') {
+        return res.status(403).json({ 
+          error: 'Access denied: Unable to save document. Please ensure you are properly authenticated.',
+          details: 'Row Level Security policy violation - user authentication may have expired'
+        });
+      }
+      
       throw error;
     }
 
