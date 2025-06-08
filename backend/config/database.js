@@ -8,7 +8,7 @@ class Database {
     this.initialized = false;
   }
 
-  initialize() {
+  async initialize() {
     try {
       if (!config.supabase.url || !config.supabase.serviceKey) {
         throw new Error('Supabase configuration missing');

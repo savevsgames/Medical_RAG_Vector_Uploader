@@ -29,7 +29,7 @@ async function startServer() {
 
   // Initialize database connection
   try {
-    database.initialize();
+    await database.initialize();
     errorLogger.success('Database client initialized');
   } catch (error) {
     errorLogger.error('Failed to initialize database client', error);
