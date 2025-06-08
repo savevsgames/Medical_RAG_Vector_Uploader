@@ -1,41 +1,37 @@
-import { errorLogger } from '../agent_utils/errorLogger.js';
+import { errorLogger } from '../agent_utils/shared/logger.js';
 
-// REDUCED REQUEST LOGGING - Only log non-status requests and errors
-export const requestLogger = (req, res, next) => {
+export function requestLogger(req, res, next) {
   const startTime = Date.now();
-  const isStatusRequest = req.path.includes('/status');
   
-  // Only log non-status requests to reduce spam
-  if (!isStatusRequest) {
-    errorLogger.info('Incoming request', {
-      method: req.method,
-      path: req.originalUrl,
-      ip: req.ip,
-      user_agent: req.get('User-Agent')?.substring(0, 100),
-      content_type: req.get('Content-Type'),
-      content_length: req.get('Content-Length'),
-      origin: req.get('Origin')
-    });
+  // Skip logging for health checks to reduce noise
+  if (req.path === '/health') {
+    return next();
   }
 
-  // Log response when finished - only for non-status or errors
+  const userEmail = req.user?.email || req.userId || 'anonymous';
+  
+  errorLogger.info('Request received', {
+    method: req.method,
+    path: req.path,
+    user: userEmail,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')?.substring(0, 100),
+    component: 'RequestLogger'
+  });
+
   res.on('finish', () => {
     const duration = Date.now() - startTime;
-    const isError = res.statusCode >= 400;
+    const logLevel = res.statusCode >= 400 ? 'error' : 'info';
     
-    // Only log status requests if they error, or log all non-status requests
-    if (!isStatusRequest || isError) {
-      const level = isError ? 'error' : 'info';
-      
-      errorLogger[level]('Request completed', {
-        method: req.method,
-        path: req.originalUrl,
-        status_code: res.statusCode,
-        duration_ms: duration,
-        user_id: req.userId || 'anonymous'
-      });
-    }
+    errorLogger[logLevel]('Request completed', {
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration: `${duration}ms`,
+      user: userEmail,
+      component: 'RequestLogger'
+    });
   });
 
   next();
-};
+}
