@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { config } from './environment.js';
-import { errorLogger } from '../agent_utils/shared/logger.js';
+import { errorLogger } from '../../agent_utils/shared/logger.js';
 
 const supabase = createClient(config.supabase.url, config.supabase.serviceKey);
 
