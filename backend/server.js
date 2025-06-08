@@ -10,13 +10,34 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import axios from 'axios';
 
-// Load environment variables
-dotenv.config();
-
+// CRITICAL: Load environment variables FIRST, before any other imports
+// Check for .env file in multiple locations
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Import our services
+// Try to load .env from multiple locations
+const envPaths = [
+  path.join(__dirname, '.env'),           // backend/.env
+  path.join(__dirname, '..', '.env'),     // root/.env
+  path.join(process.cwd(), '.env'),       // current working directory
+  path.join(process.cwd(), 'backend', '.env') // if running from root
+];
+
+let envLoaded = false;
+for (const envPath of envPaths) {
+  if (fs.existsSync(envPath)) {
+    console.log(`🔧 Loading environment variables from: ${envPath}`);
+    dotenv.config({ path: envPath });
+    envLoaded = true;
+    break;
+  }
+}
+
+if (!envLoaded) {
+  console.log('⚠️  No .env file found, using system environment variables');
+}
+
+// Import our services AFTER environment variables are loaded
 import { DocumentProcessor } from './lib/documentProcessor.js';
 import { EmbeddingService } from './lib/embedder.js';
 import { ChatService } from './lib/chatService.js';
@@ -273,32 +294,41 @@ if (fs.existsSync(frontendDistPath)) {
   });
 }
 
-// Request logging middleware
+// REDUCED REQUEST LOGGING - Only log non-status requests and errors
 app.use((req, res, next) => {
   const startTime = Date.now();
+  const isStatusRequest = req.path.includes('/status');
   
-  errorLogger.info('Incoming request', {
-    method: req.method,
-    path: req.originalUrl,
-    ip: req.ip,
-    user_agent: req.get('User-Agent')?.substring(0, 100),
-    content_type: req.get('Content-Type'),
-    content_length: req.get('Content-Length'),
-    origin: req.get('Origin')
-  });
-
-  // Log response when finished
-  res.on('finish', () => {
-    const duration = Date.now() - startTime;
-    const level = res.statusCode >= 400 ? 'error' : 'info';
-    
-    errorLogger[level]('Request completed', {
+  // Only log non-status requests to reduce spam
+  if (!isStatusRequest) {
+    errorLogger.info('Incoming request', {
       method: req.method,
       path: req.originalUrl,
-      status_code: res.statusCode,
-      duration_ms: duration,
-      user_id: req.userId || 'anonymous'
+      ip: req.ip,
+      user_agent: req.get('User-Agent')?.substring(0, 100),
+      content_type: req.get('Content-Type'),
+      content_length: req.get('Content-Length'),
+      origin: req.get('Origin')
     });
+  }
+
+  // Log response when finished - only for non-status or errors
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    const isError = res.statusCode >= 400;
+    
+    // Only log status requests if they error, or log all non-status requests
+    if (!isStatusRequest || isError) {
+      const level = isError ? 'error' : 'info';
+      
+      errorLogger[level]('Request completed', {
+        method: req.method,
+        path: req.originalUrl,
+        status_code: res.statusCode,
+        duration_ms: duration,
+        user_id: req.userId || 'anonymous'
+      });
+    }
   });
 
   next();
@@ -362,15 +392,18 @@ const verifyToken = (req, res, next) => {
     const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
     req.userId = decoded.sub;
     
-    errorLogger.info('User authenticated', {
-      user_id: req.userId,
-      path: req.path,
-      method: req.method,
-      token_exp: decoded.exp,
-      token_iat: decoded.iat,
-      token_role: decoded.role,
-      token_email: decoded.email
-    });
+    // REDUCED LOGGING: Only log authentication for non-status requests
+    if (!req.path.includes('/status')) {
+      errorLogger.info('User authenticated', {
+        user_id: req.userId,
+        path: req.path,
+        method: req.method,
+        token_exp: decoded.exp,
+        token_iat: decoded.iat,
+        token_role: decoded.role,
+        token_email: decoded.email
+      });
+    }
     
     next();
   } catch (error) {
@@ -388,12 +421,7 @@ const verifyToken = (req, res, next) => {
 
 // Health check endpoint with comprehensive status
 app.get('/health', async (req, res) => {
-  errorLogger.info('Health check requested', {
-    ip: req.ip,
-    user_agent: req.get('User-Agent')?.substring(0, 100),
-    origin: req.get('Origin')
-  });
-  
+  // REDUCED LOGGING: Don't log every health check
   const services = {
     supabase_connected: true,
     embedding_configured: embeddingService.isConfigured(),
@@ -417,8 +445,6 @@ app.get('/health', async (req, res) => {
       errorLogger.connectionCheck('RunPod Health', false, { error: error.message });
     }
   }
-
-  errorLogger.info('Health check completed', { services });
 
   res.json({
     status: 'healthy',
@@ -723,10 +749,7 @@ app.get('*', (req, res) => {
   
   const indexPath = path.join(frontendDistPath, 'index.html');
   if (fs.existsSync(indexPath)) {
-    errorLogger.info('Serving SPA fallback', {
-      requested_path: req.path,
-      serving: 'index.html'
-    });
+    // REDUCED LOGGING: Don't log every SPA fallback
     res.sendFile(indexPath);
   } else {
     errorLogger.error('index.html not found for SPA fallback', {

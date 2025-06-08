@@ -30,30 +30,39 @@ class AgentMiddleware {
     next();
   }
 
-  // Enhanced request logging for agent operations
+  // Enhanced request logging for agent operations - REDUCED LOGGING
   logAgentRequest(req, res, next) {
     const startTime = Date.now();
     
-    errorLogger.info('Agent request received', {
-      user_id: req.userId,
-      method: req.method,
-      path: req.path,
-      ip: req.ip,
-      user_agent: req.get('User-Agent')
-    });
-
-    // Log response when finished
-    res.on('finish', () => {
-      const duration = Date.now() - startTime;
-      const level = res.statusCode >= 400 ? 'error' : 'info';
-      
-      errorLogger[level]('Agent request completed', {
+    // ONLY log non-status requests to reduce spam
+    if (!req.path.includes('/status')) {
+      errorLogger.info('Agent request received', {
         user_id: req.userId,
         method: req.method,
         path: req.path,
-        status_code: res.statusCode,
-        duration_ms: duration
+        ip: req.ip,
+        user_agent: req.get('User-Agent')
       });
+    }
+
+    // Log response when finished - ONLY for non-status or errors
+    res.on('finish', () => {
+      const duration = Date.now() - startTime;
+      const isStatusRequest = req.path.includes('/status');
+      const isError = res.statusCode >= 400;
+      
+      // Only log status requests if they error, or log all non-status requests
+      if (!isStatusRequest || isError) {
+        const level = isError ? 'error' : 'info';
+        
+        errorLogger[level]('Agent request completed', {
+          user_id: req.userId,
+          method: req.method,
+          path: req.path,
+          status_code: res.statusCode,
+          duration_ms: duration
+        });
+      }
     });
 
     next();

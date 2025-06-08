@@ -63,6 +63,7 @@ export function Monitor() {
 
     const userEmail = user?.email;
 
+    // REDUCED LOGGING: Only log debug info for status checks
     logger.debug('Fetching agent status', {
       component: 'Monitor',
       user: userEmail
@@ -73,9 +74,12 @@ export function Monitor() {
       let endpoint = '/api/agent/status';
       let isLegacyFallback = false;
 
-      logApiCall(endpoint, 'GET', userEmail, 'initiated', {
-        component: 'Monitor'
-      });
+      // REDUCED LOGGING: Only log API calls for non-auto-refresh requests
+      if (!autoRefresh) {
+        logApiCall(endpoint, 'GET', userEmail, 'initiated', {
+          component: 'Monitor'
+        });
+      }
 
       try {
         response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
@@ -95,10 +99,12 @@ export function Monitor() {
         endpoint = '/agent/status';
         isLegacyFallback = true;
         
-        logApiCall(endpoint, 'GET', userEmail, 'initiated', {
-          isLegacyFallback: true,
-          component: 'Monitor'
-        });
+        if (!autoRefresh) {
+          logApiCall(endpoint, 'GET', userEmail, 'initiated', {
+            isLegacyFallback: true,
+            component: 'Monitor'
+          });
+        }
 
         response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
           method: 'GET',
@@ -111,13 +117,16 @@ export function Monitor() {
       if (response.ok) {
         const data = await response.json();
         
-        logApiCall(endpoint, 'GET', userEmail, 'success', {
-          status: response.status,
-          agentActive: data.agent_active,
-          containerStatus: data.container_status,
-          isLegacyFallback,
-          component: 'Monitor'
-        });
+        // REDUCED LOGGING: Only log successful API calls for non-auto-refresh
+        if (!autoRefresh) {
+          logApiCall(endpoint, 'GET', userEmail, 'success', {
+            status: response.status,
+            agentActive: data.agent_active,
+            containerStatus: data.container_status,
+            isLegacyFallback,
+            component: 'Monitor'
+          });
+        }
 
         setAgentStatus(data);
         
@@ -147,7 +156,7 @@ export function Monitor() {
     } finally {
       setLoading(false);
     }
-  }, [session, user]);
+  }, [session, user, autoRefresh]);
 
   const performDetailedStatusCheck = useCallback(async () => {
     if (!session || !agentStatus?.agent_active) return;
@@ -292,7 +301,7 @@ export function Monitor() {
     }
   }, [session, user, agentStatus]);
 
-  // Auto-refresh interval
+  // REDUCED AUTO-REFRESH: Increase interval to 30 seconds to reduce log spam
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (autoRefresh) {
@@ -301,7 +310,7 @@ export function Monitor() {
         if (agentStatus?.agent_active) {
           performDetailedStatusCheck();
         }
-      }, 10000); // Refresh every 10 seconds
+      }, 30000); // Increased from 10 seconds to 30 seconds
     }
     return () => {
       if (interval) clearInterval(interval);
@@ -634,7 +643,7 @@ export function Monitor() {
                 className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <label htmlFor="auto-refresh" className="text-sm text-gray-700">
-                Auto-refresh (10s)
+                Auto-refresh (30s)
               </label>
             </div>
             <div className="text-right">

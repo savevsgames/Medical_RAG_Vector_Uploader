@@ -153,16 +153,13 @@ class AgentManager {
     }
   }
 
-  // Get current agent status
+  // Get current agent status - REDUCED LOGGING FOR STATUS CHECKS
   async getAgentStatus(userId) {
     try {
+      // Only log debug info, not info level for status checks
       errorLogger.debug('Fetching agent status - starting query', {
         user_id: userId,
         component: 'AgentManager.getAgentStatus'
-      });
-
-      errorLogger.info('Fetching agent status', { 
-        user_id: userId 
       });
 
       const { data: agent, error } = await this.supabase
@@ -210,12 +207,14 @@ class AgentManager {
         component: 'AgentManager.getAgentStatus'
       });
 
-      errorLogger.info('Agent status retrieved', {
-        user_id: userId,
-        agent_active: status.agent_active,
-        agent_id: status.agent_id,
-        has_session_data: !!status.session_data
-      });
+      // REMOVED: Frequent info logging for status checks
+      // Only log when agent is actually active or there's an issue
+      if (status.agent_active) {
+        errorLogger.debug('Agent status retrieved - active agent found', {
+          user_id: userId,
+          agent_id: status.agent_id
+        });
+      }
 
       return status;
 
@@ -238,10 +237,6 @@ class AgentManager {
         component: 'AgentManager.updateLastActive'
       });
 
-      errorLogger.info('Updating agent last active timestamp', {
-        user_id: userId
-      });
-
       const { error } = await this.supabase
         .from('agents')
         .update({ last_active: new Date().toISOString() })
@@ -260,9 +255,6 @@ class AgentManager {
         errorLogger.debug('Agent last active updated successfully', {
           user_id: userId,
           component: 'AgentManager.updateLastActive'
-        });
-        errorLogger.info('Agent last active updated successfully', {
-          user_id: userId
         });
       }
 
