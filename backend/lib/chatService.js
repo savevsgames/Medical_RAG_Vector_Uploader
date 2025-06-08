@@ -132,7 +132,7 @@ export class ChatService {
         query_embedding: queryEmbedding,
         match_threshold: threshold,
         match_count: limit
-        // Removed user_id parameter - RLS will handle user filtering
+        // Removed user_id parameter - RLS will handle user filtering automatically
       });
 
       if (error) {
