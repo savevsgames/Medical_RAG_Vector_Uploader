@@ -137,7 +137,7 @@ export function Documents() {
     fetchDocuments();
   };
 
-  // DIAGNOSTIC: Test embed endpoint directly
+  // FIXED: Test embed endpoint with proper response handling
   const testEmbedEndpoint = async () => {
     if (!session) {
       toast.error('No session available for testing');
@@ -184,6 +184,7 @@ export function Documents() {
         component: 'Documents'
       });
 
+      // CRITICAL FIX: Check response.ok instead of calling response.success()
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         logger.error('Test embed request failed', {
@@ -195,6 +196,7 @@ export function Documents() {
         throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
+      // CRITICAL FIX: Parse JSON response properly
       const responseData = await response.json();
       
       logger.success('Test embed completed successfully', {
