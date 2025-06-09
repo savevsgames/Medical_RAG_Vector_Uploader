@@ -1,29 +1,17 @@
 import express from 'express';
-import { healthRouter } from './health.js';
-import { createDocumentsRouter } from './documents.js';
-import { createChatRouter } from './chat.js';
-import { mountAgentRoutes } from '../agent_utils/index.js';
+import healthRoutes from './health.js';
+import documentsRoutes from './documents.js';
+import chatRoutes from './chat.js';
+import { router as agentRoutes } from '../agent_utils/routes/agentRoutes.js';
+import { router as containerRoutes } from '../agent_utils/routes/containerRoutes.js';
 
 const router = express.Router();
 
-export function setupRoutes(app, supabaseClient) {
-  // Validate Supabase client
-  if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-    throw new Error('Invalid Supabase client provided to setupRoutes');
-  }
+// Mount all route modules
+router.use('/health', healthRoutes);
+router.use('/documents', documentsRoutes);
+router.use('/chat', chatRoutes);
+router.use('/agent', agentRoutes);
+router.use('/', containerRoutes); // Mount container routes at root level to handle /embed
 
-  // Health check (no auth required)
-  app.use('/health', healthRouter);
-  
-  // Create routers with Supabase client dependency injection
-  const documentsRouter = createDocumentsRouter(supabaseClient);
-  const chatRouter = createChatRouter(supabaseClient);
-  
-  // Mount protected routes - auth is now handled within each router
-  app.use('/api', chatRouter);
-  app.use('/', documentsRouter);
-  
-  // Mount agent routes (includes both new API and legacy)
-  // This function handles mounting containerRouter at /api path correctly
-  mountAgentRoutes(app, supabaseClient);
-}
+export default router;
