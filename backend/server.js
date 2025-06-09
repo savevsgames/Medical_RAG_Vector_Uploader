@@ -3,7 +3,7 @@ import { config, validateConfig } from './config/environment.js';
 import { database, supabase } from './config/database.js';
 import { corsMiddleware, optionsHandler } from './middleware/cors.js';
 import { requestLogger } from './middleware/logging.js';
-import { setupRoutes } from './routes/index.js';
+import setupRoutes from './routes/index.js';
 import { staticFileService } from './services/StaticFileService.js';
 import { errorLogger } from './agent_utils/shared/logger.js';
 
@@ -64,7 +64,7 @@ function startServer() {
   // Setup static file serving
   staticFileService.setupStaticFiles(app);
 
-  // CRITICAL FIX: Pass Supabase client to setupRoutes
+  // CRITICAL FIX: Properly setup routes with Supabase client
   setupRoutes(app, supabase);
 
   // Setup SPA fallback (must be last)
