@@ -6,8 +6,7 @@ import {
   FileText, 
   Activity, 
   LogOut, 
-  User,
-  Stethoscope
+  User
 } from 'lucide-react';
 
 export function Layout() {
@@ -42,16 +41,17 @@ export function Layout() {
           <div className="flex justify-between items-center h-16">
             {/* Logo and Title */}
             <div className="flex items-center space-x-3">
-              <div className="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-lg">
-                <Stethoscope className="w-5 h-5 text-white" />
+              <div className="flex items-center justify-center w-10 h-10">
+                <img 
+                  src="/logo_transparent.png" 
+                  alt="Symptom Savior Logo" 
+                  className="w-10 h-10 object-contain"
+                />
               </div>
               <div>
                 <h1 className="text-xl font-semibold text-gray-900">
-                  Medical RAG Assistant
+                  Symptom Savior - Smart MedDoc Portal
                 </h1>
-                <p className="text-xs text-gray-500">
-                  Intelligent Document Analysis
-                </p>
               </div>
             </div>
 
