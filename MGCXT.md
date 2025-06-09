@@ -1,8 +1,8 @@
 # Migration Context File (MGCXT.md)
-## Complete Database Schema Recreation with Security Fixes
+## Complete Database Schema Recreation with Security Fixes and Cleanup
 
 ### 🎯 **Purpose**
-This file documents the complete database schema needed to recreate the Medical RAG Vector Uploader system with all security fixes applied. Use this to create a single comprehensive migration that replaces all existing migrations.
+This file documents the complete database schema needed to recreate the Medical RAG Vector Uploader system with all security fixes applied. Use this to create a single comprehensive migration that replaces all existing migrations and cleans up old functions.
 
 ---
 
@@ -10,6 +10,76 @@ This file documents the complete database schema needed to recreate the Medical 
 - `20250608112819_turquoise_island.sql`
 - `20250608145125_autumn_math.sql` 
 - `20250609095725_spring_violet.sql`
+
+---
+
+## 🧹 **CRITICAL: Cleanup Old Functions First**
+
+### **Drop All Existing Functions**
+```sql
+-- Drop all existing functions that may have search path issues
+DROP FUNCTION IF EXISTS public.match_documents(vector, float, int);
+DROP FUNCTION IF EXISTS public.get_active_agent(uuid);
+DROP FUNCTION IF EXISTS public.create_agent_session(uuid, text, jsonb);
+DROP FUNCTION IF EXISTS public.terminate_agent_session(uuid);
+DROP FUNCTION IF EXISTS public.update_agent_last_active(uuid);
+DROP FUNCTION IF EXISTS public.cleanup_stale_agents();
+DROP FUNCTION IF EXISTS public.test_user_documents_count(uuid);
+DROP FUNCTION IF EXISTS public.test_vector_similarity(vector, vector);
+DROP FUNCTION IF EXISTS public.test_auth_uid();
+DROP FUNCTION IF EXISTS public.create_test_medical_document(text, text, uuid);
+
+-- Drop any legacy functions that might exist
+DROP FUNCTION IF EXISTS match_documents(vector, float, int);
+DROP FUNCTION IF EXISTS get_active_agent(uuid);
+DROP FUNCTION IF EXISTS create_agent_session(uuid, text, jsonb);
+DROP FUNCTION IF EXISTS terminate_agent_session(uuid);
+DROP FUNCTION IF EXISTS update_agent_last_active(uuid);
+DROP FUNCTION IF EXISTS cleanup_stale_agents();
+DROP FUNCTION IF EXISTS test_user_documents_count(uuid);
+DROP FUNCTION IF EXISTS test_vector_similarity(vector, vector);
+DROP FUNCTION IF EXISTS test_auth_uid();
+DROP FUNCTION IF EXISTS create_test_medical_document(text, text, uuid);
+
+-- Drop any trigger functions
+DROP FUNCTION IF EXISTS public.update_agent_last_active_trigger();
+DROP FUNCTION IF EXISTS update_agent_last_active_trigger();
+
+-- Drop any other potential legacy functions
+DROP FUNCTION IF EXISTS public.search_documents(vector, float, int);
+DROP FUNCTION IF EXISTS public.vector_search(vector, float, int);
+DROP FUNCTION IF EXISTS public.similarity_search(vector, float, int);
+DROP FUNCTION IF EXISTS search_documents(vector, float, int);
+DROP FUNCTION IF EXISTS vector_search(vector, float, int);
+DROP FUNCTION IF EXISTS similarity_search(vector, float, int);
+```
+
+### **Drop Existing Triggers**
+```sql
+-- Drop any existing triggers
+DROP TRIGGER IF EXISTS update_agent_last_active ON public.agents;
+DROP TRIGGER IF EXISTS agent_last_active_trigger ON public.agents;
+DROP TRIGGER IF EXISTS agents_update_trigger ON public.agents;
+```
+
+### **Drop Old Policies (Clean Slate)**
+```sql
+-- Drop all existing RLS policies to start fresh
+DROP POLICY IF EXISTS "Users can read own documents" ON public.documents;
+DROP POLICY IF EXISTS "documents_user_isolation" ON public.documents;
+DROP POLICY IF EXISTS "Authenticated users can read all documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can only upload as themselves" ON public.documents;
+DROP POLICY IF EXISTS "Users can only edit their own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can only delete their own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can only upload documents as themselves" ON public.documents;
+DROP POLICY IF EXISTS "Users can only insert as themselves" ON public.documents;
+
+DROP POLICY IF EXISTS "Users can manage own agents" ON public.agents;
+DROP POLICY IF EXISTS "agents_user_isolation" ON public.agents;
+
+DROP POLICY IF EXISTS "Users can manage own embedding jobs" ON public.embedding_jobs;
+DROP POLICY IF EXISTS "embedding_jobs_user_isolation" ON public.embedding_jobs;
+```
 
 ---
 
@@ -368,7 +438,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger
-DROP TRIGGER IF EXISTS update_agent_last_active ON public.agents;
 CREATE TRIGGER update_agent_last_active
     BEFORE UPDATE ON public.agents
     FOR EACH ROW
@@ -383,6 +452,7 @@ CREATE TRIGGER update_agent_last_active
 - ✅ All functions now include `SET search_path TO public, pg_catalog;`
 - ✅ Prevents search path manipulation attacks
 - ✅ Ensures consistent function behavior
+- ✅ **CRITICAL**: Old functions without search path fixes are completely removed
 
 ### **2. Extension in Public Schema - ADDRESSED**
 - ✅ Extensions explicitly created in public schema
@@ -391,6 +461,12 @@ CREATE TRIGGER update_agent_last_active
 ### **3. Auth OTP Long Expiry - CONFIGURATION**
 - ⚠️ Requires Supabase Dashboard configuration
 - ⚠️ Set OTP expiry to recommended threshold (15 minutes)
+
+### **4. Function Cleanup - NEW**
+- ✅ **CRITICAL**: All old functions are dropped before creating new ones
+- ✅ Prevents function conflicts and ensures clean state
+- ✅ Removes any legacy functions that may have search path issues
+- ✅ Ensures no orphaned functions remain in the database
 
 ---
 
@@ -433,24 +509,27 @@ CREATE POLICY "All authenticated users can read all documents"
 ## 🔄 **Migration Strategy**
 
 ### **Single Migration Approach**
-1. **Drop existing tables** (if recreating from scratch)
+1. **🧹 CLEANUP FIRST**: Drop all existing functions, triggers, and policies
 2. **Create extensions** first
-3. **Create tables** with all columns and constraints
+3. **Create tables** with all columns and constraints (IF NOT EXISTS for safety)
 4. **Create indexes** for performance
-5. **Enable RLS** and create policies
-6. **Create functions** with fixed search paths
+5. **Enable RLS** and create policies (fresh, clean policies)
+6. **Create functions** with fixed search paths (completely new, secure functions)
 7. **Create triggers** for automation
 
 ### **Data Preservation**
-- If preserving existing data, use `CREATE TABLE IF NOT EXISTS`
-- Use `ALTER TABLE` statements for schema changes
-- Use `CREATE OR REPLACE FUNCTION` for function updates
+- ✅ Uses `CREATE TABLE IF NOT EXISTS` to preserve existing data
+- ✅ Uses `CREATE INDEX IF NOT EXISTS` to avoid conflicts
+- ✅ Uses `CREATE OR REPLACE FUNCTION` for clean function replacement
+- ✅ **CRITICAL**: Drops old functions first to prevent conflicts
 
 ---
 
 ## 🧪 **Testing Checklist**
 
 ### **After Migration**
+- [ ] ✅ **No old functions remain** - Check `\df` in psql
+- [ ] ✅ **All security warnings resolved** - Check Supabase Security Advisor
 - [ ] Vector search works with `match_documents()`
 - [ ] All authenticated users can read all documents
 - [ ] Users can only upload as themselves
@@ -464,6 +543,7 @@ CREATE POLICY "All authenticated users can read all documents"
 - [ ] Functions have fixed search paths
 - [ ] Extensions are properly scoped
 - [ ] No SQL injection vulnerabilities
+- [ ] **CRITICAL**: No orphaned functions with security issues
 
 ---
 
@@ -504,6 +584,11 @@ CREATE POLICY "All authenticated users can read all documents"
 - `test_vector_similarity(vec1, vec2)` - Test vector similarity
 - `test_auth_uid()` - Test authentication context
 - `create_test_medical_document()` - Create test document
+
+### Security Notes
+- All functions include `SET search_path TO public, pg_catalog;`
+- All old functions are completely removed during migration
+- No legacy functions remain that could have security issues
 ```
 
 ---
@@ -512,11 +597,15 @@ CREATE POLICY "All authenticated users can read all documents"
 
 This context file contains everything needed to create a single, comprehensive migration that:
 
-1. ✅ **Recreates the complete database schema**
-2. ✅ **Fixes all security warnings**
-3. ✅ **Enables shared medical knowledge base**
-4. ✅ **Maintains backward compatibility**
-5. ✅ **Optimizes performance**
-6. ✅ **Preserves all functionality**
+1. ✅ **🧹 CLEANS UP all old functions first** (CRITICAL for security)
+2. ✅ **Recreates the complete database schema**
+3. ✅ **Fixes all security warnings**
+4. ✅ **Enables shared medical knowledge base**
+5. ✅ **Maintains backward compatibility**
+6. ✅ **Optimizes performance**
+7. ✅ **Preserves all functionality**
+8. ✅ **Ensures no orphaned functions remain**
 
-Use this file to create the final migration that replaces all existing migration files and resolves all current database issues.
+**CRITICAL IMPROVEMENT**: The cleanup section at the beginning ensures that all old functions with potential security issues are completely removed before creating the new, secure functions. This prevents any conflicts and ensures a clean, secure database state.
+
+Use this file to create the final migration that replaces all existing migration files and resolves all current database issues while maintaining a clean, secure function environment.
