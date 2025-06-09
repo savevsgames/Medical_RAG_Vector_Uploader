@@ -2,9 +2,13 @@ import express from 'express';
 import { ChatService } from '../lib/services/ChatService.js';
 import { supabase } from '../config/database.js';
 import { config } from '../config/environment.js';
+import { verifyToken } from '../middleware/auth.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 
 const router = express.Router();
+
+// Apply authentication to all chat routes
+router.use(verifyToken);
 
 // Initialize chat service
 const chatService = new ChatService(supabase);

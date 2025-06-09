@@ -3,9 +3,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../config/database.js';
 import { DocumentProcessingService, EmbeddingService } from '../lib/services/index.js';
 import { upload } from '../middleware/upload.js';
+import { verifyToken } from '../middleware/auth.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 
 const router = express.Router();
+
+// Apply authentication to all document routes
+router.use(verifyToken);
 
 // Initialize services
 const documentProcessor = new DocumentProcessingService();
