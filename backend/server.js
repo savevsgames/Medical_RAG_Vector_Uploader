@@ -1,6 +1,6 @@
 import express from 'express';
 import { config, validateConfig } from './config/environment.js';
-import { database } from './config/database.js';
+import { database, supabase } from './config/database.js';
 import { corsMiddleware, optionsHandler } from './middleware/cors.js';
 import { requestLogger } from './middleware/logging.js';
 import { setupRoutes } from './routes/index.js';
@@ -64,8 +64,8 @@ function startServer() {
   // Setup static file serving
   staticFileService.setupStaticFiles(app);
 
-  // Setup all routes
-  setupRoutes(app);
+  // CRITICAL FIX: Pass Supabase client to setupRoutes
+  setupRoutes(app, supabase);
 
   // Setup SPA fallback (must be last)
   staticFileService.setupSPAFallback(app);

@@ -1,20 +1,19 @@
 import { errorLogger } from '../shared/logger.js';
+import { httpClient } from '../shared/httpClient.js';
+import { config } from '../../config/environment.js';
 
 export class AgentService {
   constructor(supabaseClient) {
-    if (!supabaseClient) {
-      throw new Error('AgentService requires a Supabase client instance');
+    // Validate Supabase client
+    if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+      throw new Error('Invalid Supabase client: missing from() method');
     }
     
     this.supabase = supabaseClient;
     
-    // Validate that the client has the expected methods
-    if (typeof this.supabase.from !== 'function') {
-      throw new Error('Invalid Supabase client: missing from() method');
-    }
-    
-    errorLogger.debug('AgentService initialized with Supabase client', {
-      hasFromMethod: typeof this.supabase.from === 'function',
+    errorLogger.info('AgentService initialized', {
+      has_supabase: !!this.supabase,
+      supabase_methods: Object.getOwnPropertyNames(this.supabase).slice(0, 5),
       component: 'AgentService'
     });
   }
@@ -33,12 +32,15 @@ export class AgentService {
         .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-        errorLogger.error('Failed to get active agent', error, {
+      if (error) {
+        errorLogger.error('Failed to get active agent', {
           userId,
-          component: 'AgentService'
+          component: 'AgentService',
+          error_message: error.message,
+          error_code: error.code,
+          error_details: error.details
         });
         throw error;
       }
@@ -51,8 +53,9 @@ export class AgentService {
       });
 
       return data;
+
     } catch (error) {
-      errorLogger.error('Failed to get active agent', error, {
+      errorLogger.error('Failed to get active agent', {
         userId,
         component: 'AgentService',
         error_message: error.message,
@@ -62,217 +65,202 @@ export class AgentService {
     }
   }
 
-  async startAgent(userId, sessionData = {}) {
+  async startAgent(userId) {
     try {
-      errorLogger.info('Starting agent session', {
+      errorLogger.info('Starting agent for user', {
         userId,
-        sessionData,
         component: 'AgentService'
       });
 
-      // First, terminate any existing active agents for this user
-      await this.terminateActiveAgents(userId);
+      // Check if user already has an active agent
+      const existingAgent = await this.getActiveAgent(userId);
+      
+      if (existingAgent) {
+        errorLogger.info('User already has active agent', {
+          userId,
+          existingAgentId: existingAgent.id,
+          component: 'AgentService'
+        });
+        
+        // Update last_active timestamp
+        const { error: updateError } = await this.supabase
+          .from('agents')
+          .update({ last_active: new Date().toISOString() })
+          .eq('id', existingAgent.id);
+
+        if (updateError) {
+          errorLogger.warn('Failed to update existing agent timestamp', {
+            userId,
+            agentId: existingAgent.id,
+            error: updateError.message,
+            component: 'AgentService'
+          });
+        }
+
+        return {
+          agent_id: existingAgent.id,
+          container_id: existingAgent.session_data?.container_id || 'existing',
+          status: 'already_active'
+        };
+      }
 
       // Create new agent session
-      const { data, error } = await this.supabase
+      const agentData = {
+        user_id: userId,
+        status: 'active',
+        session_data: {
+          started_at: new Date().toISOString(),
+          runpod_endpoint: config.runpod.url,
+          capabilities: ['chat', 'embed', 'health_check']
+        },
+        created_at: new Date().toISOString(),
+        last_active: new Date().toISOString()
+      };
+
+      const { data: newAgent, error: insertError } = await this.supabase
         .from('agents')
-        .insert({
-          user_id: userId,
-          status: 'active',
-          session_data: sessionData,
-          last_active: new Date().toISOString()
-        })
+        .insert(agentData)
         .select()
         .single();
 
-      if (error) {
-        errorLogger.error('Failed to create agent session', error, {
+      if (insertError) {
+        errorLogger.error('Failed to create new agent', {
           userId,
-          component: 'AgentService'
+          component: 'AgentService',
+          error_message: insertError.message,
+          error_code: insertError.code,
+          error_details: insertError.details
         });
-        throw error;
+        throw insertError;
       }
 
-      errorLogger.success('Agent session started successfully', {
+      errorLogger.success('New agent created successfully', {
         userId,
-        agentId: data.id,
+        agentId: newAgent.id,
         component: 'AgentService'
       });
 
-      return data;
-    } catch (error) {
-      errorLogger.error('Failed to start agent', error, {
-        userId,
-        component: 'AgentService',
-        error_message: error.message,
-        error_stack: error.stack
-      });
-      throw error;
-    }
-  }
-
-  async stopAgent(userId, agentId = null) {
-    try {
-      errorLogger.info('Stopping agent session', {
-        userId,
-        agentId,
-        component: 'AgentService'
-      });
-
-      let query = this.supabase
-        .from('agents')
-        .update({
-          status: 'terminated',
-          terminated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId);
-
-      if (agentId) {
-        query = query.eq('id', agentId);
-      } else {
-        query = query.eq('status', 'active');
-      }
-
-      const { data, error } = await query.select();
-
-      if (error) {
-        errorLogger.error('Failed to stop agent session', error, {
-          userId,
-          agentId,
-          component: 'AgentService'
-        });
-        throw error;
-      }
-
-      errorLogger.success('Agent session stopped successfully', {
-        userId,
-        agentId,
-        stoppedAgents: data?.length || 0,
-        component: 'AgentService'
-      });
-
-      return data;
-    } catch (error) {
-      errorLogger.error('Failed to stop agent', error, {
-        userId,
-        agentId,
-        component: 'AgentService',
-        error_message: error.message,
-        error_stack: error.stack
-      });
-      throw error;
-    }
-  }
-
-  async updateAgentActivity(userId, agentId = null) {
-    try {
-      let query = this.supabase
-        .from('agents')
-        .update({
-          last_active: new Date().toISOString()
-        })
-        .eq('user_id', userId)
-        .eq('status', 'active');
-
-      if (agentId) {
-        query = query.eq('id', agentId);
-      }
-
-      const { data, error } = await query.select();
-
-      if (error) {
-        errorLogger.error('Failed to update agent activity', error, {
-          userId,
-          agentId,
-          component: 'AgentService'
-        });
-        throw error;
-      }
-
-      return data;
-    } catch (error) {
-      errorLogger.error('Failed to update agent activity', error, {
-        userId,
-        agentId,
-        component: 'AgentService',
-        error_message: error.message,
-        error_stack: error.stack
-      });
-      throw error;
-    }
-  }
-
-  async terminateActiveAgents(userId) {
-    try {
-      errorLogger.debug('Terminating existing active agents', {
-        userId,
-        component: 'AgentService'
-      });
-
-      const { data, error } = await this.supabase
-        .from('agents')
-        .update({
-          status: 'terminated',
-          terminated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .select();
-
-      if (error) {
-        errorLogger.error('Failed to terminate active agents', error, {
-          userId,
-          component: 'AgentService'
-        });
-        throw error;
-      }
-
-      errorLogger.debug('Terminated active agents', {
-        userId,
-        terminatedCount: data?.length || 0,
-        component: 'AgentService'
-      });
-
-      return data;
-    } catch (error) {
-      errorLogger.error('Failed to terminate active agents', error, {
-        userId,
-        component: 'AgentService',
-        error_message: error.message,
-        error_stack: error.stack
-      });
-      throw error;
-    }
-  }
-
-  async getAgentStatus(userId) {
-    try {
-      const activeAgent = await this.getActiveAgent(userId);
-      
-      const status = {
-        agent_active: !!activeAgent,
-        agent_id: activeAgent?.id || null,
-        last_active: activeAgent?.last_active || null,
-        container_status: activeAgent?.session_data?.container_status || 'unknown',
-        container_health: activeAgent?.session_data?.container_health || null,
-        session_data: activeAgent?.session_data || {}
+      return {
+        agent_id: newAgent.id,
+        container_id: 'new_session',
+        status: 'created'
       };
 
-      errorLogger.debug('Agent status retrieved', {
-        userId,
-        status,
-        component: 'AgentService'
-      });
-
-      return status;
     } catch (error) {
-      errorLogger.error('Failed to get agent status', error, {
+      errorLogger.error('Failed to start agent', {
         userId,
         component: 'AgentService',
         error_message: error.message,
         error_stack: error.stack
       });
       throw error;
+    }
+  }
+
+  async stopAgent(userId) {
+    try {
+      errorLogger.info('Stopping agent for user', {
+        userId,
+        component: 'AgentService'
+      });
+
+      // Get active agent
+      const activeAgent = await this.getActiveAgent(userId);
+      
+      if (!activeAgent) {
+        errorLogger.info('No active agent found to stop', {
+          userId,
+          component: 'AgentService'
+        });
+        return { status: 'no_active_agent' };
+      }
+
+      // Update agent status to terminated
+      const { error: updateError } = await this.supabase
+        .from('agents')
+        .update({
+          status: 'terminated',
+          terminated_at: new Date().toISOString()
+        })
+        .eq('id', activeAgent.id);
+
+      if (updateError) {
+        errorLogger.error('Failed to update agent status to terminated', {
+          userId,
+          agentId: activeAgent.id,
+          component: 'AgentService',
+          error_message: updateError.message,
+          error_code: updateError.code
+        });
+        throw updateError;
+      }
+
+      errorLogger.success('Agent stopped successfully', {
+        userId,
+        agentId: activeAgent.id,
+        component: 'AgentService'
+      });
+
+      return {
+        agent_id: activeAgent.id,
+        status: 'terminated'
+      };
+
+    } catch (error) {
+      errorLogger.error('Failed to stop agent', {
+        userId,
+        component: 'AgentService',
+        error_message: error.message,
+        error_stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  async testContainerHealth(agent) {
+    try {
+      if (!config.runpod.url) {
+        throw new Error('RunPod URL not configured');
+      }
+
+      const healthUrl = `${config.runpod.url}/health`;
+      
+      errorLogger.debug('Testing container health', {
+        agentId: agent.id,
+        healthUrl,
+        component: 'AgentService'
+      });
+
+      const response = await httpClient.get(healthUrl, {
+        timeout: 5000,
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+
+      errorLogger.success('Container health check passed', {
+        agentId: agent.id,
+        status: response.status,
+        component: 'AgentService'
+      });
+
+      return {
+        status: 'running',
+        health: response.data
+      };
+
+    } catch (error) {
+      errorLogger.warn('Container health check failed', {
+        agentId: agent.id,
+        error: error.message,
+        component: 'AgentService'
+      });
+
+      return {
+        status: 'unreachable',
+        health: null,
+        error: error.message
+      };
     }
   }
 }
