@@ -8,28 +8,37 @@ export default {
     extend: {
       colors: {
         // Symptom Savior Brand Colors
-        'guardian-gold': '#FFD700',
-        'healing-teal': '#027d82',
-        'sky-blue': '#AEE1F9',
-        'deep-midnight': '#0C1A2A',
-        'cloud-ivory': '#F9F9F9',
-        'soft-gray': '#B0BEC5',
+        'deep-midnight': '#1a1a2e',
+        'sky-blue': '#e3f2fd',
+        'cloud-ivory': '#fefefe',
+        'soft-gray': '#9e9e9e',
+        'healing-teal': '#26a69a',
+        'guardian-gold': '#ffc107',
       },
       fontFamily: {
-        // Symptom Savior Typography
         'heading': ['DM Serif Display', 'serif'],
         'subheading': ['Poppins', 'sans-serif'],
         'body': ['Inter', 'sans-serif'],
-        'mono': ['JetBrains Mono', 'Source Code Pro', 'monospace'],
-      },
-      borderRadius: {
-        'xl': '1rem',
-        '2xl': '1.5rem',
+        'mono': ['JetBrains Mono', 'monospace'],
       },
       boxShadow: {
-        'mild': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-        'soft': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-        'glow': '0 0 20px rgba(0, 181, 178, 0.3)',
+        'mild': '0 2px 8px rgba(0, 0, 0, 0.1)',
+        'soft': '0 4px 16px rgba(0, 0, 0, 0.12)',
+        'glow': '0 0 20px rgba(38, 166, 154, 0.3)',
+      },
+      animation: {
+        'float': 'float 3s ease-in-out infinite',
+        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+      },
+      keyframes: {
+        float: {
+          '0%, 100%': { transform: 'translateY(0px)' },
+          '50%': { transform: 'translateY(-10px)' },
+        },
+        'pulse-glow': {
+          '0%, 100%': { boxShadow: '0 0 20px rgba(38, 166, 154, 0.3)' },
+          '50%': { boxShadow: '0 0 30px rgba(38, 166, 154, 0.5)' },
+        },
       },
     },
   },
