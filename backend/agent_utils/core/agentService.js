@@ -1,186 +1,242 @@
-// Core agent service - consolidated business logic
-import { supabaseManager } from '../shared/supabaseClient.js';
+import { supabase } from '../../config/database.js';
 import { errorLogger } from '../shared/logger.js';
-import { handleAgentError, createNotFoundError } from '../shared/errors.js';
-import { AGENT_STATUS } from '../shared/constants.js';
+import axios from 'axios';
+import { config } from '../../config/environment.js';
 
 export class AgentService {
   constructor() {
-    this.supabase = supabaseManager.getServiceClient();
+    this.supabase = supabase;
   }
 
-  async createSession(userId, sessionData, userJWT) {
+  async getActiveAgent(userId) {
+    errorLogger.debug('Fetching active agent for user', { 
+      userId,
+      component: 'AgentService'
+    });
+
     try {
-      errorLogger.debug('Creating agent session', {
-        user_id: userId,
-        session_data: sessionData
+      const { data, error } = await this.supabase
+        .from('agents')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 means no rows found
+        errorLogger.error('Error fetching active agent from DB', error, {
+          userId,
+          component: 'AgentService'
+        });
+        throw error;
+      }
+
+      // Check container health if agent exists and has session data
+      let containerHealth = null;
+      let containerStatus = 'stopped';
+
+      if (data && data.session_data && data.session_data.runpod_endpoint) {
+        try {
+          const healthUrl = `${data.session_data.runpod_endpoint.replace(/\/+$/, '')}/health`;
+          errorLogger.debug('Checking container health', {
+            healthUrl,
+            agentId: data.id,
+            component: 'AgentService'
+          });
+
+          const response = await axios.get(healthUrl, { 
+            timeout: 5000,
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          });
+          
+          containerHealth = response.data;
+          containerStatus = 'running';
+          
+          errorLogger.debug('Container health check successful', { 
+            healthUrl, 
+            containerHealth,
+            agentId: data.id,
+            component: 'AgentService'
+          });
+        } catch (healthError) {
+          errorLogger.warn('Failed to get container health', {
+            agentId: data.id,
+            runpodEndpoint: data.session_data.runpod_endpoint,
+            error: healthError.message,
+            errorCode: healthError.code,
+            component: 'AgentService'
+          });
+          containerHealth = { 
+            status: 'unreachable', 
+            error: healthError.message 
+          };
+          containerStatus = 'unreachable';
+        }
+      }
+
+      const result = {
+        agent_active: !!data && data.status !== 'terminated',
+        agent_id: data ? data.id : null,
+        last_active: data ? data.last_active : null,
+        container_status: containerStatus,
+        container_health: containerHealth,
+        session_data: data ? data.session_data : null
+      };
+
+      errorLogger.debug('Agent status result', {
+        userId,
+        result,
+        component: 'AgentService'
       });
 
-      const userClient = supabaseManager.createUserClient(userJWT);
-      
-      const { data, error } = await userClient
+      return result;
+    } catch (error) {
+      errorLogger.error('Failed to get active agent', error, {
+        userId,
+        component: 'AgentService'
+      });
+      throw error;
+    }
+  }
+
+  async startAgent(userId) {
+    errorLogger.info('Attempting to start agent for user', { 
+      userId,
+      component: 'AgentService'
+    });
+
+    try {
+      // Check if agent already exists and is active
+      const existingAgent = await this.getActiveAgent(userId);
+      if (existingAgent.agent_active && existingAgent.container_status === 'running') {
+        errorLogger.info('Agent already active for user', {
+          userId,
+          agentId: existingAgent.agent_id,
+          component: 'AgentService'
+        });
+        return {
+          id: existingAgent.agent_id,
+          status: 'already_active',
+          message: 'Agent session already active'
+        };
+      }
+
+      // Create or update agent session
+      const sessionData = {
+        started_at: new Date().toISOString(),
+        runpod_endpoint: config.runpod.url || 'http://localhost:8000/mock-runpod',
+        capabilities: ['chat', 'embed', 'health_check']
+      };
+
+      const { data, error } = await this.supabase
         .from('agents')
         .upsert({
           user_id: userId,
-          status: AGENT_STATUS.ACTIVE,
+          status: 'initializing',
           session_data: sessionData,
           last_active: new Date().toISOString()
+        }, { 
+          onConflict: 'user_id',
+          ignoreDuplicates: false 
         })
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        errorLogger.error('Error starting agent in DB', error, {
+          userId,
+          component: 'AgentService'
+        });
+        throw error;
+      }
 
-      errorLogger.agentStart(userId, data.id, {
-        session_data: sessionData,
-        supabase_id: data.id
-      });
-
-      return data;
-    } catch (error) {
-      throw handleAgentError('create_session', error, userId, { session_data: sessionData });
-    }
-  }
-
-  async terminateSession(userId, userJWT) {
-    try {
-      errorLogger.debug('Terminating agent session', { user_id: userId });
-
-      const userClient = supabaseManager.createUserClient(userJWT);
-
-      const { data, error } = await userClient
+      // Update status to running after successful creation
+      const { data: updatedData, error: updateError } = await this.supabase
         .from('agents')
-        .update({
-          status: AGENT_STATUS.TERMINATED,
-          terminated_at: new Date().toISOString()
+        .update({ 
+          status: 'running',
+          last_active: new Date().toISOString()
         })
-        .eq('user_id', userId)
-        .eq('status', AGENT_STATUS.ACTIVE)
-        .select();
-
-      if (error) throw error;
-
-      errorLogger.agentStop(userId, {
-        terminated_sessions: data?.length || 0,
-        session_ids: data?.map(d => d.id) || []
-      });
-
-      return data;
-    } catch (error) {
-      throw handleAgentError('terminate_session', error, userId);
-    }
-  }
-
-  async getStatus(userId, userJWT) {
-    try {
-      const userClient = supabaseManager.createUserClient(userJWT);
-
-      const { data: agent, error } = await userClient
-        .from('agents')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('status', AGENT_STATUS.ACTIVE)
+        .eq('id', data.id)
+        .select()
         .single();
 
-      if (error && error.code !== 'PGRST116') throw error;
-
-      return {
-        agent_active: !!agent,
-        agent_id: agent?.id || null,
-        last_active: agent?.last_active || null,
-        session_data: agent?.session_data || null
-      };
-    } catch (error) {
-      throw handleAgentError('get_status', error, userId);
-    }
-  }
-
-  async updateLastActive(userId, userJWT) {
-    try {
-      const userClient = supabaseManager.createUserClient(userJWT);
-
-      const { error } = await userClient
-        .from('agents')
-        .update({ last_active: new Date().toISOString() })
-        .eq('user_id', userId)
-        .eq('status', AGENT_STATUS.ACTIVE);
-
-      if (error) {
-        errorLogger.warn('Failed to update last active', {
-          user_id: userId,
-          error: error.message
+      if (updateError) {
+        errorLogger.error('Error updating agent status to running', updateError, {
+          userId,
+          agentId: data.id,
+          component: 'AgentService'
         });
+        throw updateError;
       }
-    } catch (error) {
-      errorLogger.warn('Error updating last active', {
-        user_id: userId,
-        error: error.message
+
+      errorLogger.success('Agent started successfully in DB', { 
+        agentId: updatedData.id,
+        userId,
+        status: updatedData.status,
+        component: 'AgentService'
       });
-    }
-  }
-
-  async getStats(userJWT = null) {
-    try {
-      const { data: activeAgents, error: activeError } = await this.supabase
-        .from('agents')
-        .select('user_id, id, created_at, last_active')
-        .eq('status', AGENT_STATUS.ACTIVE);
-
-      const { data: totalAgents, error: totalError } = await this.supabase
-        .from('agents')
-        .select('user_id, status, created_at', { count: 'exact' });
-
-      if (activeError || totalError) {
-        throw activeError || totalError;
-      }
 
       return {
-        active_agents: activeAgents?.length || 0,
-        total_agents: totalAgents?.length || 0,
-        active_agent_details: activeAgents?.map(agent => ({
-          id: agent.id,
-          user_id: agent.user_id,
-          created_at: agent.created_at,
-          last_active: agent.last_active
-        })) || [],
-        timestamp: new Date().toISOString()
+        id: updatedData.id,
+        status: 'activated',
+        container_id: `agent-${updatedData.id}`,
+        message: 'Agent session activated successfully'
       };
     } catch (error) {
-      throw handleAgentError('get_stats', error, null);
+      errorLogger.error('Failed to start agent', error, {
+        userId,
+        component: 'AgentService'
+      });
+      throw error;
     }
   }
 
-  async cleanupStaleAgents(maxAgeHours = 24) {
-    try {
-      const cutoffTime = new Date();
-      cutoffTime.setHours(cutoffTime.getHours() - maxAgeHours);
+  async stopAgent(userId) {
+    errorLogger.info('Attempting to stop agent for user', { 
+      userId,
+      component: 'AgentService'
+    });
 
+    try {
       const { data, error } = await this.supabase
         .from('agents')
-        .update({
-          status: AGENT_STATUS.TERMINATED,
-          terminated_at: new Date().toISOString()
+        .update({ 
+          status: 'terminated', 
+          terminated_at: new Date().toISOString(),
+          last_active: new Date().toISOString()
         })
-        .eq('status', AGENT_STATUS.ACTIVE)
-        .lt('last_active', cutoffTime.toISOString())
-        .select();
+        .eq('user_id', userId)
+        .select()
+        .single();
 
-      if (error) throw error;
-
-      const cleanedCount = data?.length || 0;
-      
-      if (cleanedCount > 0) {
-        errorLogger.info('Cleaned up stale agents', {
-          count: cleanedCount,
-          max_age_hours: maxAgeHours,
-          cleaned_agent_ids: data.map(d => d.id)
+      if (error) {
+        errorLogger.error('Error stopping agent in DB', error, {
+          userId,
+          component: 'AgentService'
         });
+        throw error;
       }
 
-      return cleanedCount;
+      errorLogger.success('Agent stopped successfully in DB', { 
+        agentId: data.id,
+        userId,
+        component: 'AgentService'
+      });
+
+      return {
+        id: data.id,
+        status: 'terminated',
+        message: 'Agent session terminated successfully'
+      };
     } catch (error) {
-      errorLogger.error('Error during agent cleanup', error, { max_age_hours: maxAgeHours });
-      return 0;
+      errorLogger.error('Failed to stop agent', error, {
+        userId,
+        component: 'AgentService'
+      });
+      throw error;
     }
   }
 }
