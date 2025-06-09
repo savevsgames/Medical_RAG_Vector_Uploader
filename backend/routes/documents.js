@@ -20,6 +20,9 @@ export function createDocumentsRouter(supabaseClient) {
   const documentProcessor = new DocumentProcessingService();
   const embeddingService = new EmbeddingService();
 
+  // CRITICAL: Expected embedding dimensions for the database schema
+  const EXPECTED_EMBEDDING_DIMENSIONS = 768;
+
   // Text sanitization function to prevent Unicode escape sequence errors
   const sanitizeTextForDatabase = (text) => {
     if (!text || typeof text !== 'string') return text;
@@ -34,6 +37,28 @@ export function createDocumentsRouter(supabaseClient) {
       // Normalize line endings
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n');
+  };
+
+  // Validate embedding dimensions
+  const validateEmbeddingDimensions = (embedding, embeddingSource) => {
+    if (!embedding || !Array.isArray(embedding)) {
+      throw new Error('Invalid embedding: not an array');
+    }
+
+    if (embedding.length !== EXPECTED_EMBEDDING_DIMENSIONS) {
+      const errorMessage = `Embedding dimension mismatch: expected ${EXPECTED_EMBEDDING_DIMENSIONS} dimensions, got ${embedding.length} from ${embeddingSource}`;
+      
+      if (embeddingSource === 'openai') {
+        throw new Error(
+          `${errorMessage}. OpenAI embeddings (${embedding.length}D) are incompatible with this system. ` +
+          `Please ensure TxAgent is configured and running to generate compatible ${EXPECTED_EMBEDDING_DIMENSIONS}D embeddings.`
+        );
+      } else {
+        throw new Error(errorMessage);
+      }
+    }
+
+    return true;
   };
 
   // Enhanced document upload endpoint with chunking support
@@ -124,13 +149,27 @@ export function createDocumentsRouter(supabaseClient) {
           try {
             // Try TxAgent first if available
             if (process.env.RUNPOD_EMBEDDING_URL) {
+              errorLogger.debug('Attempting TxAgent embedding', {
+                user_id: req.userId,
+                chunk_id: chunkId,
+                runpod_url: process.env.RUNPOD_EMBEDDING_URL,
+                component: 'DocumentUpload'
+              });
+
               embedding = await embeddingService.generateEmbedding(sanitizedContent, req.headers.authorization);
               embeddingSource = 'runpod';
+              
+              errorLogger.debug('TxAgent embedding completed', {
+                user_id: req.userId,
+                chunk_id: chunkId,
+                dimensions: embedding?.length || 0,
+                component: 'DocumentUpload'
+              });
             } else {
-              throw new Error('TxAgent not configured');
+              throw new Error('TxAgent not configured - RUNPOD_EMBEDDING_URL missing');
             }
           } catch (embeddingError) {
-            errorLogger.warn(`TxAgent embedding failed for chunk ${i + 1}, trying OpenAI`, {
+            errorLogger.warn(`TxAgent embedding failed for chunk ${i + 1}, trying OpenAI fallback`, {
               user_id: req.userId,
               chunk_id: chunkId,
               error: embeddingError.message,
@@ -138,8 +177,21 @@ export function createDocumentsRouter(supabaseClient) {
             });
             
             try {
+              errorLogger.debug('Attempting OpenAI embedding fallback', {
+                user_id: req.userId,
+                chunk_id: chunkId,
+                component: 'DocumentUpload'
+              });
+
               embedding = await embeddingService.generateEmbedding(sanitizedContent, req.headers.authorization);
               embeddingSource = 'openai';
+              
+              errorLogger.debug('OpenAI embedding completed', {
+                user_id: req.userId,
+                chunk_id: chunkId,
+                dimensions: embedding?.length || 0,
+                component: 'DocumentUpload'
+              });
             } catch (localEmbeddingError) {
               errorLogger.error(`Both embedding services failed for chunk ${i + 1}`, localEmbeddingError, {
                 user_id: req.userId,
@@ -150,9 +202,28 @@ export function createDocumentsRouter(supabaseClient) {
             }
           }
 
-          // Validate embedding
-          if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
-            throw new Error('Invalid embedding generated');
+          // CRITICAL: Validate embedding dimensions before database insertion
+          try {
+            validateEmbeddingDimensions(embedding, embeddingSource);
+            
+            errorLogger.debug('Embedding dimension validation passed', {
+              user_id: req.userId,
+              chunk_id: chunkId,
+              dimensions: embedding.length,
+              expected_dimensions: EXPECTED_EMBEDDING_DIMENSIONS,
+              embedding_source: embeddingSource,
+              component: 'DocumentUpload'
+            });
+          } catch (dimensionError) {
+            errorLogger.error('Embedding dimension validation failed', dimensionError, {
+              user_id: req.userId,
+              chunk_id: chunkId,
+              actual_dimensions: embedding?.length || 0,
+              expected_dimensions: EXPECTED_EMBEDDING_DIMENSIONS,
+              embedding_source: embeddingSource,
+              component: 'DocumentUpload'
+            });
+            throw dimensionError;
           }
 
           // Prepare chunk data for database with sanitized content
@@ -166,6 +237,7 @@ export function createDocumentsRouter(supabaseClient) {
               file_size: req.file.size,
               mime_type: req.file.mimetype,
               embedding_source: embeddingSource,
+              embedding_dimensions: embedding.length,
               processing_time_ms: Date.now() - startTime,
               is_chunk: true,
               parent_document: req.file.originalname,
