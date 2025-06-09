@@ -1,5 +1,3 @@
-import pdf from 'pdf-parse';
-import mammoth from 'mammoth';
 import { errorLogger } from '../../agent_utils/shared/logger.js';
 
 export class DocumentProcessingService {
@@ -215,7 +213,24 @@ export class DocumentProcessingService {
 
   async extractFromPDF(buffer, filename) {
     try {
+      // CRITICAL FIX: Dynamic import to avoid module loading issues
+      const pdfParse = await import('pdf-parse');
+      const pdf = pdfParse.default || pdfParse;
+      
+      errorLogger.debug('PDF parsing started', {
+        filename,
+        buffer_size: buffer.length,
+        component: 'DocumentProcessingService'
+      });
+
       const data = await pdf(buffer);
+
+      errorLogger.debug('PDF parsing completed', {
+        filename,
+        pages: data.numpages,
+        text_length: data.text?.length || 0,
+        component: 'DocumentProcessingService'
+      });
 
       return {
         text: data.text,
@@ -229,15 +244,61 @@ export class DocumentProcessingService {
     } catch (error) {
       errorLogger.error('PDF extraction failed', error, {
         filename,
+        error_message: error.message,
+        error_stack: error.stack,
         component: 'DocumentProcessingService'
       });
+
+      // FALLBACK: If pdf-parse fails, try basic text extraction
+      try {
+        errorLogger.warn('Attempting fallback text extraction for PDF', {
+          filename,
+          component: 'DocumentProcessingService'
+        });
+
+        const text = buffer.toString('utf-8');
+        const cleanText = text.replace(/[^\x20-\x7E\n\r\t]/g, ' ').trim();
+        
+        if (cleanText.length > 100) {
+          return {
+            text: cleanText,
+            metadata: {
+              char_count: cleanText.length,
+              extraction_method: 'fallback-utf8',
+              warning: 'PDF parsing failed, used fallback method'
+            }
+          };
+        }
+      } catch (fallbackError) {
+        errorLogger.error('PDF fallback extraction also failed', fallbackError, {
+          filename,
+          component: 'DocumentProcessingService'
+        });
+      }
+
       throw new Error(`Failed to extract text from PDF: ${error.message}`);
     }
   }
 
   async extractFromDOCX(buffer, filename) {
     try {
+      // CRITICAL FIX: Dynamic import to avoid module loading issues
+      const mammoth = await import('mammoth');
+      
+      errorLogger.debug('DOCX parsing started', {
+        filename,
+        buffer_size: buffer.length,
+        component: 'DocumentProcessingService'
+      });
+
       const result = await mammoth.extractRawText({ buffer });
+
+      errorLogger.debug('DOCX parsing completed', {
+        filename,
+        text_length: result.value?.length || 0,
+        messages_count: result.messages?.length || 0,
+        component: 'DocumentProcessingService'
+      });
 
       return {
         text: result.value,
@@ -250,6 +311,7 @@ export class DocumentProcessingService {
     } catch (error) {
       errorLogger.error('DOCX extraction failed', error, {
         filename,
+        error_message: error.message,
         component: 'DocumentProcessingService'
       });
       throw new Error(`Failed to extract text from DOCX: ${error.message}`);
@@ -258,7 +320,19 @@ export class DocumentProcessingService {
 
   async extractFromText(buffer, filename) {
     try {
+      errorLogger.debug('Text extraction started', {
+        filename,
+        buffer_size: buffer.length,
+        component: 'DocumentProcessingService'
+      });
+
       const text = buffer.toString('utf-8');
+
+      errorLogger.debug('Text extraction completed', {
+        filename,
+        text_length: text.length,
+        component: 'DocumentProcessingService'
+      });
 
       return {
         text,
@@ -270,6 +344,7 @@ export class DocumentProcessingService {
     } catch (error) {
       errorLogger.error('Text extraction failed', error, {
         filename,
+        error_message: error.message,
         component: 'DocumentProcessingService'
       });
       throw new Error(`Failed to extract text: ${error.message}`);
