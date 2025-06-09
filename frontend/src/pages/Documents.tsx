@@ -267,19 +267,19 @@ export function Documents() {
         label: 'Total Documents',
         value: totalDocs,
         icon: <FileText className="w-5 h-5" />,
-        color: 'blue' as const
+        color: 'healing-teal' as const
       },
       {
         label: 'Total Size',
         value: `${(totalSize / 1024 / 1024).toFixed(1)} MB`,
         icon: <Upload className="w-5 h-5" />,
-        color: 'green' as const
+        color: 'guardian-gold' as const
       },
       {
         label: 'Total Content',
         value: `${(totalChars / 1000).toFixed(0)}K chars`,
         icon: <FileText className="w-5 h-5" />,
-        color: 'purple' as const
+        color: 'healing-teal' as const
       }
     ];
   };
@@ -295,7 +295,7 @@ export function Documents() {
     <PageLayout
       title="Document Library"
       subtitle="Manage your medical documents and embeddings"
-      icon={<FileText className="w-6 h-6 text-green-600" />}
+      icon={<FileText className="w-6 h-6 text-healing-teal" />}
       actions={
         <div className="flex space-x-3">
           {/* DIAGNOSTIC: Test Embed Button */}
@@ -321,7 +321,7 @@ export function Documents() {
       <StatsLayout stats={getDocumentStats()} columns={3} />
 
       {/* Controls */}
-      <div className="bg-white rounded-lg shadow p-6">
+      <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mb-6">
           <div className="flex flex-col sm:flex-row gap-3 flex-1">
             <Input
@@ -383,7 +383,7 @@ export function Documents() {
               </div>
 
               {/* Results Info */}
-              <div className="mt-6 pt-6 border-t border-gray-200 text-sm text-gray-500 text-center">
+              <div className="mt-6 pt-6 border-t border-soft-gray/20 text-sm text-soft-gray text-center font-body">
                 Showing {filteredDocuments.length} of {documents.length} documents
                 {searchTerm && ` matching "${searchTerm}"`}
               </div>

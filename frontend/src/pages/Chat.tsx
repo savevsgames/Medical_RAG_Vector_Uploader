@@ -43,8 +43,8 @@ const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
     description: 'BioBERT-powered medical AI running on RunPod containers',
     icon: Cpu,
     endpoint: '/api/chat',
-    color: 'text-blue-600',
-    bgColor: 'bg-blue-100'
+    color: 'text-healing-teal',
+    bgColor: 'bg-healing-teal/10'
   },
   openai: {
     id: 'openai',
@@ -52,8 +52,8 @@ const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
     description: 'GPT-powered assistant with medical document RAG',
     icon: Brain,
     endpoint: '/api/openai-chat',
-    color: 'text-green-600',
-    bgColor: 'bg-green-100'
+    color: 'text-guardian-gold',
+    bgColor: 'bg-guardian-gold/10'
   }
 };
 
@@ -130,7 +130,7 @@ export function Chat() {
                 <p>❌ Container Status: {statusData.container_status}</p>
                 <p>❌ RunPod container is not responding</p>
                 <p>❌ BioBERT model unavailable</p>
-                <p className="mt-2">Falling back to OpenAI for document analysis. You can try starting the TxAgent from the <Link to="/monitor" className="text-blue-600 underline">Monitor page</Link>.</p>
+                <p className="mt-2">Falling back to OpenAI for document analysis. You can try starting the TxAgent from the <Link to="/monitor" className="text-healing-teal underline">Monitor page</Link>.</p>
               </>
             );
           } else {
@@ -141,7 +141,7 @@ export function Chat() {
                 <p>❌ Container Status: {statusData.container_status || 'stopped'}</p>
                 <p>❌ No active session</p>
                 <p>❌ BioBERT model not available</p>
-                <p className="mt-2">You can start the TxAgent from the <Link to="/monitor" className="text-blue-600 underline">Monitor page</Link> or use OpenAI as an alternative.</p>
+                <p className="mt-2">You can start the TxAgent from the <Link to="/monitor" className="text-healing-teal underline">Monitor page</Link> or use OpenAI as an alternative.</p>
               </>
             );
           }
@@ -391,40 +391,40 @@ export function Chat() {
   };
 
   const getConnectionStatusIcon = () => {
-    if (connectionChecking) return <Loader2 className="w-4 h-4 animate-spin text-gray-500" />;
+    if (connectionChecking) return <Loader2 className="w-4 h-4 animate-spin text-soft-gray" />;
     
     if (!txAgentStatus) return <XCircle className="w-4 h-4 text-red-500" />;
     
     if (txAgentStatus.agent_active && txAgentStatus.container_status === 'running') {
-      return <CheckCircle className="w-4 h-4 text-green-500" />;
+      return <CheckCircle className="w-4 h-4 text-healing-teal" />;
     } else if (txAgentStatus.container_status === 'starting') {
-      return <AlertCircle className="w-4 h-4 text-yellow-500" />;
+      return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
     } else {
       return <XCircle className="w-4 h-4 text-red-500" />;
     }
   };
 
   return (
-    <div className="h-[calc(100vh-200px)] flex flex-col bg-white rounded-lg shadow">
+    <div className="h-[calc(100vh-200px)] flex flex-col bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20">
       {/* Chat Header with Agent Selector */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+      <div className="flex items-center justify-between p-4 border-b border-soft-gray/20">
         <div className="flex items-center space-x-3">
-          <div className={`flex items-center justify-center w-10 h-10 ${currentAgent.bgColor} rounded-full`}>
+          <div className={`flex items-center justify-center w-10 h-10 ${currentAgent.bgColor} rounded-xl`}>
             <currentAgent.icon className={`w-6 h-6 ${currentAgent.color}`} />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h2 className="text-lg font-semibold text-gray-900">Medical AI Assistant</h2>
+              <h2 className="text-lg font-heading font-bold text-deep-midnight">Medical AI Assistant</h2>
               {getConnectionStatusIcon()}
             </div>
-            <p className="text-sm text-gray-500">{currentAgent.description}</p>
+            <p className="text-sm text-soft-gray font-body">{currentAgent.description}</p>
           </div>
         </div>
 
         {/* Agent Selector Dropdown */}
         <div className="relative">
           <div className="flex items-center space-x-2">
-            <label htmlFor="agent-select" className="text-sm font-medium text-gray-700">
+            <label htmlFor="agent-select" className="text-sm font-subheading font-medium text-deep-midnight">
               AI Agent:
             </label>
             <div className="relative">
@@ -432,7 +432,7 @@ export function Chat() {
                 id="agent-select"
                 value={selectedAgent}
                 onChange={(e) => handleAgentChange(e.target.value as AgentType)}
-                className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-8 text-sm font-medium text-gray-900 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+                className="appearance-none bg-cloud-ivory border border-soft-gray/30 rounded-xl px-4 py-2 pr-8 text-sm font-subheading font-medium text-deep-midnight hover:border-healing-teal focus:outline-none focus:ring-2 focus:ring-healing-teal focus:border-transparent cursor-pointer transition-all duration-200"
               >
                 {Object.values(AGENT_CONFIGS).map((agent) => (
                   <option key={agent.id} value={agent.id}>
@@ -440,7 +440,7 @@ export function Chat() {
                   </option>
                 ))}
               </select>
-              <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+              <ChevronDown className="absolute right-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-soft-gray pointer-events-none" />
             </div>
           </div>
         </div>
@@ -450,12 +450,12 @@ export function Chat() {
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {connectionChecking && (
           <div className="flex items-start space-x-3">
-            <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full">
-              <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+            <div className="flex items-center justify-center w-8 h-8 bg-healing-teal/10 rounded-xl">
+              <Loader2 className="w-4 h-4 animate-spin text-healing-teal" />
             </div>
-            <div className="bg-gray-100 px-4 py-2 rounded-lg">
+            <div className="bg-sky-blue/30 px-4 py-2 rounded-xl">
               <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500">Checking TxAgent connection status...</span>
+                <span className="text-sm text-deep-midnight font-body">Checking TxAgent connection status...</span>
               </div>
             </div>
           </div>
@@ -468,38 +468,38 @@ export function Chat() {
               message.type === 'user' ? 'flex-row-reverse space-x-reverse' : ''
             }`}
           >
-            <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
+            <div className={`flex items-center justify-center w-8 h-8 rounded-xl ${
               message.type === 'user' 
-                ? 'bg-gray-100' 
+                ? 'bg-soft-gray/20' 
                 : message.agent_id === 'openai'
-                ? 'bg-green-100'
+                ? 'bg-guardian-gold/10'
                 : message.agent_id === 'system'
-                ? 'bg-purple-100'
-                : 'bg-blue-100'
+                ? 'bg-healing-teal/20'
+                : 'bg-healing-teal/10'
             }`}>
               {message.type === 'user' ? (
-                <User className="w-4 h-4 text-gray-600" />
+                <User className="w-4 h-4 text-deep-midnight" />
               ) : message.agent_id === 'openai' ? (
-                <Brain className="w-4 h-4 text-green-600" />
+                <Brain className="w-4 h-4 text-guardian-gold" />
               ) : message.agent_id === 'system' ? (
-                <AlertCircle className="w-4 h-4 text-purple-600" />
+                <AlertCircle className="w-4 h-4 text-healing-teal" />
               ) : (
-                <Bot className="w-4 h-4 text-blue-600" />
+                <Bot className="w-4 h-4 text-healing-teal" />
               )}
             </div>
             <div className={`max-w-xs lg:max-w-md ${
               message.type === 'user' ? 'text-right' : ''
             }`}>
-              <div className={`px-4 py-2 rounded-lg ${
+              <div className={`px-4 py-2 rounded-xl ${
                 message.type === 'user'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-900'
+                  ? 'bg-healing-teal text-cloud-ivory'
+                  : 'bg-sky-blue/30 text-deep-midnight'
               }`}>
-                <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+                <div className="text-sm whitespace-pre-wrap font-body">{message.content}</div>
                 <div className={`flex items-center justify-between mt-1 ${
-                  message.type === 'user' ? 'text-blue-100' : 'text-gray-500'
+                  message.type === 'user' ? 'text-cloud-ivory/80' : 'text-soft-gray'
                 }`}>
-                  <p className="text-xs">
+                  <p className="text-xs font-mono">
                     {message.timestamp.toLocaleTimeString()}
                   </p>
                   {message.agent_id && message.agent_id !== 'system' && (
@@ -516,12 +516,12 @@ export function Chat() {
               {/* Sources */}
               {message.sources && message.sources.length > 0 && (
                 <div className="mt-2 space-y-1">
-                  <p className="text-xs text-gray-500 font-medium">Sources:</p>
+                  <p className="text-xs text-soft-gray font-subheading font-medium">Sources:</p>
                   {message.sources.map((source, index) => (
-                    <div key={index} className="flex items-center space-x-2 text-xs text-gray-600 bg-gray-50 rounded px-2 py-1">
+                    <div key={index} className="flex items-center space-x-2 text-xs text-deep-midnight bg-cloud-ivory rounded-lg px-2 py-1 border border-soft-gray/20">
                       <FileText className="w-3 h-3" />
-                      <span>{source.filename}</span>
-                      <span className="text-gray-400">({Math.round(source.similarity * 100)}% match)</span>
+                      <span className="font-body">{source.filename}</span>
+                      <span className="text-soft-gray font-mono">({Math.round(source.similarity * 100)}% match)</span>
                     </div>
                   ))}
                 </div>
@@ -532,13 +532,13 @@ export function Chat() {
         
         {isLoading && (
           <div className="flex items-start space-x-3">
-            <div className={`flex items-center justify-center w-8 h-8 ${currentAgent.bgColor} rounded-full`}>
+            <div className={`flex items-center justify-center w-8 h-8 ${currentAgent.bgColor} rounded-xl`}>
               <currentAgent.icon className={`w-4 h-4 ${currentAgent.color}`} />
             </div>
-            <div className="bg-gray-100 px-4 py-2 rounded-lg">
+            <div className="bg-sky-blue/30 px-4 py-2 rounded-xl">
               <div className="flex items-center space-x-2">
-                <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
-                <span className="text-sm text-gray-500">
+                <Loader2 className="w-4 h-4 animate-spin text-healing-teal" />
+                <span className="text-sm text-deep-midnight font-body">
                   {currentAgent.name} is analyzing your documents...
                 </span>
               </div>
@@ -548,31 +548,31 @@ export function Chat() {
       </div>
 
       {/* Input Form */}
-      <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200">
+      <form onSubmit={handleSendMessage} className="p-4 border-t border-soft-gray/20">
         <div className="flex space-x-3">
           <input
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={`Ask ${currentAgent.name} about your medical documents...`}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="flex-1 px-4 py-2 border border-soft-gray/30 rounded-xl focus:outline-none focus:ring-2 focus:ring-healing-teal focus:border-transparent bg-cloud-ivory text-deep-midnight font-body transition-all duration-200"
             disabled={isLoading}
           />
           <button
             type="submit"
             disabled={!inputValue.trim() || isLoading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 bg-healing-teal text-cloud-ivory rounded-xl hover:bg-healing-teal/90 focus:outline-none focus:ring-2 focus:ring-healing-teal focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-subheading font-semibold"
           >
             <Send className="w-5 h-5" />
           </button>
         </div>
         <div className="flex items-center justify-between mt-2">
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-soft-gray font-body">
             💡 Try asking: "What are the key findings in my documents?" or "Summarize the main points"
           </p>
-          <div className="flex items-center space-x-1 text-xs text-gray-500">
-            <span>Using:</span>
-            <span className={`font-medium ${currentAgent.color}`}>
+          <div className="flex items-center space-x-1 text-xs text-soft-gray">
+            <span className="font-body">Using:</span>
+            <span className={`font-subheading font-medium ${currentAgent.color}`}>
               {currentAgent.name}
             </span>
           </div>

@@ -87,19 +87,31 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-sky-blue to-cloud-ivory py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            {isSignUp ? 'Create your account' : 'Sign in to your account'}
+        <div className="text-center">
+          <div className="flex justify-center mb-6">
+            <img 
+              src="/logo_transparent.png" 
+              alt="Symptom Savior Logo" 
+              className="w-16 h-16 object-contain glow-effect"
+            />
+          </div>
+          <h2 className="mt-6 text-center text-3xl font-heading font-bold text-deep-midnight">
+            {isSignUp ? 'Join Symptom Savior' : 'Welcome back to Symptom Savior'}
           </h2>
+          <p className="mt-2 text-center text-sm text-soft-gray font-body">
+            {isSignUp ? 'Create your account to access the Smart MedDoc Portal' : 'Sign in to your Smart MedDoc Portal'}
+          </p>
         </div>
         
-        <LoginForm
-          onSubmit={handleSubmit}
-          isSignUp={isSignUp}
-          onToggleMode={() => setIsSignUp(!isSignUp)}
-        />
+        <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-8">
+          <LoginForm
+            onSubmit={handleSubmit}
+            isSignUp={isSignUp}
+            onToggleMode={() => setIsSignUp(!isSignUp)}
+          />
+        </div>
       </div>
     </div>
   );
