@@ -9,7 +9,7 @@ export default {
       colors: {
         // Symptom Savior Brand Colors
         'guardian-gold': '#FFD700',
-        'healing-teal': '#00B5B2',
+        'healing-teal': '#70D3FF',
         'sky-blue': '#AEE1F9',
         'deep-midnight': '#0C1A2A',
         'cloud-ivory': '#F9F9F9',
