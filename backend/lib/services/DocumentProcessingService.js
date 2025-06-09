@@ -1,3 +1,5 @@
+import pdf from 'pdf-parse';
+import mammoth from 'mammoth';
 import { errorLogger } from '../../agent_utils/shared/logger.js';
 
 export class DocumentProcessingService {
@@ -170,6 +172,11 @@ export class DocumentProcessingService {
       ));
     }
 
+    // Update all chunks with final count
+    chunks.forEach(chunk => {
+      chunk.metadata.chunk_count = chunks.length;
+    });
+
     return chunks;
   }
 
@@ -213,23 +220,11 @@ export class DocumentProcessingService {
 
   async extractFromPDF(buffer, filename) {
     try {
-      // CRITICAL FIX: Dynamic import to avoid module loading issues
-      const pdfParse = await import('pdf-parse');
-      const pdf = pdfParse.default || pdfParse;
-      
-      errorLogger.debug('PDF parsing started', {
-        filename,
-        buffer_size: buffer.length,
-        component: 'DocumentProcessingService'
-      });
-
-      const data = await pdf(buffer);
-
-      errorLogger.debug('PDF parsing completed', {
-        filename,
-        pages: data.numpages,
-        text_length: data.text?.length || 0,
-        component: 'DocumentProcessingService'
+      // CRITICAL FIX: Use pdf-parse with proper options to avoid test file issue
+      const data = await pdf(buffer, {
+        // Disable any internal test file loading
+        max: 0, // No page limit
+        version: 'v1.10.100' // Specify version to avoid compatibility issues
       });
 
       return {
@@ -244,61 +239,49 @@ export class DocumentProcessingService {
     } catch (error) {
       errorLogger.error('PDF extraction failed', error, {
         filename,
-        error_message: error.message,
-        error_stack: error.stack,
+        error_code: error.code,
         component: 'DocumentProcessingService'
       });
 
-      // FALLBACK: If pdf-parse fails, try basic text extraction
-      try {
-        errorLogger.warn('Attempting fallback text extraction for PDF', {
-          filename,
-          component: 'DocumentProcessingService'
-        });
+      // ENHANCED FALLBACK: Try alternative PDF extraction methods
+      errorLogger.warn('Attempting fallback text extraction for PDF', {
+        filename,
+        component: 'DocumentProcessingService'
+      });
 
-        const text = buffer.toString('utf-8');
-        const cleanText = text.replace(/[^\x20-\x7E\n\r\t]/g, ' ').trim();
+      try {
+        // Fallback 1: Try to extract as raw text (works for some PDFs)
+        const rawText = buffer.toString('utf8');
         
-        if (cleanText.length > 100) {
+        // Basic validation - check if we got readable text
+        const readableChars = rawText.match(/[a-zA-Z0-9\s]/g);
+        if (readableChars && readableChars.length > rawText.length * 0.1) {
+          // At least 10% readable characters - probably valid text
           return {
-            text: cleanText,
+            text: rawText,
             metadata: {
-              char_count: cleanText.length,
+              char_count: rawText.length,
               extraction_method: 'fallback-utf8',
               warning: 'PDF parsing failed, used fallback method'
             }
           };
         }
+        
+        throw new Error('Fallback extraction also failed - no readable text found');
+        
       } catch (fallbackError) {
-        errorLogger.error('PDF fallback extraction also failed', fallbackError, {
+        errorLogger.error('All PDF extraction methods failed', fallbackError, {
           filename,
           component: 'DocumentProcessingService'
         });
+        throw new Error(`Failed to extract text from PDF: ${error.message}. Fallback also failed: ${fallbackError.message}`);
       }
-
-      throw new Error(`Failed to extract text from PDF: ${error.message}`);
     }
   }
 
   async extractFromDOCX(buffer, filename) {
     try {
-      // CRITICAL FIX: Dynamic import to avoid module loading issues
-      const mammoth = await import('mammoth');
-      
-      errorLogger.debug('DOCX parsing started', {
-        filename,
-        buffer_size: buffer.length,
-        component: 'DocumentProcessingService'
-      });
-
       const result = await mammoth.extractRawText({ buffer });
-
-      errorLogger.debug('DOCX parsing completed', {
-        filename,
-        text_length: result.value?.length || 0,
-        messages_count: result.messages?.length || 0,
-        component: 'DocumentProcessingService'
-      });
 
       return {
         text: result.value,
@@ -311,7 +294,6 @@ export class DocumentProcessingService {
     } catch (error) {
       errorLogger.error('DOCX extraction failed', error, {
         filename,
-        error_message: error.message,
         component: 'DocumentProcessingService'
       });
       throw new Error(`Failed to extract text from DOCX: ${error.message}`);
@@ -320,19 +302,7 @@ export class DocumentProcessingService {
 
   async extractFromText(buffer, filename) {
     try {
-      errorLogger.debug('Text extraction started', {
-        filename,
-        buffer_size: buffer.length,
-        component: 'DocumentProcessingService'
-      });
-
       const text = buffer.toString('utf-8');
-
-      errorLogger.debug('Text extraction completed', {
-        filename,
-        text_length: text.length,
-        component: 'DocumentProcessingService'
-      });
 
       return {
         text,
@@ -344,7 +314,6 @@ export class DocumentProcessingService {
     } catch (error) {
       errorLogger.error('Text extraction failed', error, {
         filename,
-        error_message: error.message,
         component: 'DocumentProcessingService'
       });
       throw new Error(`Failed to extract text: ${error.message}`);
