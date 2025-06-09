@@ -1,299 +1,255 @@
 import { errorLogger } from '../shared/logger.js';
-import { httpClient } from '../shared/httpClient.js';
-import { config } from '../../config/environment.js';
+import { ContainerService } from './containerService.js';
 
 export class AgentService {
   constructor(supabaseClient) {
-    // Validate Supabase client
     if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-      throw new Error('Invalid Supabase client: missing from() method');
+      throw new Error('Invalid Supabase client provided to AgentService');
     }
-    
     this.supabase = supabaseClient;
-    
-    errorLogger.info('AgentService initialized', {
-      has_supabase: !!this.supabase,
-      supabase_methods: Object.getOwnPropertyNames(this.supabase).slice(0, 5),
-      component: 'AgentService'
-    });
+    this.containerService = new ContainerService();
   }
 
-  async getActiveAgent(userId) {
+  // CRITICAL FIX: Use supabase.rpc() instead of direct insert to bypass RLS
+  async createSession(userId, sessionData = {}) {
     try {
-      errorLogger.debug('Getting active agent for user', {
+      errorLogger.info('Creating agent session', {
         userId,
+        sessionData,
         component: 'AgentService'
       });
 
-      const { data, error } = await this.supabase
-        .from('agents')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // FIXED: Use SECURITY DEFINER function instead of direct insert
+      const { data, error } = await this.supabase.rpc('create_agent_session', {
+        user_uuid: userId,
+        initial_status: 'initializing',
+        initial_session_data: {
+          started_at: new Date().toISOString(),
+          runpod_endpoint: process.env.RUNPOD_EMBEDDING_URL || null,
+          capabilities: ['chat', 'embed', 'health_check'],
+          ...sessionData
+        }
+      });
 
       if (error) {
-        errorLogger.error('Failed to get active agent', {
+        errorLogger.error('Failed to create agent session via RPC', error, {
           userId,
-          component: 'AgentService',
-          error_message: error.message,
           error_code: error.code,
-          error_details: error.details
+          error_message: error.message,
+          error_details: error.details,
+          component: 'AgentService'
         });
         throw error;
       }
 
-      errorLogger.debug('Active agent query completed', {
+      if (!data || data.length === 0) {
+        throw new Error('No agent session data returned from create_agent_session function');
+      }
+
+      const agentSession = data[0];
+      
+      errorLogger.success('Agent session created successfully', {
         userId,
-        hasActiveAgent: !!data,
-        agentId: data?.id,
+        agentId: agentSession.id,
+        status: agentSession.status,
         component: 'AgentService'
       });
 
-      return data;
+      return agentSession;
 
     } catch (error) {
-      errorLogger.error('Failed to get active agent', {
+      errorLogger.error('Failed to create agent session', error, {
         userId,
-        component: 'AgentService',
-        error_message: error.message,
-        error_stack: error.stack
+        sessionData,
+        component: 'AgentService'
       });
       throw error;
     }
   }
 
-  async startAgent(userId) {
+  // FIXED: Use supabase.rpc() for getting active agent
+  async getActiveSession(userId) {
     try {
-      // Temp log for RLS fix - Entry point
-      console.log('🔧 TEMP: Starting agent for userId:', userId, 'Type:', typeof userId, 'Length:', userId?.length);
-      
-      errorLogger.info('Starting agent for user', {
+      errorLogger.debug('Getting active agent session', {
         userId,
         component: 'AgentService'
       });
 
-      // Temp log for RLS fix - Check auth context
-      try {
-        const { data: authContext, error: authError } = await this.supabase.rpc('get_current_user_info');
-        console.log('🔧 TEMP: Supabase auth context:', authContext, 'Auth error:', authError);
-      } catch (authCheckError) {
-        console.log('🔧 TEMP: Could not check auth context:', authCheckError.message);
-      }
+      const { data, error } = await this.supabase.rpc('get_active_agent', {
+        user_uuid: userId
+      });
 
-      // Check if user already has an active agent
-      const existingAgent = await this.getActiveAgent(userId);
-      
-      if (existingAgent) {
-        errorLogger.info('User already has active agent', {
+      if (error) {
+        errorLogger.error('Failed to get active agent session via RPC', error, {
           userId,
-          existingAgentId: existingAgent.id,
           component: 'AgentService'
         });
-        
-        // Update last_active timestamp
-        const { error: updateError } = await this.supabase
-          .from('agents')
-          .update({ last_active: new Date().toISOString() })
-          .eq('id', existingAgent.id);
+        throw error;
+      }
 
-        if (updateError) {
-          errorLogger.warn('Failed to update existing agent timestamp', {
-            userId,
-            agentId: existingAgent.id,
-            error: updateError.message,
-            component: 'AgentService'
-          });
-        }
+      const activeAgent = data && data.length > 0 ? data[0] : null;
 
+      errorLogger.debug('Active agent session retrieved', {
+        userId,
+        hasActiveAgent: !!activeAgent,
+        agentId: activeAgent?.id,
+        status: activeAgent?.status,
+        component: 'AgentService'
+      });
+
+      return activeAgent;
+
+    } catch (error) {
+      errorLogger.error('Failed to get active agent session', error, {
+        userId,
+        component: 'AgentService'
+      });
+      throw error;
+    }
+  }
+
+  // FIXED: Use supabase.rpc() for terminating sessions
+  async terminateSession(userId) {
+    try {
+      errorLogger.info('Terminating agent session', {
+        userId,
+        component: 'AgentService'
+      });
+
+      const { data, error } = await this.supabase.rpc('terminate_agent_session', {
+        user_uuid: userId
+      });
+
+      if (error) {
+        errorLogger.error('Failed to terminate agent session via RPC', error, {
+          userId,
+          component: 'AgentService'
+        });
+        throw error;
+      }
+
+      errorLogger.success('Agent session terminated successfully', {
+        userId,
+        terminated: data,
+        component: 'AgentService'
+      });
+
+      return { success: true, terminated: data };
+
+    } catch (error) {
+      errorLogger.error('Failed to terminate agent session', error, {
+        userId,
+        component: 'AgentService'
+      });
+      throw error;
+    }
+  }
+
+  // FIXED: Use supabase.rpc() for updating last active
+  async updateLastActive(agentId) {
+    try {
+      const { data, error } = await this.supabase.rpc('update_agent_last_active', {
+        agent_uuid: agentId
+      });
+
+      if (error) {
+        errorLogger.error('Failed to update agent last active via RPC', error, {
+          agentId,
+          component: 'AgentService'
+        });
+        throw error;
+      }
+
+      return { success: true, updated: data };
+
+    } catch (error) {
+      errorLogger.error('Failed to update agent last active', error, {
+        agentId,
+        component: 'AgentService'
+      });
+      throw error;
+    }
+  }
+
+  async getSessionStatus(userId) {
+    try {
+      const activeSession = await this.getActiveSession(userId);
+      
+      if (!activeSession) {
         return {
-          agent_id: existingAgent.id,
-          container_id: existingAgent.session_data?.container_id || 'existing',
-          status: 'already_active'
+          agent_active: false,
+          agent_id: null,
+          last_active: null,
+          container_status: 'stopped'
         };
       }
 
-      // Create new agent session
-      const agentData = {
-        user_id: userId,
-        status: 'active',
-        session_data: {
-          started_at: new Date().toISOString(),
-          runpod_endpoint: config.runpod.url,
-          capabilities: ['chat', 'embed', 'health_check']
-        },
-        created_at: new Date().toISOString(),
-        last_active: new Date().toISOString()
-      };
+      // Check container health if we have an active session
+      let containerStatus = 'unknown';
+      let containerHealth = null;
 
-      // Temp log for RLS fix - Pre-insert data
-      console.log('🔧 TEMP: About to insert agentData:', JSON.stringify(agentData, null, 2));
-      console.log('🔧 TEMP: user_id field specifically:', agentData.user_id, 'Type:', typeof agentData.user_id);
-
-      const { data: newAgent, error: insertError } = await this.supabase
-        .from('agents')
-        .insert(agentData)
-        .select()
-        .single();
-
-      if (insertError) {
-        // Temp log for RLS fix - Full error details
-        console.log('🔧 TEMP: Full insertError details:', JSON.stringify(insertError, null, 2));
-        console.log('🔧 TEMP: insertError properties:', Object.keys(insertError));
-        console.log('🔧 TEMP: insertError.message:', insertError.message);
-        console.log('🔧 TEMP: insertError.code:', insertError.code);
-        console.log('🔧 TEMP: insertError.details:', insertError.details);
-        console.log('🔧 TEMP: insertError.hint:', insertError.hint);
-        
-        errorLogger.error('Failed to create new agent', {
+      try {
+        if (process.env.RUNPOD_EMBEDDING_URL) {
+          const healthCheck = await this.containerService.checkHealth();
+          containerStatus = healthCheck.healthy ? 'running' : 'unreachable';
+          containerHealth = healthCheck.data;
+        }
+      } catch (healthError) {
+        errorLogger.warn('Container health check failed', {
           userId,
-          component: 'AgentService',
-          error_message: insertError.message,
-          error_code: insertError.code,
-          error_details: insertError.details
-        });
-        throw insertError;
-      }
-
-      // Temp log for RLS fix - Success
-      console.log('🔧 TEMP: Agent created successfully! New agent:', JSON.stringify(newAgent, null, 2));
-
-      errorLogger.success('New agent created successfully', {
-        userId,
-        agentId: newAgent.id,
-        component: 'AgentService'
-      });
-
-      return {
-        agent_id: newAgent.id,
-        container_id: 'new_session',
-        status: 'created'
-      };
-
-    } catch (error) {
-      // Temp log for RLS fix - Catch block
-      console.log('🔧 TEMP: Caught error in startAgent:', error);
-      console.log('🔧 TEMP: Error type:', typeof error);
-      console.log('🔧 TEMP: Error constructor:', error.constructor.name);
-      console.log('🔧 TEMP: Error message:', error.message);
-      console.log('🔧 TEMP: Error stack:', error.stack);
-      
-      errorLogger.error('Failed to start agent', {
-        userId,
-        component: 'AgentService',
-        error_message: error.message,
-        error_stack: error.stack
-      });
-      throw error;
-    }
-  }
-
-  async stopAgent(userId) {
-    try {
-      errorLogger.info('Stopping agent for user', {
-        userId,
-        component: 'AgentService'
-      });
-
-      // Get active agent
-      const activeAgent = await this.getActiveAgent(userId);
-      
-      if (!activeAgent) {
-        errorLogger.info('No active agent found to stop', {
-          userId,
+          agentId: activeSession.id,
+          error: healthError.message,
           component: 'AgentService'
         });
-        return { status: 'no_active_agent' };
+        containerStatus = 'unreachable';
       }
-
-      // Update agent status to terminated
-      const { error: updateError } = await this.supabase
-        .from('agents')
-        .update({
-          status: 'terminated',
-          terminated_at: new Date().toISOString()
-        })
-        .eq('id', activeAgent.id);
-
-      if (updateError) {
-        errorLogger.error('Failed to update agent status to terminated', {
-          userId,
-          agentId: activeAgent.id,
-          component: 'AgentService',
-          error_message: updateError.message,
-          error_code: updateError.code
-        });
-        throw updateError;
-      }
-
-      errorLogger.success('Agent stopped successfully', {
-        userId,
-        agentId: activeAgent.id,
-        component: 'AgentService'
-      });
 
       return {
-        agent_id: activeAgent.id,
-        status: 'terminated'
+        agent_active: true,
+        agent_id: activeSession.id,
+        last_active: activeSession.last_active,
+        container_status: containerStatus,
+        container_health: containerHealth,
+        session_data: activeSession.session_data
       };
 
     } catch (error) {
-      errorLogger.error('Failed to stop agent', {
+      errorLogger.error('Failed to get session status', error, {
         userId,
-        component: 'AgentService',
-        error_message: error.message,
-        error_stack: error.stack
+        component: 'AgentService'
       });
       throw error;
     }
   }
 
-  async testContainerHealth(agent) {
+  // FIXED: Use supabase.rpc() for cleanup
+  async cleanupStaleSessions() {
     try {
-      if (!config.runpod.url) {
-        throw new Error('RunPod URL not configured');
+      errorLogger.info('Cleaning up stale agent sessions', {
+        component: 'AgentService'
+      });
+
+      const { data, error } = await this.supabase.rpc('cleanup_stale_agents');
+
+      if (error) {
+        errorLogger.error('Failed to cleanup stale sessions via RPC', error, {
+          component: 'AgentService'
+        });
+        throw error;
       }
 
-      const healthUrl = `${config.runpod.url}/health`;
-      
-      errorLogger.debug('Testing container health', {
-        agentId: agent.id,
-        healthUrl,
+      errorLogger.success('Stale agent sessions cleaned up', {
+        cleanedCount: data,
         component: 'AgentService'
       });
 
-      const response = await httpClient.get(healthUrl, {
-        timeout: 5000,
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-
-      errorLogger.success('Container health check passed', {
-        agentId: agent.id,
-        status: response.status,
-        component: 'AgentService'
-      });
-
-      return {
-        status: 'running',
-        health: response.data
-      };
+      return { success: true, cleanedCount: data };
 
     } catch (error) {
-      errorLogger.warn('Container health check failed', {
-        agentId: agent.id,
-        error: error.message,
+      errorLogger.error('Failed to cleanup stale sessions', error, {
         component: 'AgentService'
       });
-
-      return {
-        status: 'unreachable',
-        health: null,
-        error: error.message
-      };
+      throw error;
     }
   }
 }

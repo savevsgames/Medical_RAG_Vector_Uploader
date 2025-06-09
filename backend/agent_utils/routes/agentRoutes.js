@@ -1,7 +1,6 @@
 import express from 'express';
 import { AgentService } from '../core/agentService.js';
 import { errorLogger } from '../shared/logger.js';
-import { verifyToken } from '../../middleware/auth.js';
 
 export function createAgentRouter(supabaseClient) {
   // Validate Supabase client
@@ -10,167 +9,263 @@ export function createAgentRouter(supabaseClient) {
   }
 
   const router = express.Router();
-  
-  // Apply authentication middleware
-  router.use(verifyToken);
-  
-  // Initialize AgentService with injected Supabase client
   const agentService = new AgentService(supabaseClient);
 
-  // Validate AgentService initialization
-  if (!agentService || typeof agentService.getActiveAgent !== 'function') {
-    throw new Error('AgentService initialization failed - missing required methods');
-  }
+  // Middleware to extract user ID from JWT
+  const extractUserId = (req, res, next) => {
+    try {
+      // The auth middleware should have already validated the token
+      // and set req.userId
+      if (!req.userId) {
+        errorLogger.warn('No user ID found in request', {
+          component: 'AgentRouter',
+          path: req.path,
+          method: req.method
+        });
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      next();
+    } catch (error) {
+      errorLogger.error('Failed to extract user ID', error, {
+        component: 'AgentRouter'
+      });
+      res.status(401).json({ error: 'Invalid authentication' });
+    }
+  };
 
-  // GET /api/agent/status - Get current agent status
-  router.get('/status', async (req, res) => {
+  // Apply user ID extraction to all routes
+  router.use(extractUserId);
+
+  // Start agent session
+  router.post('/start', async (req, res) => {
+    const startTime = Date.now();
+    
     try {
       const userId = req.userId;
       
-      errorLogger.info('Agent status requested', {
-        user_id: userId,
-        component: 'AgentRoutes'
+      errorLogger.info('Agent start request received', {
+        userId,
+        component: 'AgentRouter'
       });
 
-      const activeAgent = await agentService.getActiveAgent(userId);
+      // Check if there's already an active session
+      const existingSession = await agentService.getActiveSession(userId);
       
-      if (!activeAgent) {
+      if (existingSession) {
+        errorLogger.info('Existing active session found', {
+          userId,
+          existingAgentId: existingSession.id,
+          existingStatus: existingSession.status,
+          component: 'AgentRouter'
+        });
+
+        // Return existing session info
         return res.json({
-          agent_active: false,
-          agent_id: null,
-          last_active: null,
-          container_status: 'stopped',
-          container_health: null,
-          session_data: null
+          status: 'already_active',
+          agent_id: existingSession.id,
+          message: 'Agent session is already active',
+          session_data: existingSession.session_data,
+          processing_time_ms: Date.now() - startTime
         });
       }
 
-      // Test container connectivity if agent is active
-      let containerStatus = 'unknown';
-      let containerHealth = null;
-      
-      if (activeAgent.status === 'active') {
-        try {
-          const healthCheck = await agentService.testContainerHealth(activeAgent);
-          containerStatus = healthCheck.status;
-          containerHealth = healthCheck.health;
-        } catch (healthError) {
-          errorLogger.warn('Container health check failed', {
-            user_id: userId,
-            agent_id: activeAgent.id,
-            error: healthError.message,
-            component: 'AgentRoutes'
-          });
-          containerStatus = 'unreachable';
-        }
-      }
-
-      const response = {
-        agent_active: activeAgent.status === 'active',
-        agent_id: activeAgent.id,
-        last_active: activeAgent.last_active,
-        container_status: containerStatus,
-        container_health: containerHealth,
-        session_data: activeAgent.session_data || null
-      };
-
-      errorLogger.success('Agent status retrieved', {
-        user_id: userId,
-        agent_active: response.agent_active,
-        container_status: containerStatus,
-        component: 'AgentRoutes'
+      // Create new session using SECURITY DEFINER function
+      const newSession = await agentService.createSession(userId, {
+        started_at: new Date().toISOString(),
+        runpod_endpoint: process.env.RUNPOD_EMBEDDING_URL,
+        capabilities: ['chat', 'embed', 'health_check']
       });
 
-      res.json(response);
-
-    } catch (error) {
-      errorLogger.error('Failed to get agent status', {
-        user_id: req.userId,
-        error_message: error.message,
-        error_stack: error.stack,
-        component: 'AgentRoutes'
-      });
-      
-      res.status(500).json({
-        error: 'Failed to get agent status',
-        details: error.message
-      });
-    }
-  });
-
-  // POST /api/agent/start - Start/activate agent session
-  router.post('/start', async (req, res) => {
-    try {
-      const userId = req.userId;
-      
-      errorLogger.info('Agent start requested', {
-        user_id: userId,
-        component: 'AgentRoutes'
-      });
-
-      const result = await agentService.startAgent(userId);
-      
-      errorLogger.success('Agent started successfully', {
-        user_id: userId,
-        agent_id: result.agent_id,
-        container_id: result.container_id,
-        component: 'AgentRoutes'
+      errorLogger.success('Agent session started successfully', {
+        userId,
+        agentId: newSession.id,
+        status: newSession.status,
+        processing_time_ms: Date.now() - startTime,
+        component: 'AgentRouter'
       });
 
       res.json({
         status: 'activated',
-        agent_id: result.agent_id,
-        container_id: result.container_id,
-        message: 'TxAgent session activated successfully'
+        agent_id: newSession.id,
+        container_id: newSession.id, // For backward compatibility
+        message: 'Agent session activated successfully',
+        session_data: newSession.session_data,
+        processing_time_ms: Date.now() - startTime
       });
 
     } catch (error) {
-      errorLogger.error('Failed to start agent', {
-        user_id: req.userId,
-        error_message: error.message,
-        error_stack: error.stack,
-        component: 'AgentRoutes'
-      });
+      const processingTime = Date.now() - startTime;
       
+      errorLogger.error('Failed to start agent session', error, {
+        userId: req.userId,
+        processing_time_ms: processingTime,
+        error_stack: error.stack,
+        component: 'AgentRouter'
+      });
+
       res.status(500).json({
-        error: 'Failed to start agent',
-        details: error.message
+        error: 'Failed to start agent session',
+        details: error.message,
+        processing_time_ms: processingTime
       });
     }
   });
 
-  // POST /api/agent/stop - Stop/deactivate agent session
+  // Stop agent session
   router.post('/stop', async (req, res) => {
+    const startTime = Date.now();
+    
     try {
       const userId = req.userId;
       
-      errorLogger.info('Agent stop requested', {
-        user_id: userId,
-        component: 'AgentRoutes'
+      errorLogger.info('Agent stop request received', {
+        userId,
+        component: 'AgentRouter'
       });
 
-      await agentService.stopAgent(userId);
-      
-      errorLogger.success('Agent stopped successfully', {
-        user_id: userId,
-        component: 'AgentRoutes'
+      // Terminate session using SECURITY DEFINER function
+      const result = await agentService.terminateSession(userId);
+
+      errorLogger.success('Agent session stopped successfully', {
+        userId,
+        terminated: result.terminated,
+        processing_time_ms: Date.now() - startTime,
+        component: 'AgentRouter'
       });
 
       res.json({
         status: 'deactivated',
-        message: 'TxAgent session deactivated successfully'
+        message: 'Agent session deactivated successfully',
+        terminated: result.terminated,
+        processing_time_ms: Date.now() - startTime
       });
 
     } catch (error) {
-      errorLogger.error('Failed to stop agent', {
-        user_id: req.userId,
-        error_message: error.message,
-        error_stack: error.stack,
-        component: 'AgentRoutes'
-      });
+      const processingTime = Date.now() - startTime;
       
+      errorLogger.error('Failed to stop agent session', error, {
+        userId: req.userId,
+        processing_time_ms: processingTime,
+        error_stack: error.stack,
+        component: 'AgentRouter'
+      });
+
       res.status(500).json({
-        error: 'Failed to stop agent',
+        error: 'Failed to stop agent session',
+        details: error.message,
+        processing_time_ms: processingTime
+      });
+    }
+  });
+
+  // Get agent status
+  router.get('/status', async (req, res) => {
+    const startTime = Date.now();
+    
+    try {
+      const userId = req.userId;
+      
+      errorLogger.debug('Agent status request received', {
+        userId,
+        component: 'AgentRouter'
+      });
+
+      // Get session status using SECURITY DEFINER functions
+      const status = await agentService.getSessionStatus(userId);
+
+      errorLogger.debug('Agent status retrieved successfully', {
+        userId,
+        agent_active: status.agent_active,
+        agent_id: status.agent_id,
+        container_status: status.container_status,
+        processing_time_ms: Date.now() - startTime,
+        component: 'AgentRouter'
+      });
+
+      res.json({
+        ...status,
+        processing_time_ms: Date.now() - startTime
+      });
+
+    } catch (error) {
+      const processingTime = Date.now() - startTime;
+      
+      errorLogger.error('Failed to get agent status', error, {
+        userId: req.userId,
+        processing_time_ms: processingTime,
+        error_stack: error.stack,
+        component: 'AgentRouter'
+      });
+
+      res.status(500).json({
+        error: 'Failed to get agent status',
+        details: error.message,
+        processing_time_ms: processingTime
+      });
+    }
+  });
+
+  // Update agent last active (for heartbeat)
+  router.post('/heartbeat', async (req, res) => {
+    try {
+      const userId = req.userId;
+      
+      // Get active session first
+      const activeSession = await agentService.getActiveSession(userId);
+      
+      if (!activeSession) {
+        return res.status(404).json({
+          error: 'No active agent session found'
+        });
+      }
+
+      // Update last active using SECURITY DEFINER function
+      await agentService.updateLastActive(activeSession.id);
+
+      res.json({
+        status: 'updated',
+        agent_id: activeSession.id,
+        last_active: new Date().toISOString()
+      });
+
+    } catch (error) {
+      errorLogger.error('Failed to update agent heartbeat', error, {
+        userId: req.userId,
+        component: 'AgentRouter'
+      });
+
+      res.status(500).json({
+        error: 'Failed to update agent heartbeat',
+        details: error.message
+      });
+    }
+  });
+
+  // Cleanup stale sessions (admin endpoint)
+  router.post('/cleanup', async (req, res) => {
+    try {
+      errorLogger.info('Agent cleanup request received', {
+        userId: req.userId,
+        component: 'AgentRouter'
+      });
+
+      // Cleanup stale sessions using SECURITY DEFINER function
+      const result = await agentService.cleanupStaleSessions();
+
+      res.json({
+        status: 'completed',
+        cleaned_count: result.cleanedCount,
+        message: `Cleaned up ${result.cleanedCount} stale agent sessions`
+      });
+
+    } catch (error) {
+      errorLogger.error('Failed to cleanup stale sessions', error, {
+        userId: req.userId,
+        component: 'AgentRouter'
+      });
+
+      res.status(500).json({
+        error: 'Failed to cleanup stale sessions',
         details: error.message
       });
     }
@@ -179,74 +274,29 @@ export function createAgentRouter(supabaseClient) {
   return router;
 }
 
+// Legacy router for backward compatibility
 export function createAgentLegacyRouter(supabaseClient) {
-  // Validate Supabase client
-  if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-    throw new Error('Invalid Supabase client provided to createAgentLegacyRouter');
-  }
-
   const router = express.Router();
   
-  // Apply authentication middleware
-  router.use(verifyToken);
-  
-  // Initialize AgentService with injected Supabase client
-  const agentService = new AgentService(supabaseClient);
-
-  // Legacy deprecation middleware
+  // Add deprecation warning middleware
   router.use((req, res, next) => {
     errorLogger.warn('Legacy agent endpoint accessed', {
       path: req.path,
       method: req.method,
-      user_id: req.userId,
       user_agent: req.get('User-Agent'),
-      component: 'AgentLegacyRoutes'
+      component: 'AgentLegacyRouter'
     });
     
-    res.setHeader('X-Deprecated', 'true');
-    res.setHeader('X-Deprecation-Message', 'This endpoint is deprecated. Use /api/agent/* instead.');
+    // Add deprecation header
+    res.set('X-API-Deprecated', 'true');
+    res.set('X-API-Deprecation-Info', 'Use /api/agent/* endpoints instead');
+    
     next();
   });
 
-  // Legacy routes (same logic as new routes but with deprecation warnings)
-  router.get('/status', async (req, res) => {
-    try {
-      const userId = req.userId;
-      const activeAgent = await agentService.getActiveAgent(userId);
-      
-      if (!activeAgent) {
-        return res.json({
-          agent_active: false,
-          agent_id: null,
-          last_active: null,
-          container_status: 'stopped'
-        });
-      }
-
-      res.json({
-        agent_active: activeAgent.status === 'active',
-        agent_id: activeAgent.id,
-        last_active: activeAgent.last_active,
-        container_status: activeAgent.status === 'active' ? 'running' : 'stopped'
-      });
-
-    } catch (error) {
-      errorLogger.error('Legacy agent status failed', {
-        user_id: req.userId,
-        error_message: error.message,
-        component: 'AgentLegacyRoutes'
-      });
-      
-      res.status(500).json({
-        error: 'Failed to get agent status',
-        details: error.message
-      });
-    }
-  });
+  // Mount the new router under legacy paths
+  const newRouter = createAgentRouter(supabaseClient);
+  router.use('/', newRouter);
 
   return router;
 }
-
-// Legacy exports for backward compatibility
-export const router = createAgentRouter;
-export const legacyRouter = createAgentLegacyRouter;

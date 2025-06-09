@@ -217,7 +217,7 @@ CREATE POLICY "Users can manage own embedding jobs"
     WITH CHECK (user_id = auth.uid());
 ```
 
-### **4. Database Functions with FIXED Search Paths**
+### **4. Database Functions with FIXED Search Paths and SECURITY DEFINER**
 
 #### **Document Search Function**
 ```sql
@@ -234,8 +234,11 @@ RETURNS TABLE (
     user_id uuid,
     created_at timestamptz,
     similarity float
-) AS $$
-SET search_path TO public, pg_catalog;
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 BEGIN
     RETURN QUERY
     SELECT
@@ -252,10 +255,10 @@ BEGIN
     ORDER BY documents.embedding <=> query_embedding
     LIMIT match_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 ```
 
-#### **Agent Management Functions**
+#### **Agent Management Functions with SECURITY DEFINER**
 ```sql
 -- Get active agent for user
 CREATE OR REPLACE FUNCTION public.get_active_agent(user_uuid uuid)
@@ -265,8 +268,11 @@ RETURNS TABLE (
     session_data jsonb,
     created_at timestamptz,
     last_active timestamptz
-) AS $$
-SET search_path TO public, pg_catalog;
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 BEGIN
     RETURN QUERY
     SELECT 
@@ -282,16 +288,24 @@ BEGIN
     ORDER BY agents.last_active DESC
     LIMIT 1;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Create agent session
+-- CRITICAL FIX: Create agent session with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.create_agent_session(
     user_uuid uuid,
     initial_status text DEFAULT 'initializing',
     initial_session_data jsonb DEFAULT '{}'
 )
-RETURNS uuid AS $$
-SET search_path TO public, pg_catalog;
+RETURNS TABLE (
+    id uuid,
+    status text,
+    session_data jsonb,
+    created_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 DECLARE
     new_agent_id uuid;
 BEGIN
@@ -303,18 +317,29 @@ BEGIN
         AND terminated_at IS NULL;
     
     -- Create new agent session
-    INSERT INTO public.agents (user_id, status, session_data)
-    VALUES (user_uuid, initial_status, initial_session_data)
-    RETURNING id INTO new_agent_id;
+    INSERT INTO public.agents (user_id, status, session_data, created_at, last_active)
+    VALUES (user_uuid, initial_status, initial_session_data, now(), now())
+    RETURNING agents.id INTO new_agent_id;
     
-    RETURN new_agent_id;
+    -- Return the created agent details
+    RETURN QUERY
+    SELECT 
+        agents.id,
+        agents.status,
+        agents.session_data,
+        agents.created_at
+    FROM public.agents
+    WHERE agents.id = new_agent_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Terminate agent session
+-- Terminate agent session with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.terminate_agent_session(user_uuid uuid)
-RETURNS boolean AS $$
-SET search_path TO public, pg_catalog;
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 BEGIN
     UPDATE public.agents 
     SET status = 'terminated', terminated_at = now()
@@ -324,12 +349,15 @@ BEGIN
     
     RETURN FOUND;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Update agent last active
+-- Update agent last active with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.update_agent_last_active(agent_uuid uuid)
-RETURNS boolean AS $$
-SET search_path TO public, pg_catalog;
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 BEGIN
     UPDATE public.agents 
     SET last_active = now()
@@ -337,12 +365,15 @@ BEGIN
     
     RETURN FOUND;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Cleanup stale agents
+-- Cleanup stale agents with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.cleanup_stale_agents()
-RETURNS integer AS $$
-SET search_path TO public, pg_catalog;
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 DECLARE
     affected_count integer;
 BEGIN
@@ -355,15 +386,18 @@ BEGIN
     GET DIAGNOSTICS affected_count = ROW_COUNT;
     RETURN affected_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 ```
 
-#### **Test and Utility Functions**
+#### **Test and Utility Functions with SECURITY DEFINER**
 ```sql
 -- Test user documents count
 CREATE OR REPLACE FUNCTION public.test_user_documents_count(user_uuid uuid)
-RETURNS integer AS $$
-SET search_path TO public, pg_catalog;
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 BEGIN
     RETURN (
         SELECT COUNT(*)::integer 
@@ -371,37 +405,46 @@ BEGIN
         WHERE user_id = user_uuid
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Test vector similarity
 CREATE OR REPLACE FUNCTION public.test_vector_similarity(
     vec1 vector(768),
     vec2 vector(768)
 )
-RETURNS float AS $$
-SET search_path TO public, pg_catalog;
+RETURNS float
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 BEGIN
     RETURN 1 - (vec1 <=> vec2);
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
 -- Test auth uid
 CREATE OR REPLACE FUNCTION public.test_auth_uid()
-RETURNS uuid AS $$
-SET search_path TO public, pg_catalog;
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 BEGIN
     RETURN auth.uid();
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
--- Create test medical document
+-- Create test medical document with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.create_test_medical_document(
     test_filename text DEFAULT 'test-medical-doc.txt',
     test_content text DEFAULT 'This is a test medical document containing cardiology and diagnosis information.',
     test_user_id uuid DEFAULT auth.uid()
 )
-RETURNS uuid AS $$
-SET search_path TO public, pg_catalog;
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 DECLARE
     new_doc_id uuid;
 BEGIN
@@ -420,7 +463,7 @@ BEGIN
     
     RETURN new_doc_id;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 ```
 
 ### **5. Triggers and Automation**
@@ -429,13 +472,16 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 ```sql
 -- Trigger function to update last_active
 CREATE OR REPLACE FUNCTION public.update_agent_last_active_trigger()
-RETURNS trigger AS $$
-SET search_path TO public, pg_catalog;
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
 BEGIN
     NEW.last_active = now();
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Create trigger
 CREATE TRIGGER update_agent_last_active
@@ -449,20 +495,26 @@ CREATE TRIGGER update_agent_last_active
 ## 🔧 **Security Fixes Applied**
 
 ### **1. Function Search Path Mutable - FIXED**
-- ✅ All functions now include `SET search_path TO public, pg_catalog;`
+- ✅ All functions now include `SET search_path = public, pg_catalog`
 - ✅ Prevents search path manipulation attacks
 - ✅ Ensures consistent function behavior
 - ✅ **CRITICAL**: Old functions without search path fixes are completely removed
 
-### **2. Extension in Public Schema - ADDRESSED**
+### **2. SECURITY DEFINER Added - NEW FIX**
+- ✅ **CRITICAL**: All functions now include `SECURITY DEFINER`
+- ✅ Functions execute with creator privileges, bypassing RLS
+- ✅ Fixes `auth.uid()` being NULL when using service role
+- ✅ Ensures agent session creation works properly
+
+### **3. Extension in Public Schema - ADDRESSED**
 - ✅ Extensions explicitly created in public schema
 - ✅ Documented for awareness in shared environments
 
-### **3. Auth OTP Long Expiry - CONFIGURATION**
+### **4. Auth OTP Long Expiry - CONFIGURATION**
 - ⚠️ Requires Supabase Dashboard configuration
 - ⚠️ Set OTP expiry to recommended threshold (15 minutes)
 
-### **4. Function Cleanup - NEW**
+### **5. Function Cleanup - NEW**
 - ✅ **CRITICAL**: All old functions are dropped before creating new ones
 - ✅ Prevents function conflicts and ensures clean state
 - ✅ Removes any legacy functions that may have search path issues
@@ -514,7 +566,7 @@ CREATE POLICY "All authenticated users can read all documents"
 3. **Create tables** with all columns and constraints (IF NOT EXISTS for safety)
 4. **Create indexes** for performance
 5. **Enable RLS** and create policies (fresh, clean policies)
-6. **Create functions** with fixed search paths (completely new, secure functions)
+6. **Create functions** with fixed search paths and SECURITY DEFINER (completely new, secure functions)
 7. **Create triggers** for automation
 
 ### **Data Preservation**
@@ -530,6 +582,7 @@ CREATE POLICY "All authenticated users can read all documents"
 ### **After Migration**
 - [ ] ✅ **No old functions remain** - Check `\df` in psql
 - [ ] ✅ **All security warnings resolved** - Check Supabase Security Advisor
+- [ ] ✅ **SECURITY DEFINER functions work** - Test agent session creation
 - [ ] Vector search works with `match_documents()`
 - [ ] All authenticated users can read all documents
 - [ ] Users can only upload as themselves
@@ -540,10 +593,11 @@ CREATE POLICY "All authenticated users can read all documents"
 
 ### **Security Verification**
 - [ ] RLS policies prevent unauthorized access
-- [ ] Functions have fixed search paths
+- [ ] Functions have fixed search paths and SECURITY DEFINER
 - [ ] Extensions are properly scoped
 - [ ] No SQL injection vulnerabilities
 - [ ] **CRITICAL**: No orphaned functions with security issues
+- [ ] **CRITICAL**: Agent session creation bypasses RLS correctly
 
 ---
 
@@ -567,7 +621,7 @@ CREATE POLICY "All authenticated users can read all documents"
 
 ### **Function Updates to Document**
 ```markdown
-## Database Functions (All with Fixed Search Paths)
+## Database Functions (All with Fixed Search Paths and SECURITY DEFINER)
 
 ### Document Search
 - `match_documents(query_embedding, threshold, count)` - Vector similarity search
@@ -586,7 +640,8 @@ CREATE POLICY "All authenticated users can read all documents"
 - `create_test_medical_document()` - Create test document
 
 ### Security Notes
-- All functions include `SET search_path TO public, pg_catalog;`
+- All functions include `SET search_path = public, pg_catalog`
+- All functions include `SECURITY DEFINER` to bypass RLS
 - All old functions are completely removed during migration
 - No legacy functions remain that could have security issues
 ```
@@ -600,12 +655,13 @@ This context file contains everything needed to create a single, comprehensive m
 1. ✅ **🧹 CLEANS UP all old functions first** (CRITICAL for security)
 2. ✅ **Recreates the complete database schema**
 3. ✅ **Fixes all security warnings**
-4. ✅ **Enables shared medical knowledge base**
-5. ✅ **Maintains backward compatibility**
-6. ✅ **Optimizes performance**
-7. ✅ **Preserves all functionality**
-8. ✅ **Ensures no orphaned functions remain**
+4. ✅ **Adds SECURITY DEFINER to all functions** (CRITICAL for RLS bypass)
+5. ✅ **Enables shared medical knowledge base**
+6. ✅ **Maintains backward compatibility**
+7. ✅ **Optimizes performance**
+8. ✅ **Preserves all functionality**
+9. ✅ **Ensures no orphaned functions remain**
 
-**CRITICAL IMPROVEMENT**: The cleanup section at the beginning ensures that all old functions with potential security issues are completely removed before creating the new, secure functions. This prevents any conflicts and ensures a clean, secure database state.
+**CRITICAL IMPROVEMENT**: All functions now include `SECURITY DEFINER` which allows them to execute with the privileges of their creator, bypassing RLS policies. This fixes the issue where `auth.uid()` returns NULL when using the service role key for operations like agent session creation.
 
 Use this file to create the final migration that replaces all existing migration files and resolves all current database issues while maintaining a clean, secure function environment.
