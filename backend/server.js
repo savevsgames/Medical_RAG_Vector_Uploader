@@ -45,6 +45,33 @@ function startServer() {
     process.exit(1);
   }
 
+  // CRITICAL FIX: Validate the Supabase client before using it
+  let supabaseClient;
+  try {
+    // First, try to get the client from the database module
+    supabaseClient = database.getClient();
+    
+    // If that doesn't work, try the direct import
+    if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+      supabaseClient = supabase;
+    }
+    
+    // Final validation
+    if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+      throw new Error('Supabase client is not properly initialized or exported');
+    }
+    
+    errorLogger.success('Supabase client validated successfully', {
+      hasFromMethod: typeof supabaseClient.from === 'function',
+      hasAuthMethod: typeof supabaseClient.auth === 'object',
+      clientType: supabaseClient.constructor?.name || 'unknown'
+    });
+    
+  } catch (error) {
+    errorLogger.error('Failed to validate Supabase client', error);
+    process.exit(1);
+  }
+
   // Test database connection (async, but non-blocking)
   database.healthCheck()
     .then(healthCheck => {
@@ -75,10 +102,9 @@ function startServer() {
   // Setup static file serving
   staticFileService.setupStaticFiles(app);
 
-  // CRITICAL FIX: Pass the service_role authenticated Supabase client
-  // This ensures all routes have access to the properly authenticated client
+  // CRITICAL FIX: Pass the validated Supabase client
   try {
-    setupRoutes(app, supabase);
+    setupRoutes(app, supabaseClient);
     errorLogger.success('Routes setup completed with service_role Supabase client');
   } catch (error) {
     errorLogger.error('Failed to setup routes', error);
