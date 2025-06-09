@@ -20,6 +20,22 @@ export function createDocumentsRouter(supabaseClient) {
   const documentProcessor = new DocumentProcessingService();
   const embeddingService = new EmbeddingService();
 
+  // Text sanitization function to prevent Unicode escape sequence errors
+  const sanitizeTextForDatabase = (text) => {
+    if (!text || typeof text !== 'string') return text;
+    
+    return text
+      // Replace single backslashes with double backslashes to prevent escape sequence interpretation
+      .replace(/\\/g, '\\\\')
+      // Remove or replace other problematic Unicode sequences
+      .replace(/\u0000/g, '') // Remove null bytes
+      // Replace invalid Unicode surrogates
+      .replace(/[\uD800-\uDFFF]/g, '?')
+      // Normalize line endings
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
+  };
+
   // Enhanced document upload endpoint with chunking support
   router.post('/upload', upload.single('file'), async (req, res) => {
     const startTime = Date.now();
@@ -89,14 +105,26 @@ export function createDocumentsRouter(supabaseClient) {
             component: 'DocumentUpload'
           });
 
-          // Generate embedding for this chunk
+          // CRITICAL FIX: Sanitize chunk content before processing
+          const sanitizedContent = sanitizeTextForDatabase(chunk.content);
+          
+          errorLogger.debug(`Sanitized chunk content`, {
+            user_id: req.userId,
+            chunk_id: chunkId,
+            original_length: chunk.content.length,
+            sanitized_length: sanitizedContent.length,
+            content_changed: chunk.content !== sanitizedContent,
+            component: 'DocumentUpload'
+          });
+
+          // Generate embedding for the sanitized chunk
           let embedding;
           let embeddingSource = 'unknown';
           
           try {
             // Try TxAgent first if available
             if (process.env.RUNPOD_EMBEDDING_URL) {
-              embedding = await embeddingService.generateEmbedding(chunk.content, req.headers.authorization);
+              embedding = await embeddingService.generateEmbedding(sanitizedContent, req.headers.authorization);
               embeddingSource = 'runpod';
             } else {
               throw new Error('TxAgent not configured');
@@ -110,7 +138,7 @@ export function createDocumentsRouter(supabaseClient) {
             });
             
             try {
-              embedding = await embeddingService.generateEmbedding(chunk.content, req.headers.authorization);
+              embedding = await embeddingService.generateEmbedding(sanitizedContent, req.headers.authorization);
               embeddingSource = 'openai';
             } catch (localEmbeddingError) {
               errorLogger.error(`Both embedding services failed for chunk ${i + 1}`, localEmbeddingError, {
@@ -127,11 +155,11 @@ export function createDocumentsRouter(supabaseClient) {
             throw new Error('Invalid embedding generated');
           }
 
-          // Prepare chunk data for database
+          // Prepare chunk data for database with sanitized content
           const chunkData = {
             id: chunkId,
             filename: req.file.originalname,
-            content: chunk.content,
+            content: sanitizedContent, // Use sanitized content for database storage
             metadata: {
               ...originalMetadata,
               ...chunk.metadata,
@@ -140,11 +168,20 @@ export function createDocumentsRouter(supabaseClient) {
               embedding_source: embeddingSource,
               processing_time_ms: Date.now() - startTime,
               is_chunk: true,
-              parent_document: req.file.originalname
+              parent_document: req.file.originalname,
+              content_sanitized: chunk.content !== sanitizedContent // Track if content was modified
             },
             embedding,
             user_id: req.userId
           };
+
+          errorLogger.debug(`Attempting database insert for chunk ${i + 1}`, {
+            user_id: req.userId,
+            chunk_id: chunkId,
+            content_length: sanitizedContent.length,
+            embedding_dimensions: embedding.length,
+            component: 'DocumentUpload'
+          });
 
           // Store chunk in database
           const { data, error } = await supabaseClient
@@ -158,6 +195,9 @@ export function createDocumentsRouter(supabaseClient) {
               user_id: req.userId,
               chunk_id: chunkId,
               error_code: error.code,
+              error_message: error.message,
+              error_details: error.details,
+              error_hint: error.hint,
               component: 'DocumentUpload'
             });
             throw error;
@@ -166,15 +206,17 @@ export function createDocumentsRouter(supabaseClient) {
           processedChunks.push({
             chunk_id: chunkId,
             chunk_index: i,
-            content_length: chunk.content.length,
+            content_length: sanitizedContent.length,
             embedding_dimensions: embedding.length,
-            embedding_source: embeddingSource
+            embedding_source: embeddingSource,
+            content_sanitized: chunk.content !== sanitizedContent
           });
 
           errorLogger.debug(`Chunk ${i + 1}/${chunks.length} processed successfully`, {
             user_id: req.userId,
             chunk_id: chunkId,
             embedding_dimensions: embedding.length,
+            database_id: data.id,
             component: 'DocumentUpload'
           });
 
@@ -186,12 +228,15 @@ export function createDocumentsRouter(supabaseClient) {
             chunk_id: chunkId,
             chunk_index: i,
             error: chunkErrorMessage,
+            error_code: chunkError.code,
+            error_details: chunkError.details,
             component: 'DocumentUpload'
           });
 
           failedChunks.push({
             chunk_index: i,
             error: chunkErrorMessage,
+            error_code: chunkError.code,
             content_preview: chunk.content.substring(0, 100) + '...'
           });
         }
@@ -230,6 +275,7 @@ export function createDocumentsRouter(supabaseClient) {
         failed_chunks: failedChunks.length,
         processing_time_ms: processingTime,
         is_partial_success: isPartialSuccess,
+        content_sanitization_applied: processedChunks.some(chunk => chunk.content_sanitized),
         component: 'DocumentUpload'
       });
 
@@ -248,7 +294,8 @@ export function createDocumentsRouter(supabaseClient) {
           original_size: req.file.size,
           total_content_length: originalMetadata.original_length,
           average_chunk_size: Math.round(originalMetadata.original_length / chunks.length),
-          embedding_dimensions: processedChunks[0]?.embedding_dimensions || null
+          embedding_dimensions: processedChunks[0]?.embedding_dimensions || null,
+          content_sanitization_applied: processedChunks.some(chunk => chunk.content_sanitized)
         }
       });
       
@@ -261,6 +308,7 @@ export function createDocumentsRouter(supabaseClient) {
         processing_time_ms: processingTime,
         error_stack: error.stack,
         error_type: error.constructor.name,
+        supabase_error_details: error.details || null,
         component: 'DocumentUpload'
       });
       
