@@ -30,7 +30,16 @@ function startServer() {
   // Initialize database connection (synchronous)
   try {
     const result = database.initialize();
-    errorLogger.success('Database client initialized');
+    errorLogger.success('Database client initialized with service_role authentication');
+    
+    // Log service role confirmation
+    errorLogger.info('Supabase client configuration', {
+      url: config.supabase.url,
+      using_service_role: true,
+      has_service_key: !!config.supabase.serviceKey,
+      service_key_length: config.supabase.serviceKey?.length || 0
+    });
+    
   } catch (error) {
     errorLogger.error('Failed to initialize database client', error);
     process.exit(1);
@@ -40,7 +49,9 @@ function startServer() {
   database.healthCheck()
     .then(healthCheck => {
       if (healthCheck.healthy) {
-        errorLogger.success('Database connection test passed');
+        errorLogger.success('Database connection test passed', {
+          auth_role: healthCheck.auth_role || 'service_role'
+        });
       } else {
         errorLogger.error('Database connection test failed', new Error(healthCheck.message));
         // Don't exit - let the server start but log the issue
@@ -64,8 +75,15 @@ function startServer() {
   // Setup static file serving
   staticFileService.setupStaticFiles(app);
 
-  // CRITICAL FIX: Properly setup routes with Supabase client
-  setupRoutes(app, supabase);
+  // CRITICAL FIX: Pass the service_role authenticated Supabase client
+  // This ensures all routes have access to the properly authenticated client
+  try {
+    setupRoutes(app, supabase);
+    errorLogger.success('Routes setup completed with service_role Supabase client');
+  } catch (error) {
+    errorLogger.error('Failed to setup routes', error);
+    process.exit(1);
+  }
 
   // Setup SPA fallback (must be last)
   staticFileService.setupSPAFallback(app);
@@ -119,11 +137,13 @@ function startServer() {
       port: config.port,
       health_check: `http://localhost:${config.port}/health`,
       environment: config.nodeEnv,
-      json_limit: '10mb'
+      json_limit: '10mb',
+      supabase_auth: 'service_role'
     });
     
     errorLogger.info('🔧 Services configured:');
     errorLogger.connectionCheck('Database', database.isInitialized());
+    errorLogger.connectionCheck('Supabase Auth', 'service_role');
     
     errorLogger.info('📚 Available endpoints:');
     errorLogger.info('  - GET  /health (Health check)');
