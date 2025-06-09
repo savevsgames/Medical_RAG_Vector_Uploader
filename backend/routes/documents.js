@@ -20,7 +20,7 @@ export function createDocumentsRouter(supabaseClient) {
   const documentProcessor = new DocumentProcessingService();
   const embeddingService = new EmbeddingService();
 
-  // Enhanced document upload endpoint with comprehensive logging
+  // Enhanced document upload endpoint with chunking support
   router.post('/upload', upload.single('file'), async (req, res) => {
     const startTime = Date.now();
     
@@ -34,7 +34,7 @@ export function createDocumentsRouter(supabaseClient) {
         return res.status(400).json({ error: 'No file provided' });
       }
 
-      errorLogger.info('Processing upload', {
+      errorLogger.info('Processing upload with chunking', {
         user_id: req.userId,
         filename: req.file.originalname,
         size: req.file.size,
@@ -43,218 +43,213 @@ export function createDocumentsRouter(supabaseClient) {
         component: 'DocumentUpload'
       });
 
-      const documentId = uuidv4();
-      
-      // ENHANCED: Log before text extraction
-      errorLogger.debug('Starting text extraction', {
-        user_id: req.userId,
-        document_id: documentId,
-        filename: req.file.originalname,
-        buffer_size: req.file.buffer.length,
-        component: 'DocumentUpload'
-      });
-
-      // Extract text from document
-      const { text, metadata } = await documentProcessor.extractText(
+      // Extract text and create chunks
+      const { chunks, originalMetadata } = await documentProcessor.extractText(
         req.file.buffer, 
         req.file.originalname
       );
 
-      // ENHANCED: Log after text extraction
-      errorLogger.debug('Text extraction completed', {
-        user_id: req.userId,
-        document_id: documentId,
-        text_length: text?.length || 0,
-        metadata,
-        component: 'DocumentUpload'
-      });
-
-      if (!text || text.trim().length === 0) {
-        errorLogger.warn('Upload failed - no text extracted', {
+      if (!chunks || chunks.length === 0) {
+        errorLogger.warn('Upload failed - no chunks created', {
           user_id: req.userId,
           filename: req.file.originalname,
-          metadata,
+          originalMetadata,
           component: 'DocumentUpload'
         });
         return res.status(400).json({ error: 'Could not extract text from document' });
       }
 
-      // ENHANCED: Log embedding attempt details
-      let embedding;
-      let embeddingSource = 'local';
-      
-      try {
-        if (process.env.RUNPOD_EMBEDDING_URL) {
-          errorLogger.debug('Attempting TxAgent embedding', {
-            user_id: req.userId,
-            document_id: documentId,
-            text_length: text.length,
-            runpod_url: process.env.RUNPOD_EMBEDDING_URL,
-            has_jwt: !!req.headers.authorization,
-            jwt_preview: req.headers.authorization ? req.headers.authorization.substring(0, 20) + '...' : 'none',
-            component: 'DocumentUpload'
-          });
+      // Update chunk metadata with total count
+      chunks.forEach(chunk => {
+        chunk.metadata.chunk_count = chunks.length;
+      });
 
-          // CRITICAL FIX: Pass user JWT to embedding service
-          embedding = await embeddingService.generateEmbedding(text, req.headers.authorization);
-          embeddingSource = 'runpod';
-          
-          errorLogger.success('TxAgent embedding completed', {
-            user_id: req.userId,
-            document_id: documentId,
-            dimensions: embedding?.length || 0,
-            embedding_type: typeof embedding,
-            component: 'DocumentUpload'
-          });
-        } else {
-          throw new Error('TxAgent not configured - RUNPOD_EMBEDDING_URL missing');
-        }
-      } catch (embeddingError) {
-        errorLogger.warn('TxAgent embedding failed, attempting local service', {
-          user_id: req.userId,
-          document_id: documentId,
-          error: embeddingError.message,
-          error_code: embeddingError.code,
-          error_name: embeddingError.name,
-          status: embeddingError.response?.status,
-          response_data: embeddingError.response?.data,
-          component: 'DocumentUpload'
-        });
-        
-        try {
-          // ENHANCED: Log local embedding attempt
-          errorLogger.debug('Attempting local embedding fallback', {
-            user_id: req.userId,
-            document_id: documentId,
-            text_length: text.length,
-            has_jwt: !!req.headers.authorization,
-            component: 'DocumentUpload'
-          });
-
-          // CRITICAL FIX: Pass user JWT to local embedding service
-          embedding = await embeddingService.generateEmbedding(text, req.headers.authorization);
-          embeddingSource = 'local';
-          
-          errorLogger.info('Local embedding completed', {
-            user_id: req.userId,
-            document_id: documentId,
-            dimensions: embedding?.length || 0,
-            embedding_type: typeof embedding,
-            component: 'DocumentUpload'
-          });
-        } catch (localEmbeddingError) {
-          errorLogger.error('Both TxAgent and local embedding failed', localEmbeddingError, {
-            user_id: req.userId,
-            document_id: documentId,
-            txagent_error: embeddingError.message,
-            local_error: localEmbeddingError.message,
-            component: 'DocumentUpload'
-          });
-          throw localEmbeddingError;
-        }
-      }
-
-      // ENHANCED: Validate embedding before database insertion
-      if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
-        errorLogger.error('Invalid embedding generated', new Error('Embedding validation failed'), {
-          user_id: req.userId,
-          document_id: documentId,
-          embedding_type: typeof embedding,
-          embedding_length: embedding?.length || 0,
-          embedding_source: embeddingSource,
-          component: 'DocumentUpload'
-        });
-        throw new Error('Failed to generate valid embedding');
-      }
-
-      // CRITICAL FIX: Ensure user_id is properly set for RLS
-      const documentData = {
-        id: documentId,
-        filename: req.file.originalname,
-        content: text,
-        metadata: {
-          ...metadata,
-          file_size: req.file.size,
-          mime_type: req.file.mimetype,
-          embedding_source: embeddingSource,
-          processing_time_ms: Date.now() - startTime
-        },
-        embedding,
-        user_id: req.userId // CRITICAL: This must match the authenticated user's ID
-      };
-
-      errorLogger.debug('Preparing Supabase insertion', {
+      errorLogger.info('Document chunked successfully', {
         user_id: req.userId,
-        document_id: documentId,
-        has_embedding: !!embedding,
-        embedding_dimensions: embedding?.length,
-        document_data_keys: Object.keys(documentData),
+        filename: req.file.originalname,
+        chunks_created: chunks.length,
+        total_characters: originalMetadata.original_length,
         component: 'DocumentUpload'
       });
 
-      // Store in Supabase with proper user context using injected client
-      const { data, error } = await supabaseClient
-        .from('documents')
-        .insert(documentData)
-        .select()
-        .single();
+      // Process each chunk
+      const processedChunks = [];
+      const failedChunks = [];
 
-      // ENHANCED: Detailed Supabase error logging
-      if (error) {
-        errorLogger.error('Supabase insert failed', error, {
-          user_id: req.userId,
-          document_id: documentId,
-          filename: req.file.originalname,
-          error_code: error.code,
-          error_details: error.details,
-          error_hint: error.hint,
-          error_message: error.message,
-          supabase_operation: 'insert',
-          table: 'documents',
-          document_data_size: JSON.stringify(documentData).length,
-          component: 'DocumentUpload'
-        });
-        
-        // Provide more specific error messages for common RLS issues
-        if (error.code === '42501') {
-          return res.status(403).json({ 
-            error: 'Access denied: Unable to save document. Please ensure you are properly authenticated.',
-            details: 'Row Level Security policy violation - user authentication may have expired'
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const chunkId = uuidv4();
+
+        try {
+          errorLogger.debug(`Processing chunk ${i + 1}/${chunks.length}`, {
+            user_id: req.userId,
+            chunk_id: chunkId,
+            chunk_index: i,
+            chunk_length: chunk.content.length,
+            component: 'DocumentUpload'
+          });
+
+          // Generate embedding for this chunk
+          let embedding;
+          let embeddingSource = 'unknown';
+          
+          try {
+            // Try TxAgent first if available
+            if (process.env.RUNPOD_EMBEDDING_URL) {
+              embedding = await embeddingService.generateEmbedding(chunk.content, req.headers.authorization);
+              embeddingSource = 'runpod';
+            } else {
+              throw new Error('TxAgent not configured');
+            }
+          } catch (embeddingError) {
+            errorLogger.warn(`TxAgent embedding failed for chunk ${i + 1}, trying OpenAI`, {
+              user_id: req.userId,
+              chunk_id: chunkId,
+              error: embeddingError.message,
+              component: 'DocumentUpload'
+            });
+            
+            try {
+              embedding = await embeddingService.generateEmbedding(chunk.content, req.headers.authorization);
+              embeddingSource = 'openai';
+            } catch (localEmbeddingError) {
+              errorLogger.error(`Both embedding services failed for chunk ${i + 1}`, localEmbeddingError, {
+                user_id: req.userId,
+                chunk_id: chunkId,
+                component: 'DocumentUpload'
+              });
+              throw localEmbeddingError;
+            }
+          }
+
+          // Validate embedding
+          if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+            throw new Error('Invalid embedding generated');
+          }
+
+          // Prepare chunk data for database
+          const chunkData = {
+            id: chunkId,
+            filename: req.file.originalname,
+            content: chunk.content,
+            metadata: {
+              ...originalMetadata,
+              ...chunk.metadata,
+              file_size: req.file.size,
+              mime_type: req.file.mimetype,
+              embedding_source: embeddingSource,
+              processing_time_ms: Date.now() - startTime,
+              is_chunk: true,
+              parent_document: req.file.originalname
+            },
+            embedding,
+            user_id: req.userId
+          };
+
+          // Store chunk in database
+          const { data, error } = await supabaseClient
+            .from('documents')
+            .insert(chunkData)
+            .select()
+            .single();
+
+          if (error) {
+            errorLogger.error(`Database insert failed for chunk ${i + 1}`, error, {
+              user_id: req.userId,
+              chunk_id: chunkId,
+              error_code: error.code,
+              component: 'DocumentUpload'
+            });
+            throw error;
+          }
+
+          processedChunks.push({
+            chunk_id: chunkId,
+            chunk_index: i,
+            content_length: chunk.content.length,
+            embedding_dimensions: embedding.length,
+            embedding_source: embeddingSource
+          });
+
+          errorLogger.debug(`Chunk ${i + 1}/${chunks.length} processed successfully`, {
+            user_id: req.userId,
+            chunk_id: chunkId,
+            embedding_dimensions: embedding.length,
+            component: 'DocumentUpload'
+          });
+
+        } catch (chunkError) {
+          const chunkErrorMessage = chunkError instanceof Error ? chunkError.message : 'Unknown chunk error';
+          
+          errorLogger.error(`Failed to process chunk ${i + 1}`, chunkError, {
+            user_id: req.userId,
+            chunk_id: chunkId,
+            chunk_index: i,
+            error: chunkErrorMessage,
+            component: 'DocumentUpload'
+          });
+
+          failedChunks.push({
+            chunk_index: i,
+            error: chunkErrorMessage,
+            content_preview: chunk.content.substring(0, 100) + '...'
           });
         }
-        
-        if (error.code === '23505') {
-          return res.status(409).json({
-            error: 'Document with this ID already exists',
-            details: 'Duplicate document ID conflict'
-          });
-        }
-        
-        throw error;
       }
 
       const processingTime = Date.now() - startTime;
 
-      errorLogger.success('Document processed successfully', {
+      // Determine response based on success/failure ratio
+      if (processedChunks.length === 0) {
+        errorLogger.error('All chunks failed to process', new Error('Complete upload failure'), {
+          user_id: req.userId,
+          filename: req.file.originalname,
+          total_chunks: chunks.length,
+          failed_chunks: failedChunks.length,
+          component: 'DocumentUpload'
+        });
+
+        return res.status(500).json({
+          error: 'Failed to process any chunks from the document',
+          details: {
+            total_chunks: chunks.length,
+            failed_chunks: failedChunks.length,
+            failures: failedChunks
+          }
+        });
+      }
+
+      // Success response (partial or complete)
+      const isPartialSuccess = failedChunks.length > 0;
+      
+      errorLogger.success('Document upload completed', {
         user_id: req.userId,
-        document_id: documentId,
         filename: req.file.originalname,
-        content_length: text.length,
-        vector_dimensions: embedding?.length,
-        embedding_source: embeddingSource,
+        total_chunks: chunks.length,
+        successful_chunks: processedChunks.length,
+        failed_chunks: failedChunks.length,
         processing_time_ms: processingTime,
-        supabase_id: data.id,
+        is_partial_success: isPartialSuccess,
         component: 'DocumentUpload'
       });
 
       res.json({
-        document_id: documentId,
+        message: isPartialSuccess 
+          ? 'Document partially processed - some chunks failed'
+          : 'Document uploaded and processed successfully',
         filename: req.file.originalname,
-        content_length: text.length,
-        vector_dimensions: embedding?.length,
-        embedding_source: embeddingSource,
+        total_chunks: chunks.length,
+        successful_chunks: processedChunks.length,
+        failed_chunks: failedChunks.length,
         processing_time_ms: processingTime,
-        message: 'Document uploaded and processed successfully'
+        chunks: processedChunks,
+        failures: failedChunks.length > 0 ? failedChunks : undefined,
+        document_stats: {
+          original_size: req.file.size,
+          total_content_length: originalMetadata.original_length,
+          average_chunk_size: Math.round(originalMetadata.original_length / chunks.length),
+          embedding_dimensions: processedChunks[0]?.embedding_dimensions || null
+        }
       });
       
     } catch (error) {
@@ -266,13 +261,13 @@ export function createDocumentsRouter(supabaseClient) {
         processing_time_ms: processingTime,
         error_stack: error.stack,
         error_type: error.constructor.name,
-        supabase_error_details: error.details || null,
         component: 'DocumentUpload'
       });
       
       res.status(500).json({ 
         error: 'Upload failed', 
-        details: error.message 
+        details: error.message,
+        processing_time_ms: processingTime
       });
     }
   });
