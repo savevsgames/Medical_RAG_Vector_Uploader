@@ -67,10 +67,21 @@ export class AgentService {
 
   async startAgent(userId) {
     try {
+      // Temp log for RLS fix - Entry point
+      console.log('🔧 TEMP: Starting agent for userId:', userId, 'Type:', typeof userId, 'Length:', userId?.length);
+      
       errorLogger.info('Starting agent for user', {
         userId,
         component: 'AgentService'
       });
+
+      // Temp log for RLS fix - Check auth context
+      try {
+        const { data: authContext, error: authError } = await this.supabase.rpc('get_current_user_info');
+        console.log('🔧 TEMP: Supabase auth context:', authContext, 'Auth error:', authError);
+      } catch (authCheckError) {
+        console.log('🔧 TEMP: Could not check auth context:', authCheckError.message);
+      }
 
       // Check if user already has an active agent
       const existingAgent = await this.getActiveAgent(userId);
@@ -87,7 +98,6 @@ export class AgentService {
           .from('agents')
           .update({ last_active: new Date().toISOString() })
           .eq('id', existingAgent.id);
-
 
         if (updateError) {
           errorLogger.warn('Failed to update existing agent timestamp', {
@@ -118,6 +128,10 @@ export class AgentService {
         last_active: new Date().toISOString()
       };
 
+      // Temp log for RLS fix - Pre-insert data
+      console.log('🔧 TEMP: About to insert agentData:', JSON.stringify(agentData, null, 2));
+      console.log('🔧 TEMP: user_id field specifically:', agentData.user_id, 'Type:', typeof agentData.user_id);
+
       const { data: newAgent, error: insertError } = await this.supabase
         .from('agents')
         .insert(agentData)
@@ -125,6 +139,14 @@ export class AgentService {
         .single();
 
       if (insertError) {
+        // Temp log for RLS fix - Full error details
+        console.log('🔧 TEMP: Full insertError details:', JSON.stringify(insertError, null, 2));
+        console.log('🔧 TEMP: insertError properties:', Object.keys(insertError));
+        console.log('🔧 TEMP: insertError.message:', insertError.message);
+        console.log('🔧 TEMP: insertError.code:', insertError.code);
+        console.log('🔧 TEMP: insertError.details:', insertError.details);
+        console.log('🔧 TEMP: insertError.hint:', insertError.hint);
+        
         errorLogger.error('Failed to create new agent', {
           userId,
           component: 'AgentService',
@@ -134,6 +156,9 @@ export class AgentService {
         });
         throw insertError;
       }
+
+      // Temp log for RLS fix - Success
+      console.log('🔧 TEMP: Agent created successfully! New agent:', JSON.stringify(newAgent, null, 2));
 
       errorLogger.success('New agent created successfully', {
         userId,
@@ -148,6 +173,13 @@ export class AgentService {
       };
 
     } catch (error) {
+      // Temp log for RLS fix - Catch block
+      console.log('🔧 TEMP: Caught error in startAgent:', error);
+      console.log('🔧 TEMP: Error type:', typeof error);
+      console.log('🔧 TEMP: Error constructor:', error.constructor.name);
+      console.log('🔧 TEMP: Error message:', error.message);
+      console.log('🔧 TEMP: Error stack:', error.stack);
+      
       errorLogger.error('Failed to start agent', {
         userId,
         component: 'AgentService',
