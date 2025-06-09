@@ -88,6 +88,8 @@ export class AgentService {
           .update({ last_active: new Date().toISOString() })
           .eq('id', existingAgent.id);
 
+        // Can we add some logging info about the user and request here?
+
         if (updateError) {
           errorLogger.warn('Failed to update existing agent timestamp', {
             userId,
