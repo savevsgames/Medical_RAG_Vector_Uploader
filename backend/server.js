@@ -54,7 +54,11 @@ function startServer() {
   // Middleware setup
   app.use(corsMiddleware);
   app.options('*', optionsHandler);
-  app.use(express.json());
+  
+  // ENHANCED: Increase JSON body limit for larger document metadata
+  app.use(express.json({ limit: '10mb' }));
+  errorLogger.info('Express JSON body limit set to 10mb');
+  
   app.use(requestLogger);
 
   // Setup static file serving
@@ -114,7 +118,8 @@ function startServer() {
     errorLogger.success('🚀 Medical RAG Server running', {
       port: config.port,
       health_check: `http://localhost:${config.port}/health`,
-      environment: config.nodeEnv
+      environment: config.nodeEnv,
+      json_limit: '10mb'
     });
     
     errorLogger.info('🔧 Services configured:');

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Upload, Plus } from 'lucide-react';
+import { FileText, Upload, Plus, TestTube } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { UploadModal } from '../components/upload';
@@ -31,13 +31,14 @@ interface Document {
 }
 
 export function Documents() {
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
+  const [testingEmbed, setTestingEmbed] = useState(false);
   
   // Modal states
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -136,6 +137,90 @@ export function Documents() {
     fetchDocuments();
   };
 
+  // DIAGNOSTIC: Test embed endpoint directly
+  const testEmbedEndpoint = async () => {
+    if (!session) {
+      toast.error('No session available for testing');
+      return;
+    }
+
+    setTestingEmbed(true);
+    
+    try {
+      logger.info('Testing embed endpoint directly', {
+        component: 'Documents',
+        user: user?.email,
+        apiUrl: import.meta.env.VITE_API_URL
+      });
+
+      const testPayload = {
+        documentText: 'This is a test document for embedding generation. It contains medical terminology like cardiology, diagnosis, and treatment.',
+        file_path: 'test-document.txt',
+        metadata: {
+          file_size: 128,
+          mime_type: 'text/plain',
+          test: true
+        }
+      };
+
+      logger.debug('Test embed payload', {
+        payload: testPayload,
+        component: 'Documents'
+      });
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/embed`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(testPayload)
+      });
+
+      logger.debug('Test embed response received', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        component: 'Documents'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        logger.error('Test embed request failed', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+          component: 'Documents'
+        });
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const responseData = await response.json();
+      
+      logger.success('Test embed completed successfully', {
+        responseData,
+        component: 'Documents'
+      });
+
+      toast.success(`Embed test successful! Generated ${responseData.vector_dimensions || 'unknown'} dimensional embedding`);
+      
+      console.log('🧪 Test Embed Response:', responseData);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      logger.error('Test embed failed', {
+        error: errorMessage,
+        component: 'Documents'
+      });
+
+      toast.error(`Embed test failed: ${errorMessage}`);
+      console.error('🧪 Test Embed Error:', error);
+    } finally {
+      setTestingEmbed(false);
+    }
+  };
+
   // Filter and search documents
   useEffect(() => {
     let filtered = documents;
@@ -212,12 +297,24 @@ export function Documents() {
       subtitle="Manage your medical documents and embeddings"
       icon={<FileText className="w-6 h-6 text-green-600" />}
       actions={
-        <Button
-          onClick={() => setShowUploadModal(true)}
-          icon={<Plus className="w-5 h-5" />}
-        >
-          Upload Documents
-        </Button>
+        <div className="flex space-x-3">
+          {/* DIAGNOSTIC: Test Embed Button */}
+          <Button
+            variant="ghost"
+            onClick={testEmbedEndpoint}
+            loading={testingEmbed}
+            icon={<TestTube className="w-5 h-5" />}
+          >
+            {testingEmbed ? 'Testing...' : 'Test Embed'}
+          </Button>
+          
+          <Button
+            onClick={() => setShowUploadModal(true)}
+            icon={<Plus className="w-5 h-5" />}
+          >
+            Upload Documents
+          </Button>
+        </div>
       }
     >
       {/* Stats */}

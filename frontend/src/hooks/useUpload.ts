@@ -22,11 +22,28 @@ export function useUpload() {
     setUploads(prev => prev.map((upload, index) => 
       index === fileIndex ? { ...upload, ...updates } : upload
     ));
+    
+    // ENHANCED: Log progress updates for debugging
+    logger.debug('Upload progress updated', {
+      fileIndex,
+      updates,
+      component: 'useUpload'
+    });
   }, []);
 
   const uploadFile = useCallback(async (file: File, fileIndex: number) => {
     const userEmail = user?.email;
     
+    // ENHANCED: Log upload initiation with detailed file info
+    logger.debug('Upload file initiated', {
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      fileIndex,
+      lastModified: file.lastModified,
+      component: 'useUpload'
+    });
+
     try {
       // Update status to uploading
       updateUploadProgress(fileIndex, {
@@ -41,12 +58,31 @@ export function useUpload() {
         component: 'useUpload'
       });
 
+      // ENHANCED: Log session retrieval attempt
+      logger.debug('Retrieving user session for upload', {
+        user: userEmail,
+        component: 'useUpload'
+      });
+
       // Get session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError || !session) {
+        logger.error('Session retrieval failed', {
+          sessionError: sessionError?.message,
+          hasSession: !!session,
+          component: 'useUpload'
+        });
         throw new Error('Authentication required');
       }
+
+      // ENHANCED: Log session details (safely)
+      logger.debug('Session retrieved successfully', {
+        hasAccessToken: !!session.access_token,
+        tokenPreview: session.access_token ? session.access_token.substring(0, 20) + '...' : 'none',
+        expiresAt: session.expires_at,
+        component: 'useUpload'
+      });
 
       updateUploadProgress(fileIndex, {
         progress: 30,
@@ -56,11 +92,31 @@ export function useUpload() {
       const formData = new FormData();
       formData.append('file', file);
 
+      // ENHANCED: Log FormData preparation
+      logger.debug('FormData prepared', {
+        fileName: file.name,
+        formDataEntries: Array.from(formData.entries()).map(([key, value]) => ({
+          key,
+          valueType: typeof value,
+          valueSize: value instanceof File ? value.size : String(value).length
+        })),
+        component: 'useUpload'
+      });
+
       const apiUrl = `${import.meta.env.VITE_API_URL}/upload`;
       
       logApiCall('/upload', 'POST', userEmail, 'initiated', {
         fileName: file.name,
         fileSize: file.size,
+        apiUrl,
+        component: 'useUpload'
+      });
+
+      // ENHANCED: Log fetch request details
+      logger.debug('Starting fetch request', {
+        url: apiUrl,
+        method: 'POST',
+        hasAuthHeader: !!session.access_token,
         component: 'useUpload'
       });
 
@@ -72,6 +128,15 @@ export function useUpload() {
         },
       });
 
+      // ENHANCED: Log response details
+      logger.debug('Fetch response received', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        headers: Object.fromEntries(response.headers.entries()),
+        component: 'useUpload'
+      });
+
       updateUploadProgress(fileIndex, {
         progress: 60,
         message: 'Processing document...'
@@ -79,10 +144,30 @@ export function useUpload() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        
+        // ENHANCED: Log detailed error response
+        logger.error('Upload request failed', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+          fileName: file.name,
+          component: 'useUpload'
+        });
+        
         throw new Error(errorData.detail || errorData.error || `HTTP ${response.status}`);
       }
 
       const responseData = await response.json();
+
+      // ENHANCED: Log successful response data
+      logger.debug('Upload response data received', {
+        responseData,
+        documentId: responseData.document_id,
+        contentLength: responseData.content_length,
+        vectorDimensions: responseData.vector_dimensions,
+        embeddingSource: responseData.embedding_source,
+        component: 'useUpload'
+      });
 
       updateUploadProgress(fileIndex, {
         progress: 80,
@@ -112,6 +197,16 @@ export function useUpload() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
       
+      // ENHANCED: Log detailed error information
+      logger.error('Upload file failed', {
+        fileName: file.name,
+        fileSize: file.size,
+        error: errorMessage,
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        errorStack: error instanceof Error ? error.stack : undefined,
+        component: 'useUpload'
+      });
+      
       updateUploadProgress(fileIndex, {
         status: 'error',
         progress: 0,
@@ -132,6 +227,14 @@ export function useUpload() {
     if (isUploading) return;
 
     const userEmail = user?.email;
+    
+    // ENHANCED: Log multiple files upload initiation
+    logger.debug('Multiple files upload initiated', {
+      fileCount: files.length,
+      fileNames: files.map(f => f.name),
+      totalSize: files.reduce((sum, f) => sum + f.size, 0),
+      component: 'useUpload'
+    });
     
     logUserAction('Multiple Files Upload Initiated', userEmail, {
       fileCount: files.length,
@@ -156,25 +259,45 @@ export function useUpload() {
     // Upload files sequentially to avoid overwhelming the server
     for (let i = 0; i < files.length; i++) {
       try {
+        logger.debug('Processing file in sequence', {
+          fileIndex: i,
+          fileName: files[i].name,
+          component: 'useUpload'
+        });
+        
         const result = await uploadFile(files[i], i);
         results.push(result);
       } catch (error) {
-        logger.error('File upload failed', {
-          component: 'useUpload',
-          user: userEmail,
+        logger.error('File upload failed in sequence', {
+          fileIndex: i,
           fileName: files[i].name,
-          error: error instanceof Error ? error.message : 'Unknown error'
+          user: userEmail,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          component: 'useUpload'
         });
       }
     }
 
     setIsUploading(false);
+    
+    // ENHANCED: Log final upload results
+    logger.debug('Multiple files upload completed', {
+      totalFiles: files.length,
+      successfulUploads: results.length,
+      failedUploads: files.length - results.length,
+      component: 'useUpload'
+    });
+    
     return results;
   }, [isUploading, user, uploadFile]);
 
   const clearUploads = useCallback(() => {
+    logger.debug('Clearing upload history', {
+      previousUploadCount: uploads.length,
+      component: 'useUpload'
+    });
     setUploads([]);
-  }, []);
+  }, [uploads.length]);
 
   const getUploadStats = useCallback(() => {
     const total = uploads.length;

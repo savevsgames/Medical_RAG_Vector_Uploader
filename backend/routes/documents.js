@@ -36,11 +36,29 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
     const documentId = uuidv4();
     
+    // ENHANCED: Log before text extraction
+    errorLogger.debug('Starting text extraction', {
+      user_id: req.userId,
+      document_id: documentId,
+      filename: req.file.originalname,
+      buffer_size: req.file.buffer.length,
+      component: 'DocumentUpload'
+    });
+
     // Extract text from document
     const { text, metadata } = await documentProcessor.extractText(
       req.file.buffer, 
       req.file.originalname
     );
+
+    // ENHANCED: Log after text extraction
+    errorLogger.debug('Text extraction completed', {
+      user_id: req.userId,
+      document_id: documentId,
+      text_length: text?.length || 0,
+      metadata,
+      component: 'DocumentUpload'
+    });
 
     if (!text || text.trim().length === 0) {
       errorLogger.warn('Upload failed - no text extracted', {
@@ -52,18 +70,19 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Could not extract text from document' });
     }
 
-    // CRITICAL FIX: Try TxAgent embedding first with proper JWT forwarding
+    // ENHANCED: Log embedding attempt details
     let embedding;
     let embeddingSource = 'local';
     
     try {
       if (process.env.RUNPOD_EMBEDDING_URL) {
-        errorLogger.info('Attempting TxAgent embedding with user JWT', {
+        errorLogger.debug('Attempting TxAgent embedding', {
           user_id: req.userId,
           document_id: documentId,
           text_length: text.length,
           runpod_url: process.env.RUNPOD_EMBEDDING_URL,
           has_jwt: !!req.headers.authorization,
+          jwt_preview: req.headers.authorization ? req.headers.authorization.substring(0, 20) + '...' : 'none',
           component: 'DocumentUpload'
         });
 
@@ -74,32 +93,69 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         errorLogger.success('TxAgent embedding completed', {
           user_id: req.userId,
           document_id: documentId,
-          dimensions: embedding.length,
+          dimensions: embedding?.length || 0,
+          embedding_type: typeof embedding,
           component: 'DocumentUpload'
         });
       } else {
-        throw new Error('TxAgent not configured');
+        throw new Error('TxAgent not configured - RUNPOD_EMBEDDING_URL missing');
       }
     } catch (embeddingError) {
-      errorLogger.warn('TxAgent embedding failed, using local service', {
+      errorLogger.warn('TxAgent embedding failed, attempting local service', {
         user_id: req.userId,
         document_id: documentId,
         error: embeddingError.message,
         error_code: embeddingError.code,
+        error_name: embeddingError.name,
         status: embeddingError.response?.status,
+        response_data: embeddingError.response?.data,
         component: 'DocumentUpload'
       });
       
-      // CRITICAL FIX: Pass user JWT to local embedding service
-      embedding = await embeddingService.generateEmbedding(text, req.headers.authorization);
-      embeddingSource = 'local';
-      
-      errorLogger.info('Local embedding completed', {
+      try {
+        // ENHANCED: Log local embedding attempt
+        errorLogger.debug('Attempting local embedding fallback', {
+          user_id: req.userId,
+          document_id: documentId,
+          text_length: text.length,
+          has_jwt: !!req.headers.authorization,
+          component: 'DocumentUpload'
+        });
+
+        // CRITICAL FIX: Pass user JWT to local embedding service
+        embedding = await embeddingService.generateEmbedding(text, req.headers.authorization);
+        embeddingSource = 'local';
+        
+        errorLogger.info('Local embedding completed', {
+          user_id: req.userId,
+          document_id: documentId,
+          dimensions: embedding?.length || 0,
+          embedding_type: typeof embedding,
+          component: 'DocumentUpload'
+        });
+      } catch (localEmbeddingError) {
+        errorLogger.error('Both TxAgent and local embedding failed', localEmbeddingError, {
+          user_id: req.userId,
+          document_id: documentId,
+          txagent_error: embeddingError.message,
+          local_error: localEmbeddingError.message,
+          component: 'DocumentUpload'
+        });
+        throw localEmbeddingError;
+      }
+    }
+
+    // ENHANCED: Validate embedding before database insertion
+    if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+      errorLogger.error('Invalid embedding generated', new Error('Embedding validation failed'), {
         user_id: req.userId,
         document_id: documentId,
-        dimensions: embedding?.length,
+        embedding_type: typeof embedding,
+        embedding_length: embedding?.length || 0,
+        embedding_source: embeddingSource,
         component: 'DocumentUpload'
       });
+      throw new Error('Failed to generate valid embedding');
     }
 
     // CRITICAL FIX: Ensure user_id is properly set for RLS
@@ -118,11 +174,12 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       user_id: req.userId // CRITICAL: This must match the authenticated user's ID
     };
 
-    errorLogger.debug('Inserting document into Supabase', {
+    errorLogger.debug('Preparing Supabase insertion', {
       user_id: req.userId,
       document_id: documentId,
       has_embedding: !!embedding,
       embedding_dimensions: embedding?.length,
+      document_data_keys: Object.keys(documentData),
       component: 'DocumentUpload'
     });
 
@@ -133,6 +190,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       .select()
       .single();
 
+    // ENHANCED: Detailed Supabase error logging
     if (error) {
       errorLogger.error('Supabase insert failed', error, {
         user_id: req.userId,
@@ -144,6 +202,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         error_message: error.message,
         supabase_operation: 'insert',
         table: 'documents',
+        document_data_size: JSON.stringify(documentData).length,
         component: 'DocumentUpload'
       });
       
@@ -152,6 +211,13 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         return res.status(403).json({ 
           error: 'Access denied: Unable to save document. Please ensure you are properly authenticated.',
           details: 'Row Level Security policy violation - user authentication may have expired'
+        });
+      }
+      
+      if (error.code === '23505') {
+        return res.status(409).json({
+          error: 'Document with this ID already exists',
+          details: 'Duplicate document ID conflict'
         });
       }
       
