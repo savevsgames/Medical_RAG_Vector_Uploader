@@ -1,6 +1,6 @@
 import express from 'express';
 import { config, validateConfig } from './config/environment.js';
-import { database } from './config/database.js';
+import { database, supabase } from './config/database.js';
 import { corsMiddleware, optionsHandler } from './middleware/cors.js';
 import { requestLogger } from './middleware/logging.js';
 import setupRoutes from './routes/index.js';
@@ -29,7 +29,7 @@ function startServer() {
 
   // Initialize database connection (synchronous)
   try {
-    const supabaseClient = database.initialize();
+    const result = database.initialize();
     errorLogger.success('Database client initialized with service_role authentication');
     
     // Log service role confirmation
@@ -78,8 +78,7 @@ function startServer() {
   // CRITICAL FIX: Pass the service_role authenticated Supabase client
   // This ensures all routes have access to the properly authenticated client
   try {
-    const supabaseClient = database.initialize();
-    setupRoutes(app, supabaseClient);
+    setupRoutes(app, supabase);
     errorLogger.success('Routes setup completed with service_role Supabase client');
   } catch (error) {
     errorLogger.error('Failed to setup routes', error);
