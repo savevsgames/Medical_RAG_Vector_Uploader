@@ -7,7 +7,6 @@ class Database {
     this.initialized = false;
   }
 
-  // Synchronous initialization - just creates the client
   initialize() {
     try {
       if (!config.supabase.url || !config.supabase.serviceKey) {
@@ -33,7 +32,6 @@ class Database {
     }
   }
 
-  // Async health check - can be called after initialization
   async healthCheck() {
     if (!this.client) {
       return { 
@@ -43,7 +41,6 @@ class Database {
     }
 
     try {
-      // Simple query to test connection
       const { data, error } = await this.client
         .from('documents')
         .select('count')
@@ -80,8 +77,9 @@ class Database {
   }
 }
 
-// Create and export a singleton instance
+// ✅ CRITICAL FIX: Instantiate and immediately initialize
 export const database = new Database();
+database.initialize(); // ✅ Make sure the client is ready
 
-// Also export the client directly for backward compatibility
-export const supabase = database.getClient.bind(database);
+// ✅ CRITICAL FIX: Export the real client, not a function
+export const supabase = database.getClient(); // ✅ Real client, not a function
