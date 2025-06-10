@@ -15,6 +15,33 @@ This file documents the complete database schema needed to recreate the Medical 
 
 ## 🧹 **CRITICAL: Cleanup Old Functions First**
 
+### **Drop Old Policies (Clean Slate)**
+```sql
+-- Drop all existing RLS policies to start fresh
+DROP POLICY IF EXISTS "Users can read own documents" ON public.documents;
+DROP POLICY IF EXISTS "documents_user_isolation" ON public.documents;
+DROP POLICY IF EXISTS "Authenticated users can read all documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can only upload as themselves" ON public.documents;
+DROP POLICY IF EXISTS "Users can only edit their own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can only delete their own documents" ON public.documents;
+DROP POLICY IF EXISTS "Users can only upload documents as themselves" ON public.documents;
+DROP POLICY IF EXISTS "Users can only insert as themselves" ON public.documents;
+
+DROP POLICY IF EXISTS "Users can manage own agents" ON public.agents;
+DROP POLICY IF EXISTS "agents_user_isolation" ON public.agents;
+
+DROP POLICY IF EXISTS "Users can manage own embedding jobs" ON public.embedding_jobs;
+DROP POLICY IF EXISTS "embedding_jobs_user_isolation" ON public.embedding_jobs;
+```
+
+### **Drop Existing Triggers**
+```sql
+-- Drop any existing triggers
+DROP TRIGGER IF EXISTS update_agent_last_active ON public.agents;
+DROP TRIGGER IF EXISTS agent_last_active_trigger ON public.agents;
+DROP TRIGGER IF EXISTS agents_update_trigger ON public.agents;
+```
+
 ### **Drop All Existing Functions**
 ```sql
 -- Drop all existing functions that may have search path issues
@@ -52,33 +79,6 @@ DROP FUNCTION IF EXISTS public.similarity_search(vector, float, int);
 DROP FUNCTION IF EXISTS search_documents(vector, float, int);
 DROP FUNCTION IF EXISTS vector_search(vector, float, int);
 DROP FUNCTION IF EXISTS similarity_search(vector, float, int);
-```
-
-### **Drop Existing Triggers**
-```sql
--- Drop any existing triggers
-DROP TRIGGER IF EXISTS update_agent_last_active ON public.agents;
-DROP TRIGGER IF EXISTS agent_last_active_trigger ON public.agents;
-DROP TRIGGER IF EXISTS agents_update_trigger ON public.agents;
-```
-
-### **Drop Old Policies (Clean Slate)**
-```sql
--- Drop all existing RLS policies to start fresh
-DROP POLICY IF EXISTS "Users can read own documents" ON public.documents;
-DROP POLICY IF EXISTS "documents_user_isolation" ON public.documents;
-DROP POLICY IF EXISTS "Authenticated users can read all documents" ON public.documents;
-DROP POLICY IF EXISTS "Users can only upload as themselves" ON public.documents;
-DROP POLICY IF EXISTS "Users can only edit their own documents" ON public.documents;
-DROP POLICY IF EXISTS "Users can only delete their own documents" ON public.documents;
-DROP POLICY IF EXISTS "Users can only upload documents as themselves" ON public.documents;
-DROP POLICY IF EXISTS "Users can only insert as themselves" ON public.documents;
-
-DROP POLICY IF EXISTS "Users can manage own agents" ON public.agents;
-DROP POLICY IF EXISTS "agents_user_isolation" ON public.agents;
-
-DROP POLICY IF EXISTS "Users can manage own embedding jobs" ON public.embedding_jobs;
-DROP POLICY IF EXISTS "embedding_jobs_user_isolation" ON public.embedding_jobs;
 ```
 
 ---
@@ -561,7 +561,7 @@ CREATE POLICY "All authenticated users can read all documents"
 ## 🔄 **Migration Strategy**
 
 ### **Single Migration Approach**
-1. **🧹 CLEANUP FIRST**: Drop all existing functions, triggers, and policies
+1. **🧹 CLEANUP FIRST**: Drop all existing policies, triggers, and functions
 2. **Create extensions** first
 3. **Create tables** with all columns and constraints (IF NOT EXISTS for safety)
 4. **Create indexes** for performance
