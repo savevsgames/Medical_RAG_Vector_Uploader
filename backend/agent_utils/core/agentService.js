@@ -1,4 +1,7 @@
+import { createClient } from '@supabase/supabase-js';
+import { config } from '../../config/environment.js';
 import { errorLogger } from '../shared/logger.js';
+import axios from 'axios';
 
 export class AgentService {
   constructor(supabaseClient) {
@@ -9,11 +12,195 @@ export class AgentService {
   }
 
   /**
-   * Create a new agent session using the SECURITY DEFINER function
-   * @param {string} userId - User UUID
+   * Get agent status with live health check
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} Agent status with live container health
+   */
+  async getAgentStatus(userId) {
+    try {
+      errorLogger.info('Getting agent status with live health check', {
+        userId,
+        component: 'AgentService'
+      });
+
+      // Get agent record from database
+      const { data: agent, error } = await this.supabase
+        .from('agents')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .is('terminated_at', null)
+        .order('last_active', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        errorLogger.error('Failed to fetch agent from database', error, {
+          userId,
+          component: 'AgentService'
+        });
+        throw error;
+      }
+
+      // Base status object
+      let agentStatus = {
+        agent_active: false,
+        agent_id: null,
+        last_active: null,
+        container_status: 'stopped',
+        container_health: null,
+        session_data: null
+      };
+
+      // If no agent found in database, return inactive status
+      if (!agent) {
+        errorLogger.info('No active agent found in database', {
+          userId,
+          component: 'AgentService'
+        });
+        return agentStatus;
+      }
+
+      // Agent exists in database, now check live container health
+      errorLogger.info('Agent found in database, checking live container health', {
+        userId,
+        agentId: agent.id,
+        dbStatus: agent.status,
+        component: 'AgentService'
+      });
+
+      // Update status with database info
+      agentStatus = {
+        agent_active: agent.status === 'active',
+        agent_id: agent.id,
+        last_active: agent.last_active,
+        container_status: 'checking',
+        container_health: null,
+        session_data: agent.session_data
+      };
+
+      // Perform live health check if RunPod URL is configured
+      if (config.runpod.url) {
+        try {
+          const healthUrl = `${config.runpod.url.replace(/\/+$/, '')}/health`;
+          
+          errorLogger.debug('Performing live health check', {
+            healthUrl,
+            userId,
+            agentId: agent.id,
+            component: 'AgentService'
+          });
+
+          const healthResponse = await axios.get(healthUrl, {
+            timeout: 10000, // 10 second timeout
+            headers: {
+              'Accept': 'application/json',
+              'User-Agent': 'Medical-RAG-Backend/1.0'
+            }
+          });
+
+          if (healthResponse.status === 200 && healthResponse.data) {
+            const healthData = healthResponse.data;
+            
+            errorLogger.success('Container health check successful', {
+              healthData,
+              userId,
+              agentId: agent.id,
+              component: 'AgentService'
+            });
+
+            // Container is healthy and responding
+            agentStatus.container_status = 'running';
+            agentStatus.container_health = healthData;
+            agentStatus.agent_active = true; // Confirm agent is truly active
+
+            // Update last_active timestamp in database
+            await this.updateAgentLastActive(agent.id);
+
+          } else {
+            errorLogger.warn('Container health check returned unexpected response', {
+              status: healthResponse.status,
+              data: healthResponse.data,
+              userId,
+              agentId: agent.id,
+              component: 'AgentService'
+            });
+
+            agentStatus.container_status = 'unhealthy';
+            agentStatus.agent_active = false; // Container not healthy
+          }
+
+        } catch (healthError) {
+          errorLogger.error('Container health check failed', healthError, {
+            userId,
+            agentId: agent.id,
+            healthUrl: config.runpod.url,
+            errorType: healthError.constructor.name,
+            errorMessage: healthError.message,
+            component: 'AgentService'
+          });
+
+          // Container is unreachable or unhealthy
+          agentStatus.container_status = 'unreachable';
+          agentStatus.agent_active = false; // Container not reachable
+          agentStatus.container_health = {
+            error: healthError.message,
+            error_type: healthError.constructor.name,
+            last_check: new Date().toISOString()
+          };
+
+          // Consider terminating the agent session if container is unreachable
+          if (healthError.code === 'ECONNREFUSED' || healthError.code === 'ETIMEDOUT') {
+            errorLogger.warn('Container appears to be down, considering session termination', {
+              userId,
+              agentId: agent.id,
+              errorCode: healthError.code,
+              component: 'AgentService'
+            });
+
+            // Optionally terminate the session after multiple failed checks
+            // This could be implemented with a retry counter in session_data
+          }
+        }
+      } else {
+        errorLogger.warn('RunPod URL not configured, cannot perform health check', {
+          userId,
+          agentId: agent.id,
+          component: 'AgentService'
+        });
+
+        agentStatus.container_status = 'unknown';
+        agentStatus.container_health = {
+          error: 'RunPod URL not configured',
+          last_check: new Date().toISOString()
+        };
+      }
+
+      errorLogger.info('Agent status determined', {
+        userId,
+        agentId: agent.id,
+        agentActive: agentStatus.agent_active,
+        containerStatus: agentStatus.container_status,
+        component: 'AgentService'
+      });
+
+      return agentStatus;
+
+    } catch (error) {
+      errorLogger.error('Failed to get agent status', error, {
+        userId,
+        component: 'AgentService'
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new agent session
+   * @param {string} userId - User ID
    * @param {string} status - Initial status (default: 'initializing')
-   * @param {object} sessionData - Initial session data
-   * @returns {Promise<object>} Created agent session details
+   * @param {Object} sessionData - Session data
+   * @returns {Promise<Object>} Created agent
    */
   async createAgentSession(userId, status = 'initializing', sessionData = {}) {
     try {
@@ -24,110 +211,36 @@ export class AgentService {
         component: 'AgentService'
       });
 
-      // CRITICAL: Use the new SECURITY DEFINER function
-      const { data, error } = await this.supabase.rpc('create_agent_session', {
-        user_uuid: userId,
-        initial_status: status,
-        initial_session_data: sessionData
-      });
+      // Use the database function to create agent session
+      const { data, error } = await this.supabase
+        .rpc('create_agent_session', {
+          user_uuid: userId,
+          initial_status: status,
+          initial_session_data: sessionData
+        });
 
       if (error) {
-        errorLogger.error('Failed to create agent session via RPC', error, {
+        errorLogger.error('Failed to create agent session', error, {
           userId,
           status,
-          sessionData,
           component: 'AgentService'
         });
         throw error;
       }
 
-      // The function returns a table, so data should be an array with one row
-      const agentSession = Array.isArray(data) ? data[0] : data;
-
-      if (!agentSession) {
-        throw new Error('No agent session data returned from create_agent_session function');
-      }
-
+      const agent = data[0]; // RPC returns array
+      
       errorLogger.success('Agent session created successfully', {
-        agentId: agentSession.id,
-        status: agentSession.status,
         userId,
+        agentId: agent.id,
+        status: agent.status,
         component: 'AgentService'
       });
 
-      return {
-        agent_id: agentSession.id,
-        status: agentSession.status,
-        session_data: agentSession.session_data,
-        created_at: agentSession.created_at,
-        agent_active: true
-      };
+      return agent;
 
     } catch (error) {
-      errorLogger.error('Agent session creation failed', error, {
-        userId,
-        status,
-        sessionData,
-        component: 'AgentService'
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Get active agent session for user using SECURITY DEFINER function
-   * @param {string} userId - User UUID
-   * @returns {Promise<object|null>} Active agent session or null
-   */
-  async getActiveAgent(userId) {
-    try {
-      errorLogger.debug('Getting active agent for user', {
-        userId,
-        component: 'AgentService'
-      });
-
-      // CRITICAL: Use the new SECURITY DEFINER function
-      const { data, error } = await this.supabase.rpc('get_active_agent', {
-        user_uuid: userId
-      });
-
-      if (error) {
-        errorLogger.error('Failed to get active agent via RPC', error, {
-          userId,
-          component: 'AgentService'
-        });
-        throw error;
-      }
-
-      // The function returns a table, so data should be an array
-      const activeAgent = Array.isArray(data) && data.length > 0 ? data[0] : null;
-
-      if (activeAgent) {
-        errorLogger.debug('Active agent found', {
-          agentId: activeAgent.id,
-          status: activeAgent.status,
-          userId,
-          component: 'AgentService'
-        });
-
-        return {
-          agent_id: activeAgent.id,
-          status: activeAgent.status,
-          session_data: activeAgent.session_data,
-          created_at: activeAgent.created_at,
-          last_active: activeAgent.last_active,
-          agent_active: true
-        };
-      } else {
-        errorLogger.debug('No active agent found for user', {
-          userId,
-          component: 'AgentService'
-        });
-        return null;
-      }
-
-    } catch (error) {
-      errorLogger.error('Failed to get active agent', error, {
+      errorLogger.error('Failed to create agent session', error, {
         userId,
         component: 'AgentService'
       });
@@ -136,8 +249,8 @@ export class AgentService {
   }
 
   /**
-   * Terminate agent session using SECURITY DEFINER function
-   * @param {string} userId - User UUID
+   * Terminate agent session
+   * @param {string} userId - User ID
    * @returns {Promise<boolean>} Success status
    */
   async terminateAgentSession(userId) {
@@ -147,37 +260,30 @@ export class AgentService {
         component: 'AgentService'
       });
 
-      // CRITICAL: Use the new SECURITY DEFINER function
-      const { data, error } = await this.supabase.rpc('terminate_agent_session', {
-        user_uuid: userId
-      });
+      // Use the database function to terminate agent session
+      const { data, error } = await this.supabase
+        .rpc('terminate_agent_session', {
+          user_uuid: userId
+        });
 
       if (error) {
-        errorLogger.error('Failed to terminate agent session via RPC', error, {
+        errorLogger.error('Failed to terminate agent session', error, {
           userId,
           component: 'AgentService'
         });
         throw error;
       }
 
-      const success = data === true;
+      errorLogger.success('Agent session terminated successfully', {
+        userId,
+        terminated: data,
+        component: 'AgentService'
+      });
 
-      if (success) {
-        errorLogger.success('Agent session terminated successfully', {
-          userId,
-          component: 'AgentService'
-        });
-      } else {
-        errorLogger.warn('No active agent session found to terminate', {
-          userId,
-          component: 'AgentService'
-        });
-      }
-
-      return success;
+      return data;
 
     } catch (error) {
-      errorLogger.error('Agent session termination failed', error, {
+      errorLogger.error('Failed to terminate agent session', error, {
         userId,
         component: 'AgentService'
       });
@@ -186,45 +292,27 @@ export class AgentService {
   }
 
   /**
-   * Update agent last active timestamp using SECURITY DEFINER function
-   * @param {string} agentId - Agent UUID
+   * Update agent last active timestamp
+   * @param {string} agentId - Agent ID
    * @returns {Promise<boolean>} Success status
    */
   async updateAgentLastActive(agentId) {
     try {
-      errorLogger.debug('Updating agent last active', {
-        agentId,
-        component: 'AgentService'
-      });
-
-      // CRITICAL: Use the new SECURITY DEFINER function
-      const { data, error } = await this.supabase.rpc('update_agent_last_active', {
-        agent_uuid: agentId
-      });
+      // Use the database function to update last active
+      const { data, error } = await this.supabase
+        .rpc('update_agent_last_active', {
+          agent_uuid: agentId
+        });
 
       if (error) {
-        errorLogger.error('Failed to update agent last active via RPC', error, {
+        errorLogger.error('Failed to update agent last active', error, {
           agentId,
           component: 'AgentService'
         });
         throw error;
       }
 
-      const success = data === true;
-
-      if (success) {
-        errorLogger.debug('Agent last active updated successfully', {
-          agentId,
-          component: 'AgentService'
-        });
-      } else {
-        errorLogger.warn('Agent not found for last active update', {
-          agentId,
-          component: 'AgentService'
-        });
-      }
-
-      return success;
+      return data;
 
     } catch (error) {
       errorLogger.error('Failed to update agent last active', error, {
@@ -236,7 +324,7 @@ export class AgentService {
   }
 
   /**
-   * Cleanup stale agents using SECURITY DEFINER function
+   * Cleanup stale agents
    * @returns {Promise<number>} Number of agents cleaned up
    */
   async cleanupStaleAgents() {
@@ -245,27 +333,26 @@ export class AgentService {
         component: 'AgentService'
       });
 
-      // CRITICAL: Use the new SECURITY DEFINER function
-      const { data, error } = await this.supabase.rpc('cleanup_stale_agents');
+      // Use the database function to cleanup stale agents
+      const { data, error } = await this.supabase
+        .rpc('cleanup_stale_agents');
 
       if (error) {
-        errorLogger.error('Failed to cleanup stale agents via RPC', error, {
+        errorLogger.error('Failed to cleanup stale agents', error, {
           component: 'AgentService'
         });
         throw error;
       }
 
-      const cleanedCount = data || 0;
-
-      errorLogger.success('Stale agents cleanup completed', {
-        cleanedCount,
+      errorLogger.success('Stale agents cleaned up', {
+        cleanedCount: data,
         component: 'AgentService'
       });
 
-      return cleanedCount;
+      return data;
 
     } catch (error) {
-      errorLogger.error('Stale agents cleanup failed', error, {
+      errorLogger.error('Failed to cleanup stale agents', error, {
         component: 'AgentService'
       });
       throw error;
@@ -273,43 +360,92 @@ export class AgentService {
   }
 
   /**
-   * Get comprehensive agent status for user
-   * @param {string} userId - User UUID
-   * @returns {Promise<object>} Complete agent status
+   * Perform detailed status check with endpoint testing
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} Detailed status information
    */
-  async getAgentStatus(userId) {
+  async performDetailedStatusCheck(userId) {
     try {
-      errorLogger.debug('Getting comprehensive agent status', {
+      errorLogger.info('Performing detailed status check', {
         userId,
         component: 'AgentService'
       });
 
-      // Get active agent using SECURITY DEFINER function
-      const activeAgent = await this.getActiveAgent(userId);
+      // First get basic agent status
+      const agentStatus = await this.getAgentStatus(userId);
 
-      if (!activeAgent) {
+      if (!agentStatus.agent_active || !config.runpod.url) {
         return {
-          agent_active: false,
-          agent_id: null,
-          last_active: null,
-          container_status: 'stopped',
-          session_data: null
+          container_reachable: false,
+          jwt_valid: false,
+          endpoints_working: false,
+          last_test_time: new Date().toISOString(),
+          test_results: {
+            health: { status: 0, error: 'Agent not active or RunPod URL not configured' },
+            chat: { status: 0, error: 'Agent not active' },
+            embed: { status: 0, error: 'Agent not active' }
+          }
         };
       }
 
-      // Update last active timestamp
-      await this.updateAgentLastActive(activeAgent.agent_id);
-
-      return {
-        agent_active: true,
-        agent_id: activeAgent.agent_id,
-        last_active: activeAgent.last_active,
-        container_status: activeAgent.status === 'active' ? 'running' : 'starting',
-        session_data: activeAgent.session_data
+      const testResults = {
+        health: { status: 0, response: null, error: null },
+        chat: { status: 0, response: null, error: null },
+        embed: { status: 0, response: null, error: null }
       };
 
+      const baseUrl = config.runpod.url.replace(/\/+$/, '');
+
+      // Test health endpoint
+      try {
+        const healthResponse = await axios.get(`${baseUrl}/health`, { timeout: 5000 });
+        testResults.health.status = healthResponse.status;
+        testResults.health.response = healthResponse.data;
+      } catch (error) {
+        testResults.health.error = error.message;
+      }
+
+      // Test embed endpoint
+      try {
+        const embedResponse = await axios.post(`${baseUrl}/embed`, {
+          text: 'Test embedding generation'
+        }, { timeout: 10000 });
+        testResults.embed.status = embedResponse.status;
+        testResults.embed.response = embedResponse.data;
+      } catch (error) {
+        testResults.embed.error = error.message;
+      }
+
+      // Test chat endpoint
+      try {
+        const chatResponse = await axios.post(`${baseUrl}/chat`, {
+          message: 'Test connection',
+          context: []
+        }, { timeout: 10000 });
+        testResults.chat.status = chatResponse.status;
+        testResults.chat.response = chatResponse.data;
+      } catch (error) {
+        testResults.chat.error = error.message;
+      }
+
+      const detailedStatus = {
+        container_reachable: testResults.health.status === 200,
+        jwt_valid: testResults.health.status !== 401,
+        endpoints_working: testResults.chat.status === 200 || testResults.embed.status === 200,
+        last_test_time: new Date().toISOString(),
+        test_results: testResults
+      };
+
+      errorLogger.success('Detailed status check completed', {
+        userId,
+        detailedStatus,
+        component: 'AgentService'
+      });
+
+      return detailedStatus;
+
     } catch (error) {
-      errorLogger.error('Failed to get agent status', error, {
+      errorLogger.error('Detailed status check failed', error, {
         userId,
         component: 'AgentService'
       });
