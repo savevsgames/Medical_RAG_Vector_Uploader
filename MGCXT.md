@@ -217,9 +217,9 @@ CREATE POLICY "Users can manage own embedding jobs"
     WITH CHECK (user_id = auth.uid());
 ```
 
-### **4. Database Functions with FIXED Search Paths and SECURITY DEFINER**
+### **4. Database Functions with FIXED Search Paths, SECURITY DEFINER, and Correct Volatilities**
 
-#### **Document Search Function**
+#### **Document Search Function (STABLE - Read-only)**
 ```sql
 CREATE OR REPLACE FUNCTION public.match_documents(
     query_embedding vector(768),
@@ -236,6 +236,7 @@ RETURNS TABLE (
     similarity float
 )
 LANGUAGE plpgsql
+STABLE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -258,7 +259,9 @@ END;
 $$;
 ```
 
-#### **Agent Management Functions with SECURITY DEFINER**
+#### **Agent Management Functions**
+
+##### **Get Active Agent (STABLE - Read-only)**
 ```sql
 -- CORRECTED: Get active agent for user (FIXED VERSION)
 CREATE OR REPLACE FUNCTION public.get_active_agent(
@@ -291,7 +294,10 @@ BEGIN
     LIMIT 1;
 END;
 $$;
+```
 
+##### **Create Agent Session (VOLATILE - Modifies data)**
+```sql
 -- CRITICAL FIX: Create agent session with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.create_agent_session(
     user_uuid uuid,
@@ -305,6 +311,7 @@ RETURNS TABLE (
     created_at timestamptz
 )
 LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -334,11 +341,15 @@ BEGIN
     WHERE agents.id = new_agent_id;
 END;
 $$;
+```
 
+##### **Terminate Agent Session (VOLATILE - Modifies data)**
+```sql
 -- Terminate agent session with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.terminate_agent_session(user_uuid uuid)
 RETURNS boolean
 LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -352,11 +363,15 @@ BEGIN
     RETURN FOUND;
 END;
 $$;
+```
 
--- Update agent last active with SECURITY DEFINER
+##### **Update Agent Last Active (VOLATILE - Modifies data)**
+```sql
+-- CORRECTED: Update agent last active with VOLATILE (not STABLE)
 CREATE OR REPLACE FUNCTION public.update_agent_last_active(agent_uuid uuid)
 RETURNS boolean
 LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -368,11 +383,15 @@ BEGIN
     RETURN FOUND;
 END;
 $$;
+```
 
+##### **Cleanup Stale Agents (VOLATILE - Modifies data)**
+```sql
 -- Cleanup stale agents with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.cleanup_stale_agents()
 RETURNS integer
 LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -391,12 +410,15 @@ END;
 $$;
 ```
 
-#### **Test and Utility Functions with SECURITY DEFINER**
+#### **Test and Utility Functions**
+
+##### **Test User Documents Count (STABLE - Read-only)**
 ```sql
 -- Test user documents count
 CREATE OR REPLACE FUNCTION public.test_user_documents_count(user_uuid uuid)
 RETURNS integer
 LANGUAGE plpgsql
+STABLE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -408,7 +430,10 @@ BEGIN
     );
 END;
 $$;
+```
 
+##### **Test Vector Similarity (IMMUTABLE - Pure computation)**
+```sql
 -- Test vector similarity
 CREATE OR REPLACE FUNCTION public.test_vector_similarity(
     vec1 vector(768),
@@ -416,6 +441,7 @@ CREATE OR REPLACE FUNCTION public.test_vector_similarity(
 )
 RETURNS float
 LANGUAGE plpgsql
+IMMUTABLE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -423,11 +449,15 @@ BEGIN
     RETURN 1 - (vec1 <=> vec2);
 END;
 $$;
+```
 
+##### **Test Auth UID (STABLE - Read-only)**
+```sql
 -- Test auth uid
 CREATE OR REPLACE FUNCTION public.test_auth_uid()
 RETURNS uuid
 LANGUAGE plpgsql
+STABLE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -435,7 +465,10 @@ BEGIN
     RETURN auth.uid();
 END;
 $$;
+```
 
+##### **Create Test Medical Document (VOLATILE - Modifies data)**
+```sql
 -- Create test medical document with SECURITY DEFINER
 CREATE OR REPLACE FUNCTION public.create_test_medical_document(
     test_filename text DEFAULT 'test-medical-doc.txt',
@@ -444,6 +477,7 @@ CREATE OR REPLACE FUNCTION public.create_test_medical_document(
 )
 RETURNS uuid
 LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -470,12 +504,13 @@ $$;
 
 ### **5. Triggers and Automation**
 
-#### **Update Agent Last Active Trigger**
+#### **Update Agent Last Active Trigger (VOLATILE - Modifies data)**
 ```sql
 -- Trigger function to update last_active
 CREATE OR REPLACE FUNCTION public.update_agent_last_active_trigger()
 RETURNS trigger
 LANGUAGE plpgsql
+VOLATILE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -508,10 +543,11 @@ CREATE TRIGGER update_agent_last_active
 - ✅ Fixes `auth.uid()` being NULL when using service role
 - ✅ Ensures agent session creation works properly
 
-### **3. STABLE Function Classification - FIXED**
-- ✅ **CRITICAL**: `get_active_agent` now includes `STABLE` for PostgREST compatibility
-- ✅ Indicates function doesn't modify data, required for RPC calls
-- ✅ Ensures proper PostgREST schema cache behavior
+### **3. Function Volatility Classification - FIXED**
+- ✅ **CRITICAL**: `STABLE` functions only for read-only operations (PostgREST compatibility)
+- ✅ **CRITICAL**: `VOLATILE` functions for data modification operations
+- ✅ **CRITICAL**: `IMMUTABLE` functions for pure computations
+- ✅ Prevents "UPDATE is not allowed in a non-volatile function" errors
 
 ### **4. Extension in Public Schema - ADDRESSED**
 - ✅ Extensions explicitly created in public schema
@@ -573,7 +609,7 @@ CREATE POLICY "All authenticated users can read all documents"
 3. **Create tables** with all columns and constraints (IF NOT EXISTS for safety)
 4. **Create indexes** for performance
 5. **Enable RLS** and create policies (fresh, clean policies)
-6. **Create functions** with fixed search paths and SECURITY DEFINER (completely new, secure functions)
+6. **Create functions** with fixed search paths, SECURITY DEFINER, and correct volatilities
 7. **Create triggers** for automation
 
 ### **Data Preservation**
@@ -591,17 +627,20 @@ CREATE POLICY "All authenticated users can read all documents"
 - [ ] ✅ **All security warnings resolved** - Check Supabase Security Advisor
 - [ ] ✅ **SECURITY DEFINER functions work** - Test agent session creation
 - [ ] ✅ **STABLE functions work with PostgREST** - Test RPC calls
+- [ ] ✅ **VOLATILE functions work correctly** - Test data modifications
 - [ ] Vector search works with `match_documents()`
 - [ ] All authenticated users can read all documents
 - [ ] Users can only upload as themselves
 - [ ] Agent sessions create/terminate properly
 - [ ] No "Function Search Path Mutable" warnings
+- [ ] No "UPDATE is not allowed in a non-volatile function" errors
 - [ ] Embedding jobs track properly
 - [ ] Performance is acceptable with indexes
 
 ### **Security Verification**
 - [ ] RLS policies prevent unauthorized access
 - [ ] Functions have fixed search paths and SECURITY DEFINER
+- [ ] Functions have correct volatility classifications
 - [ ] Extensions are properly scoped
 - [ ] No SQL injection vulnerabilities
 - [ ] **CRITICAL**: No orphaned functions with security issues
@@ -630,28 +669,30 @@ CREATE POLICY "All authenticated users can read all documents"
 
 ### **Function Updates to Document**
 ```markdown
-## Database Functions (All with Fixed Search Paths, SECURITY DEFINER, and STABLE)
+## Database Functions (All with Fixed Search Paths, SECURITY DEFINER, and Correct Volatilities)
 
 ### Document Search
-- `match_documents(query_embedding, threshold, count)` - Vector similarity search
+- `match_documents(query_embedding, threshold, count)` - Vector similarity search (STABLE)
 
 ### Agent Management
 - `get_active_agent(user_id)` - Get user's active agent session (STABLE for RPC)
-- `create_agent_session(user_id, status, data)` - Create new agent session
-- `terminate_agent_session(user_id)` - Terminate user's agent sessions
-- `update_agent_last_active(agent_id)` - Update agent activity timestamp
-- `cleanup_stale_agents()` - Clean up inactive agent sessions
+- `create_agent_session(user_id, status, data)` - Create new agent session (VOLATILE)
+- `terminate_agent_session(user_id)` - Terminate user's agent sessions (VOLATILE)
+- `update_agent_last_active(agent_id)` - Update agent activity timestamp (VOLATILE)
+- `cleanup_stale_agents()` - Clean up inactive agent sessions (VOLATILE)
 
 ### Testing & Utilities
-- `test_user_documents_count(user_id)` - Count user's documents
-- `test_vector_similarity(vec1, vec2)` - Test vector similarity
-- `test_auth_uid()` - Test authentication context
-- `create_test_medical_document()` - Create test document
+- `test_user_documents_count(user_id)` - Count user's documents (STABLE)
+- `test_vector_similarity(vec1, vec2)` - Test vector similarity (IMMUTABLE)
+- `test_auth_uid()` - Test authentication context (STABLE)
+- `create_test_medical_document()` - Create test document (VOLATILE)
 
 ### Security Notes
 - All functions include `SET search_path = public, pg_catalog`
 - All functions include `SECURITY DEFINER` to bypass RLS
 - Read-only functions include `STABLE` for PostgREST compatibility
+- Data-modifying functions include `VOLATILE` for proper transaction handling
+- Pure computation functions include `IMMUTABLE` for optimization
 - All old functions are completely removed during migration
 - No legacy functions remain that could have security issues
 ```
@@ -666,7 +707,7 @@ This context file contains everything needed to create a single, comprehensive m
 2. ✅ **Recreates the complete database schema**
 3. ✅ **Fixes all security warnings**
 4. ✅ **Adds SECURITY DEFINER to all functions** (CRITICAL for RLS bypass)
-5. ✅ **Adds STABLE to read-only functions** (CRITICAL for PostgREST RPC)
+5. ✅ **Adds correct volatility classifications** (CRITICAL for PostgreSQL compliance)
 6. ✅ **Enables shared medical knowledge base**
 7. ✅ **Maintains backward compatibility**
 8. ✅ **Optimizes performance**
@@ -675,7 +716,8 @@ This context file contains everything needed to create a single, comprehensive m
 
 **CRITICAL IMPROVEMENTS**: 
 - All functions now include `SECURITY DEFINER` which allows them to execute with the privileges of their creator, bypassing RLS policies. This fixes the issue where `auth.uid()` returns NULL when using the service role key for operations like agent session creation.
-- The `get_active_agent` function now includes `STABLE` which is required for PostgREST RPC calls and ensures proper schema cache behavior.
-- The function logic is corrected to only look for 'active' agents, not 'initializing' ones.
+- Functions now have correct volatility classifications: `STABLE` for read-only, `VOLATILE` for data-modifying, `IMMUTABLE` for pure computations.
+- The `get_active_agent` function includes `STABLE` for PostgREST RPC compatibility.
+- The `update_agent_last_active` function is correctly marked as `VOLATILE` to allow UPDATE operations.
 
 Use this file to create the final migration that replaces all existing migration files and resolves all current database issues while maintaining a clean, secure function environment.
