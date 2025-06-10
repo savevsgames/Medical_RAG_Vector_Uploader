@@ -1,330 +1,324 @@
 import express from 'express';
 import { AgentService } from '../core/agentService.js';
+import { ContainerService } from '../core/containerService.js';
+import { verifyToken } from '../../middleware/auth.js';
 import { errorLogger } from '../shared/logger.js';
 
-export function createAgentRouter(supabaseClient) {
-  // Validate Supabase client
-  if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-    throw new Error('Invalid Supabase client provided to createAgentRouter');
+/**
+ * Route Handler Factory - Creates standardized route handlers
+ */
+class RouteHandlerFactory {
+  constructor(agentService, logger) {
+    this.agentService = agentService;
+    this.logger = logger;
   }
 
-  const router = express.Router();
-  const agentService = new AgentService(supabaseClient);
-
-  // Middleware to extract user ID from JWT
-  const extractUserId = (req, res, next) => {
-    try {
-      // Extract user ID from the JWT token
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'No authorization token provided' });
-      }
-
-      const token = authHeader.substring(7);
-      
-      // Decode JWT to get user ID (basic decode, validation happens in Supabase)
-      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-      req.userId = payload.sub;
-
-      if (!req.userId) {
-        return res.status(401).json({ error: 'Invalid token: no user ID found' });
-      }
-
-      next();
-    } catch (error) {
-      errorLogger.error('Failed to extract user ID from token', error, {
-        component: 'AgentRouter'
-      });
-      return res.status(401).json({ error: 'Invalid authorization token' });
-    }
-  };
-
-  // Apply user ID extraction to all routes
-  router.use(extractUserId);
-
-  /**
-   * POST /api/agent/start - Start/Activate TxAgent session
-   */
-  router.post('/start', async (req, res) => {
-    const startTime = Date.now();
-    
-    try {
-      const userId = req.userId;
-      
-      errorLogger.info('Agent start request received', {
-        userId,
-        ip: req.ip,
-        userAgent: req.get('User-Agent')?.substring(0, 100),
-        component: 'AgentRouter'
-      });
-
-      // Check if user already has an active agent
-      const existingAgent = await agentService.getActiveAgent(userId);
-      
-      if (existingAgent) {
-        errorLogger.info('User already has active agent, updating status', {
-          userId,
-          existingAgentId: existingAgent.agent_id,
-          component: 'AgentRouter'
+  createAsyncHandler(handlerFn) {
+    return async (req, res) => {
+      try {
+        await handlerFn(req, res);
+      } catch (error) {
+        this.logger.error('Route handler error', error, {
+          path: req.path,
+          method: req.method,
+          user_id: req.userId,
+          component: 'RouteHandlerFactory'
         });
-
-        // Update the existing agent's last active timestamp
-        await agentService.updateAgentLastActive(existingAgent.agent_id);
-
-        return res.json({
-          status: 'already_active',
-          message: 'TxAgent session is already active',
-          agent_id: existingAgent.agent_id,
-          session_data: existingAgent.session_data,
-          processing_time_ms: Date.now() - startTime
+        
+        res.status(500).json({
+          error: 'Internal server error',
+          details: error.message
         });
       }
-
-      // Create new agent session with enhanced session data
-      const sessionData = {
-        started_at: new Date().toISOString(),
-        user_agent: req.get('User-Agent'),
-        ip_address: req.ip,
-        capabilities: ['chat', 'embed', 'document_search'],
-        runpod_endpoint: process.env.RUNPOD_EMBEDDING_URL || null,
-        backend_version: '1.0.0'
-      };
-
-      const newAgent = await agentService.createAgentSession(userId, 'active', sessionData);
-
-      errorLogger.success('Agent session created successfully', {
-        userId,
-        agentId: newAgent.agent_id,
-        processingTime: Date.now() - startTime,
-        component: 'AgentRouter'
-      });
-
-      res.json({
-        status: 'activated',
-        message: 'TxAgent session activated successfully',
-        agent_id: newAgent.agent_id,
-        session_data: newAgent.session_data,
-        created_at: newAgent.created_at,
-        processing_time_ms: Date.now() - startTime
-      });
-
-    } catch (error) {
-      const processingTime = Date.now() - startTime;
-      
-      errorLogger.error('Agent start request failed', error, {
-        userId: req.userId,
-        processingTime,
-        errorStack: error.stack,
-        component: 'AgentRouter'
-      });
-
-      res.status(500).json({
-        error: 'Failed to start TxAgent session',
-        details: error.message,
-        processing_time_ms: processingTime
-      });
-    }
-  });
-
-  /**
-   * POST /api/agent/stop - Stop/Terminate TxAgent session
-   */
-  router.post('/stop', async (req, res) => {
-    const startTime = Date.now();
-    
-    try {
-      const userId = req.userId;
-      
-      errorLogger.info('Agent stop request received', {
-        userId,
-        component: 'AgentRouter'
-      });
-
-      const success = await agentService.terminateAgentSession(userId);
-
-      if (success) {
-        errorLogger.success('Agent session terminated successfully', {
-          userId,
-          processingTime: Date.now() - startTime,
-          component: 'AgentRouter'
-        });
-
-        res.json({
-          status: 'terminated',
-          message: 'TxAgent session terminated successfully',
-          processing_time_ms: Date.now() - startTime
-        });
-      } else {
-        errorLogger.warn('No active agent session found to terminate', {
-          userId,
-          component: 'AgentRouter'
-        });
-
-        res.json({
-          status: 'not_active',
-          message: 'No active TxAgent session found',
-          processing_time_ms: Date.now() - startTime
-        });
-      }
-
-    } catch (error) {
-      const processingTime = Date.now() - startTime;
-      
-      errorLogger.error('Agent stop request failed', error, {
-        userId: req.userId,
-        processingTime,
-        errorStack: error.stack,
-        component: 'AgentRouter'
-      });
-
-      res.status(500).json({
-        error: 'Failed to stop TxAgent session',
-        details: error.message,
-        processing_time_ms: processingTime
-      });
-    }
-  });
-
-  /**
-   * GET /api/agent/status - Get TxAgent session status
-   */
-  router.get('/status', async (req, res) => {
-    const startTime = Date.now();
-    
-    try {
-      const userId = req.userId;
-      
-      errorLogger.debug('Agent status request received', {
-        userId,
-        component: 'AgentRouter'
-      });
-
-      const status = await agentService.getAgentStatus(userId);
-
-      errorLogger.debug('Agent status retrieved successfully', {
-        userId,
-        agentActive: status.agent_active,
-        agentId: status.agent_id,
-        processingTime: Date.now() - startTime,
-        component: 'AgentRouter'
-      });
-
-      res.json({
-        ...status,
-        processing_time_ms: Date.now() - startTime,
-        timestamp: new Date().toISOString()
-      });
-
-    } catch (error) {
-      const processingTime = Date.now() - startTime;
-      
-      errorLogger.error('Agent status request failed', error, {
-        userId: req.userId,
-        processingTime,
-        errorStack: error.stack,
-        component: 'AgentRouter'
-      });
-
-      res.status(500).json({
-        error: 'Failed to get TxAgent status',
-        details: error.message,
-        processing_time_ms: processingTime
-      });
-    }
-  });
-
-  /**
-   * POST /api/agent/cleanup - Cleanup stale agent sessions (admin endpoint)
-   */
-  router.post('/cleanup', async (req, res) => {
-    const startTime = Date.now();
-    
-    try {
-      errorLogger.info('Agent cleanup request received', {
-        userId: req.userId,
-        component: 'AgentRouter'
-      });
-
-      const cleanedCount = await agentService.cleanupStaleAgents();
-
-      errorLogger.success('Agent cleanup completed', {
-        cleanedCount,
-        processingTime: Date.now() - startTime,
-        component: 'AgentRouter'
-      });
-
-      res.json({
-        status: 'completed',
-        message: `Cleaned up ${cleanedCount} stale agent sessions`,
-        cleaned_count: cleanedCount,
-        processing_time_ms: Date.now() - startTime
-      });
-
-    } catch (error) {
-      const processingTime = Date.now() - startTime;
-      
-      errorLogger.error('Agent cleanup request failed', error, {
-        userId: req.userId,
-        processingTime,
-        errorStack: error.stack,
-        component: 'AgentRouter'
-      });
-
-      res.status(500).json({
-        error: 'Failed to cleanup stale agents',
-        details: error.message,
-        processing_time_ms: processingTime
-      });
-    }
-  });
-
-  return router;
+    };
+  }
 }
 
-// Legacy router for backward compatibility (deprecated)
+/**
+ * Agent Status Operations - Handles status-related endpoints
+ */
+class AgentStatusOperations {
+  constructor(agentService, logger) {
+    this.agentService = agentService;
+    this.logger = logger;
+  }
+
+  async handleGetStatus(req, res) {
+    const userId = req.userId;
+    
+    this.logger.info('Agent status requested', {
+      user_id: userId,
+      component: 'AgentStatusOperations'
+    });
+
+    try {
+      const status = await this.agentService.getAgentStatus(userId);
+      
+      this.logger.success('Agent status retrieved', {
+        user_id: userId,
+        agent_active: status.agent_active,
+        container_status: status.container_status,
+        component: 'AgentStatusOperations'
+      });
+
+      res.json(status);
+    } catch (error) {
+      this.logger.error('Failed to get agent status', error, {
+        user_id: userId,
+        component: 'AgentStatusOperations'
+      });
+      
+      res.status(500).json({
+        error: 'Failed to retrieve agent status',
+        details: error.message
+      });
+    }
+  }
+
+  async handleHealthCheck(req, res) {
+    const userId = req.userId;
+    
+    this.logger.info('Detailed health check requested', {
+      user_id: userId,
+      component: 'AgentStatusOperations'
+    });
+
+    try {
+      const healthStatus = await this.agentService.performDetailedStatusCheck(userId);
+      
+      this.logger.success('Health check completed', {
+        user_id: userId,
+        container_reachable: healthStatus.container_reachable,
+        endpoints_working: healthStatus.endpoints_working,
+        component: 'AgentStatusOperations'
+      });
+
+      res.json(healthStatus);
+    } catch (error) {
+      this.logger.error('Health check failed', error, {
+        user_id: userId,
+        component: 'AgentStatusOperations'
+      });
+      
+      res.status(500).json({
+        error: 'Health check failed',
+        details: error.message
+      });
+    }
+  }
+}
+
+/**
+ * Agent Lifecycle Operations - Handles start/stop operations
+ */
+class AgentLifecycleOperations {
+  constructor(agentService, logger) {
+    this.agentService = agentService;
+    this.logger = logger;
+  }
+
+  async handleStart(req, res) {
+    const userId = req.userId;
+    
+    this.logger.info('Agent start requested', {
+      user_id: userId,
+      component: 'AgentLifecycleOperations'
+    });
+
+    try {
+      const result = await this.agentService.startAgent(userId);
+      
+      this.logger.success('Agent started successfully', {
+        user_id: userId,
+        agent_id: result.agent_id,
+        container_id: result.container_id,
+        component: 'AgentLifecycleOperations'
+      });
+
+      res.json({
+        message: 'Agent started successfully',
+        agent_id: result.agent_id,
+        container_id: result.container_id,
+        status: result.status || 'activated'
+      });
+    } catch (error) {
+      this.logger.error('Failed to start agent', error, {
+        user_id: userId,
+        component: 'AgentLifecycleOperations'
+      });
+      
+      res.status(500).json({
+        error: 'Failed to start agent',
+        details: error.message
+      });
+    }
+  }
+
+  async handleStop(req, res) {
+    const userId = req.userId;
+    
+    this.logger.info('Agent stop requested', {
+      user_id: userId,
+      component: 'AgentLifecycleOperations'
+    });
+
+    try {
+      const result = await this.agentService.stopAgent(userId);
+      
+      this.logger.success('Agent stopped successfully', {
+        user_id: userId,
+        terminated_sessions: result.terminated_sessions,
+        component: 'AgentLifecycleOperations'
+      });
+
+      res.json({
+        message: 'Agent stopped successfully',
+        terminated_sessions: result.terminated_sessions
+      });
+    } catch (error) {
+      this.logger.error('Failed to stop agent', error, {
+        user_id: userId,
+        component: 'AgentLifecycleOperations'
+      });
+      
+      res.status(500).json({
+        error: 'Failed to stop agent',
+        details: error.message
+      });
+    }
+  }
+}
+
+/**
+ * Agent Route Definitions - Defines all route handlers
+ */
+class AgentRouteDefinitions {
+  constructor(statusOps, lifecycleOps, handlerFactory) {
+    this.statusOps = statusOps;
+    this.lifecycleOps = lifecycleOps;
+    this.handlerFactory = handlerFactory;
+  }
+
+  getStatusRoute() {
+    return this.handlerFactory.createAsyncHandler(
+      this.statusOps.handleGetStatus.bind(this.statusOps)
+    );
+  }
+
+  getHealthCheckRoute() {
+    return this.handlerFactory.createAsyncHandler(
+      this.statusOps.handleHealthCheck.bind(this.statusOps)
+    );
+  }
+
+  getStartRoute() {
+    return this.handlerFactory.createAsyncHandler(
+      this.lifecycleOps.handleStart.bind(this.lifecycleOps)
+    );
+  }
+
+  getStopRoute() {
+    return this.handlerFactory.createAsyncHandler(
+      this.lifecycleOps.handleStop.bind(this.lifecycleOps)
+    );
+  }
+}
+
+/**
+ * Agent Router Configuration - Main router factory
+ */
+class AgentRouterConfig {
+  constructor(supabaseClient, logger = errorLogger) {
+    // Step 5: Validate Supabase Client Before Use
+    if (!supabaseClient || typeof supabaseClient.from !== 'function') {
+      throw new Error('Invalid Supabase client provided to AgentRouterConfig');
+    }
+    
+    this.supabaseClient = supabaseClient;
+    this.logger = logger;
+  }
+
+  createRouter() {
+    const router = express.Router();
+    
+    // Step 4: Apply Authentication Middleware
+    router.use(verifyToken);
+    
+    this.logger.info('Creating agent router with dependencies', {
+      component: 'AgentRouterConfig'
+    });
+
+    try {
+      // Step 1: Instantiate AgentService
+      const agentService = new AgentService(this.supabaseClient);
+      
+      // Step 2: Wire into Component Classes
+      const handlerFactory = new RouteHandlerFactory(agentService, this.logger);
+      const statusOps = new AgentStatusOperations(agentService, this.logger);
+      const lifecycleOps = new AgentLifecycleOperations(agentService, this.logger);
+      const routeDefinitions = new AgentRouteDefinitions(statusOps, lifecycleOps, handlerFactory);
+
+      // Step 3: Define Routes with Abstractions
+      router.get('/status', routeDefinitions.getStatusRoute());
+      router.post('/health-check', routeDefinitions.getHealthCheckRoute());
+      router.post('/start', routeDefinitions.getStartRoute());
+      router.post('/stop', routeDefinitions.getStopRoute());
+
+      this.logger.success('Agent router created successfully', {
+        routes: ['/status', '/health-check', '/start', '/stop'],
+        component: 'AgentRouterConfig'
+      });
+
+      return router;
+    } catch (error) {
+      this.logger.error('Failed to create agent router', error, {
+        component: 'AgentRouterConfig'
+      });
+      throw error;
+    }
+  }
+}
+
+/**
+ * Factory function to create agent router
+ */
+export function createAgentRouter(supabaseClient) {
+  const config = new AgentRouterConfig(supabaseClient);
+  return config.createRouter();
+}
+
+/**
+ * Legacy router for backward compatibility
+ */
 export function createAgentLegacyRouter(supabaseClient) {
   const router = express.Router();
   
   // Add deprecation warning middleware
   router.use((req, res, next) => {
-    errorLogger.warn('Legacy agent endpoint accessed', {
+    errorLogger.warn('Legacy agent route accessed', {
       path: req.path,
       method: req.method,
-      userAgent: req.get('User-Agent'),
-      component: 'AgentLegacyRouter'
+      user_agent: req.get('User-Agent'),
+      component: 'LegacyAgentRouter'
     });
     
-    // Add deprecation header
-    res.set('X-API-Deprecated', 'true');
-    res.set('X-API-Deprecation-Message', 'This endpoint is deprecated. Use /api/agent/* instead.');
-    
+    res.setHeader('X-Deprecated', 'true');
+    res.setHeader('X-Deprecation-Message', 'Use /api/agent/* endpoints instead');
     next();
   });
 
-  // Redirect legacy routes to new API
-  router.post('/start', (req, res) => {
-    res.status(301).json({
-      error: 'Endpoint moved',
-      message: 'This endpoint has moved to /api/agent/start',
-      new_endpoint: '/api/agent/start'
-    });
-  });
-
-  router.post('/stop', (req, res) => {
-    res.status(301).json({
-      error: 'Endpoint moved',
-      message: 'This endpoint has moved to /api/agent/stop',
-      new_endpoint: '/api/agent/stop'
-    });
-  });
-
-  router.get('/status', (req, res) => {
-    res.status(301).json({
-      error: 'Endpoint moved',
-      message: 'This endpoint has moved to /api/agent/status',
-      new_endpoint: '/api/agent/status'
-    });
-  });
+  // Create main router and mount legacy paths
+  const mainRouter = createAgentRouter(supabaseClient);
+  router.use('/', mainRouter);
 
   return router;
 }
+
+// Export individual classes for testing
+export {
+  AgentRouterConfig,
+  RouteHandlerFactory,
+  AgentStatusOperations,
+  AgentLifecycleOperations,
+  AgentRouteDefinitions
+};
