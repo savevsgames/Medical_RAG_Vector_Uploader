@@ -260,8 +260,10 @@ $$;
 
 #### **Agent Management Functions with SECURITY DEFINER**
 ```sql
--- Get active agent for user
-CREATE OR REPLACE FUNCTION public.get_active_agent(user_uuid uuid)
+-- CORRECTED: Get active agent for user (FIXED VERSION)
+CREATE OR REPLACE FUNCTION public.get_active_agent(
+    user_uuid uuid
+)
 RETURNS TABLE (
     id uuid,
     status text,
@@ -270,6 +272,7 @@ RETURNS TABLE (
     last_active timestamptz
 )
 LANGUAGE plpgsql
+STABLE
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
@@ -283,8 +286,7 @@ BEGIN
         agents.last_active
     FROM public.agents
     WHERE agents.user_id = user_uuid
-        AND agents.status IN ('active', 'initializing')
-        AND agents.terminated_at IS NULL
+        AND agents.status IN ('active')
     ORDER BY agents.last_active DESC
     LIMIT 1;
 END;
@@ -506,15 +508,20 @@ CREATE TRIGGER update_agent_last_active
 - ✅ Fixes `auth.uid()` being NULL when using service role
 - ✅ Ensures agent session creation works properly
 
-### **3. Extension in Public Schema - ADDRESSED**
+### **3. STABLE Function Classification - FIXED**
+- ✅ **CRITICAL**: `get_active_agent` now includes `STABLE` for PostgREST compatibility
+- ✅ Indicates function doesn't modify data, required for RPC calls
+- ✅ Ensures proper PostgREST schema cache behavior
+
+### **4. Extension in Public Schema - ADDRESSED**
 - ✅ Extensions explicitly created in public schema
 - ✅ Documented for awareness in shared environments
 
-### **4. Auth OTP Long Expiry - CONFIGURATION**
+### **5. Auth OTP Long Expiry - CONFIGURATION**
 - ⚠️ Requires Supabase Dashboard configuration
 - ⚠️ Set OTP expiry to recommended threshold (15 minutes)
 
-### **5. Function Cleanup - NEW**
+### **6. Function Cleanup - NEW**
 - ✅ **CRITICAL**: All old functions are dropped before creating new ones
 - ✅ Prevents function conflicts and ensures clean state
 - ✅ Removes any legacy functions that may have search path issues
@@ -583,6 +590,7 @@ CREATE POLICY "All authenticated users can read all documents"
 - [ ] ✅ **No old functions remain** - Check `\df` in psql
 - [ ] ✅ **All security warnings resolved** - Check Supabase Security Advisor
 - [ ] ✅ **SECURITY DEFINER functions work** - Test agent session creation
+- [ ] ✅ **STABLE functions work with PostgREST** - Test RPC calls
 - [ ] Vector search works with `match_documents()`
 - [ ] All authenticated users can read all documents
 - [ ] Users can only upload as themselves
@@ -598,6 +606,7 @@ CREATE POLICY "All authenticated users can read all documents"
 - [ ] No SQL injection vulnerabilities
 - [ ] **CRITICAL**: No orphaned functions with security issues
 - [ ] **CRITICAL**: Agent session creation bypasses RLS correctly
+- [ ] **CRITICAL**: PostgREST RPC calls work with STABLE functions
 
 ---
 
@@ -621,13 +630,13 @@ CREATE POLICY "All authenticated users can read all documents"
 
 ### **Function Updates to Document**
 ```markdown
-## Database Functions (All with Fixed Search Paths and SECURITY DEFINER)
+## Database Functions (All with Fixed Search Paths, SECURITY DEFINER, and STABLE)
 
 ### Document Search
 - `match_documents(query_embedding, threshold, count)` - Vector similarity search
 
 ### Agent Management
-- `get_active_agent(user_id)` - Get user's active agent session
+- `get_active_agent(user_id)` - Get user's active agent session (STABLE for RPC)
 - `create_agent_session(user_id, status, data)` - Create new agent session
 - `terminate_agent_session(user_id)` - Terminate user's agent sessions
 - `update_agent_last_active(agent_id)` - Update agent activity timestamp
@@ -642,6 +651,7 @@ CREATE POLICY "All authenticated users can read all documents"
 ### Security Notes
 - All functions include `SET search_path = public, pg_catalog`
 - All functions include `SECURITY DEFINER` to bypass RLS
+- Read-only functions include `STABLE` for PostgREST compatibility
 - All old functions are completely removed during migration
 - No legacy functions remain that could have security issues
 ```
@@ -656,12 +666,16 @@ This context file contains everything needed to create a single, comprehensive m
 2. ✅ **Recreates the complete database schema**
 3. ✅ **Fixes all security warnings**
 4. ✅ **Adds SECURITY DEFINER to all functions** (CRITICAL for RLS bypass)
-5. ✅ **Enables shared medical knowledge base**
-6. ✅ **Maintains backward compatibility**
-7. ✅ **Optimizes performance**
-8. ✅ **Preserves all functionality**
-9. ✅ **Ensures no orphaned functions remain**
+5. ✅ **Adds STABLE to read-only functions** (CRITICAL for PostgREST RPC)
+6. ✅ **Enables shared medical knowledge base**
+7. ✅ **Maintains backward compatibility**
+8. ✅ **Optimizes performance**
+9. ✅ **Preserves all functionality**
+10. ✅ **Ensures no orphaned functions remain**
 
-**CRITICAL IMPROVEMENT**: All functions now include `SECURITY DEFINER` which allows them to execute with the privileges of their creator, bypassing RLS policies. This fixes the issue where `auth.uid()` returns NULL when using the service role key for operations like agent session creation.
+**CRITICAL IMPROVEMENTS**: 
+- All functions now include `SECURITY DEFINER` which allows them to execute with the privileges of their creator, bypassing RLS policies. This fixes the issue where `auth.uid()` returns NULL when using the service role key for operations like agent session creation.
+- The `get_active_agent` function now includes `STABLE` which is required for PostgREST RPC calls and ensures proper schema cache behavior.
+- The function logic is corrected to only look for 'active' agents, not 'initializing' ones.
 
 Use this file to create the final migration that replaces all existing migration files and resolves all current database issues while maintaining a clean, secure function environment.
