@@ -35,6 +35,13 @@ export function useAgents() {
 
   const fetchAgentStatus = useCallback(async (silent = false) => {
     try {
+      if (!silent) {
+        logger.info('Fetching agent status', {
+          user: user?.email,
+          component: 'useAgents'
+        });
+      }
+
       const data = await apiCall('/api/agent/status');
       setAgentStatus(data);
       
@@ -62,13 +69,20 @@ export function useAgents() {
   const startAgent = useCallback(async () => {
     setActionLoading(true);
     try {
+      logger.info('Starting agent session', {
+        user: user?.email,
+        component: 'useAgents'
+      });
+
       const data = await apiCall('/api/agent/start', { method: 'POST' });
       
+      // Update local state immediately
       setAgentStatus({
         agent_active: true,
         agent_id: data.agent_id,
         last_active: new Date().toISOString(),
-        container_status: data.status === 'activated' ? 'running' : 'starting'
+        container_status: 'running',
+        session_data: data.session_data
       });
 
       logAgentOperation('Started Successfully', user?.email, {
@@ -78,6 +92,10 @@ export function useAgents() {
       });
 
       toast.success('TxAgent session activated successfully!');
+      
+      // Refresh status after a short delay
+      setTimeout(() => fetchAgentStatus(true), 1000);
+      
       return data;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -87,18 +105,24 @@ export function useAgents() {
         component: 'useAgents'
       });
 
-      toast.error(errorMessage);
+      toast.error(`Failed to start agent: ${errorMessage}`);
       throw error;
     } finally {
       setActionLoading(false);
     }
-  }, [apiCall, user]);
+  }, [apiCall, user, fetchAgentStatus]);
 
   const stopAgent = useCallback(async () => {
     setActionLoading(true);
     try {
+      logger.info('Stopping agent session', {
+        user: user?.email,
+        component: 'useAgents'
+      });
+
       await apiCall('/api/agent/stop', { method: 'POST' });
       
+      // Update local state immediately
       setAgentStatus({
         agent_active: false,
         agent_id: null,
@@ -113,6 +137,10 @@ export function useAgents() {
       });
 
       toast.success('TxAgent session deactivated successfully!');
+      
+      // Refresh status after a short delay
+      setTimeout(() => fetchAgentStatus(true), 1000);
+      
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       
@@ -121,18 +149,30 @@ export function useAgents() {
         component: 'useAgents'
       });
 
-      toast.error(errorMessage);
+      toast.error(`Failed to stop agent: ${errorMessage}`);
       throw error;
     } finally {
       setActionLoading(false);
     }
-  }, [apiCall, user]);
+  }, [apiCall, user, fetchAgentStatus]);
 
   const performDetailedStatusCheck = useCallback(async () => {
-    if (!agentStatus?.agent_active) return;
+    if (!agentStatus?.agent_active) {
+      logger.warn('Cannot perform detailed status check - no active agent', {
+        user: user?.email,
+        component: 'useAgents'
+      });
+      return;
+    }
 
     setStatusTesting(true);
     try {
+      logger.info('Performing detailed status check', {
+        user: user?.email,
+        agentId: agentStatus.agent_id,
+        component: 'useAgents'
+      });
+
       const testResults = {
         health: { status: 0, response: null, error: null },
         chat: { status: 0, response: null, error: null },
@@ -141,7 +181,7 @@ export function useAgents() {
 
       // Test health endpoint
       try {
-        const healthData = await apiCall('/api/agent/status');
+        const healthData = await apiCall('/api/agent/health-check', { method: 'POST' });
         testResults.health.status = 200;
         testResults.health.response = healthData;
       } catch (error) {
@@ -187,6 +227,14 @@ export function useAgents() {
       };
 
       setDetailedStatus(newDetailedStatus);
+      
+      logger.success('Detailed status check completed', {
+        user: user?.email,
+        container_reachable: newDetailedStatus.container_reachable,
+        endpoints_working: newDetailedStatus.endpoints_working,
+        component: 'useAgents'
+      });
+      
       return newDetailedStatus;
 
     } catch (error) {
@@ -203,8 +251,10 @@ export function useAgents() {
 
   // Auto-fetch status on mount
   useEffect(() => {
-    fetchAgentStatus(true);
-  }, [fetchAgentStatus]);
+    if (user) {
+      fetchAgentStatus(true);
+    }
+  }, [fetchAgentStatus, user]);
 
   return {
     agentStatus,
