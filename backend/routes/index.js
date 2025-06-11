@@ -15,6 +15,8 @@ export function setupRoutes(app, supabaseClient) {
     throw new Error('Invalid Supabase client provided to setupRoutes');
   }
 
+  errorLogger.info('Setting up routes with clean API structure');
+
   // Health check (no auth required)
   app.use('/health', healthRouter);
   
@@ -22,9 +24,10 @@ export function setupRoutes(app, supabaseClient) {
   const documentsRouter = createDocumentsRouter(supabaseClient);
   const chatRouter = createChatRouter(supabaseClient);
   
+  // FIXED: Clean route structure - no legacy routes
   // Mount protected routes - auth is now handled within each router
-  app.use('/api', chatRouter);
-  app.use('/', documentsRouter);
+  app.use('/api', chatRouter);           // /api/chat, /api/openai-chat
+  app.use('/', documentsRouter);         // /upload (legacy for compatibility)
   
   // Add direct embedding endpoint
   app.post('/api/embed', verifyToken, async (req, res) => {
@@ -108,9 +111,24 @@ export function setupRoutes(app, supabaseClient) {
     }
   });
   
-  // Mount agent routes (includes both new API and legacy)
-  // This function handles mounting containerRouter at /api path correctly
+  // FIXED: Mount agent routes ONLY (no legacy routes)
+  // This function handles mounting agent routes at /api/agent path
   mountAgentRoutes(app, supabaseClient);
+
+  errorLogger.success('Routes setup completed with clean structure:', {
+    routes: [
+      'GET /health',
+      'POST /upload',
+      'POST /api/chat',
+      'POST /api/openai-chat', 
+      'POST /api/embed',
+      'POST /api/agent/start',
+      'POST /api/agent/stop',
+      'GET /api/agent/status',
+      'POST /api/agent/health-check'
+    ],
+    legacy_routes_removed: true
+  });
 }
 
 export default setupRoutes

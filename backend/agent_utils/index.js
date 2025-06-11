@@ -1,5 +1,5 @@
-// Main export module - simplified
-import { createAgentRouter, createAgentLegacyRouter } from './routes/agentRoutes.js';
+// Main export module - cleaned up, no legacy routes
+import { createAgentRouter } from './routes/agentRoutes.js';
 import { router as containerRouter } from './routes/containerRoutes.js';
 import { errorLogger } from './shared/logger.js';
 
@@ -13,16 +13,12 @@ export function mountAgentRoutes(app, supabaseClient) {
   
   // Create routers with Supabase client dependency injection
   const agentRouter = createAgentRouter(supabaseClient);
-  const agentLegacyRouter = createAgentLegacyRouter(supabaseClient);
   
-  // Mount new API routes
+  // Mount new API routes ONLY - no legacy routes
   app.use('/api/agent', agentRouter);
   app.use('/api', containerRouter);
   
-  // Mount legacy routes with deprecation warnings
-  app.use('/agent', agentLegacyRouter);
-  
-  errorLogger.info('Agent routes mounted successfully');
+  errorLogger.info('Agent routes mounted successfully (legacy routes removed)');
 }
 
 // Export services for direct use if needed

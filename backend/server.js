@@ -171,17 +171,16 @@ function startServer() {
     errorLogger.connectionCheck('Database', database.isInitialized());
     errorLogger.connectionCheck('Supabase Auth', 'service_role');
     
-    errorLogger.info('📚 Available endpoints:');
+    errorLogger.info('📚 Available endpoints (LEGACY ROUTES REMOVED):');
     errorLogger.info('  - GET  /health (Health check)');
     errorLogger.info('  - POST /upload (Document upload)');
     errorLogger.info('  - POST /api/chat (Chat with TxAgent)');
     errorLogger.info('  - POST /api/openai-chat (Chat with OpenAI RAG)');
-    errorLogger.info('  - POST /chat (Legacy chat - deprecated)');
     errorLogger.info('  - POST /api/agent/start (Start TxAgent)');
     errorLogger.info('  - POST /api/agent/stop (Stop TxAgent)');
     errorLogger.info('  - GET  /api/agent/status (Agent status)');
+    errorLogger.info('  - POST /api/agent/health-check (Detailed health check)');
     errorLogger.info('  - POST /api/embed (RunPod embedding)');
-    errorLogger.info('  - POST /agent/* (Legacy endpoints - deprecated)');
     errorLogger.info('  - GET  /* (SPA fallback to index.html)');
   });
 }
