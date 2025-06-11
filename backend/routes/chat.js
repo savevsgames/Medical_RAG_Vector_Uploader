@@ -23,7 +23,7 @@ export function createChatRouter(supabaseClient) {
   const agentService = new AgentService(supabaseClient);
   const searchService = new DocumentSearchService(supabaseClient);
 
-  // TxAgent Chat endpoint - proxy to the user's TxAgent container with BioBERT embedding
+  // TxAgent Chat endpoint - UPDATED for new container API
   router.post('/chat', async (req, res) => {
     try {
       const { message, top_k = 5, temperature = 0.7 } = req.body || {};
@@ -51,72 +51,37 @@ export function createChatRouter(supabaseClient) {
           user_id: userId,
           component: 'TxAgentChat'
         });
-        return res.status(503).json({ error: 'TxAgent not running. Please start the agent first.' });
+        return res.status(503).json({ 
+          error: 'TxAgent not running. Please start the agent first.',
+          details: 'No active TxAgent session found. Please activate TxAgent from the Monitor page.'
+        });
       }
       
       const baseUrl = agent.session_data.runpod_endpoint.replace(/\/+$/, '');
       
-      // 2. Get a BioBERT embedding for the query (container /embed) - ensures 768-dim consistency
-      errorLogger.debug('Getting BioBERT embedding for query', {
+      errorLogger.debug('TxAgent session found', {
         user_id: userId,
+        agent_id: agent.id,
         base_url: baseUrl,
         component: 'TxAgentChat'
       });
-      
-      // DETAILED LOGGING: Exact payload being sent to /embed
-      const embedPayload = { text: message };
-      console.log('🔍 EMBED REQUEST PAYLOAD:', JSON.stringify(embedPayload, null, 2));
-      console.log('🔍 EMBED REQUEST URL:', `${baseUrl}/embed`);
-      console.log('🔍 EMBED REQUEST HEADERS:', {
-        Authorization: req.headers.authorization ? 'Bearer [REDACTED]' : 'None',
-        'Content-Type': 'application/json'
-      });
-      
-      const { data: embedResp } = await axios.post(
-        `${baseUrl}/embed`,
-        embedPayload,
-        { 
-          headers: { Authorization: req.headers.authorization },
-          timeout: 30000
-        }
-      );
-      
-      console.log('🔍 EMBED RESPONSE:', JSON.stringify(embedResp, null, 2));
-      
-      const queryEmbedding = embedResp.embedding; // 768-dim array
 
-      // 3. Similarity search in Supabase (top_k docs)
-      errorLogger.debug('Performing similarity search', {
-        user_id: userId,
-        top_k: top_k,
-        embedding_dimensions: queryEmbedding?.length || 0,
-        component: 'TxAgentChat'
-      });
-
-      const similarDocs = await searchService.searchRelevantDocuments(
-        userId,
-        queryEmbedding,
-        top_k
-      );
-
-      // 4. Call the container's /chat endpoint, sending the docs for context
+      // 2. Call TxAgent's /chat endpoint directly with the new API format
       const chatUrl = `${baseUrl}/chat`;
       
       errorLogger.debug('Calling TxAgent chat endpoint', {
         user_id: userId,
         chat_url: chatUrl,
-        similar_docs_count: similarDocs?.length || 0,
         component: 'TxAgentChat'
       });
 
-      // DETAILED LOGGING: Exact payload being sent to /chat
-      // CRITICAL FIX: Add missing 'history' and 'stream' fields required by container
+      // UPDATED: Use the new TxAgent API format
       const chatPayload = {
-        query: message,
-        history: [], // Required by container - conversation history
-        top_k,
-        temperature,
-        stream: false // Required by container - disable streaming for now
+        query: message,        // CRITICAL: TxAgent expects 'query' not 'message'
+        history: [],           // Required by container - conversation history
+        top_k,                 // Number of documents to retrieve
+        temperature,           // Response randomness
+        stream: false          // Required by container - disable streaming for now
       };
       
       console.log('🔍 CHAT REQUEST PAYLOAD:', JSON.stringify(chatPayload, null, 2));
@@ -130,18 +95,22 @@ export function createChatRouter(supabaseClient) {
         chatUrl,
         chatPayload,
         { 
-          headers: { Authorization: req.headers.authorization },
+          headers: { 
+            'Authorization': req.headers.authorization,
+            'Content-Type': 'application/json'
+          },
           timeout: 60000 // Longer timeout for chat processing
         }
       );
 
       console.log('🔍 CHAT RESPONSE:', JSON.stringify(chatResp, null, 2));
 
-      // 5. Return the formatted response to the frontend
+      // 3. Return the formatted response to the frontend
       errorLogger.success('TxAgent chat completed', {
         user_id: userId,
         response_length: chatResp.response?.length || 0,
         sources_count: chatResp.sources?.length || 0,
+        processing_time: chatResp.processing_time,
         component: 'TxAgentChat'
       });
 
@@ -150,6 +119,8 @@ export function createChatRouter(supabaseClient) {
         sources: chatResp.sources || [],
         agent_id: 'txagent',
         processing_time: chatResp.processing_time || null,
+        model: chatResp.model || 'BioBERT',
+        tokens_used: chatResp.tokens_used || null,
         timestamp: new Date().toISOString(),
         status: 'success'
       });
@@ -168,8 +139,32 @@ export function createChatRouter(supabaseClient) {
         user_id: req.userId,
         error_message: errorMessage,
         error_stack: error.stack,
+        response_status: error.response?.status,
+        response_data: error.response?.data,
         component: 'TxAgentChat'
       });
+
+      // Enhanced error handling for different scenarios
+      if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
+        return res.status(503).json({ 
+          error: 'TxAgent container unreachable',
+          details: 'The TxAgent container is not responding. Please check if it is running and accessible.'
+        });
+      }
+
+      if (error.response?.status === 401) {
+        return res.status(401).json({ 
+          error: 'Authentication failed with TxAgent',
+          details: 'Invalid or expired authentication token for TxAgent container.'
+        });
+      }
+
+      if (error.response?.status === 422) {
+        return res.status(422).json({ 
+          error: 'Invalid request format for TxAgent',
+          details: error.response?.data?.detail || 'Request format does not match TxAgent API expectations.'
+        });
+      }
       
       res.status(502).json({ 
         error: 'TxAgent chat processing failed',
@@ -178,7 +173,7 @@ export function createChatRouter(supabaseClient) {
     }
   });
 
-  // OpenAI Chat endpoint - dedicated endpoint for OpenAI RAG
+  // OpenAI Chat endpoint - Enhanced fallback option
   router.post('/openai-chat', async (req, res) => {
     try {
       const { message } = req.body;
@@ -197,7 +192,10 @@ export function createChatRouter(supabaseClient) {
           user_id: userId,
           component: 'OpenAIChat'
         });
-        return res.status(503).json({ error: 'OpenAI chat service not configured' });
+        return res.status(503).json({ 
+          error: 'OpenAI chat service not configured',
+          details: 'OpenAI API key is not configured. Please use TxAgent or configure OpenAI.'
+        });
       }
 
       errorLogger.info('Processing OpenAI chat request', {
@@ -222,6 +220,8 @@ export function createChatRouter(supabaseClient) {
         sources: result.sources,
         agent_id: 'openai',
         processing_time: null,
+        model: 'GPT-4',
+        tokens_used: null,
         timestamp: new Date().toISOString(),
         status: 'success'
       });

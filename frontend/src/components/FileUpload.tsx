@@ -80,7 +80,14 @@ export function FileUpload() {
           component: 'FileUpload'
         });
 
-        throw new Error(errorData.detail || errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+        // Enhanced error handling for different scenarios
+        if (response.status === 503) {
+          throw new Error(errorData.error || 'TxAgent is not running. Please start the agent from the Monitor page before uploading documents.');
+        } else if (response.status === 422) {
+          throw new Error(errorData.details || 'Document format not supported or TxAgent container needs updating.');
+        } else {
+          throw new Error(errorData.detail || errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+        }
       }
 
       const responseData = await response.json();
@@ -92,18 +99,26 @@ export function FileUpload() {
         component: 'FileUpload'
       });
 
-      logFileOperation('Upload Completed', file.name, userEmail, {
-        documentId: responseData.document_id,
-        contentLength: responseData.content_length,
-        vectorDimensions: responseData.vector_dimensions,
-        embeddingSource: responseData.embedding_source,
+      logFileOperation('Upload Submitted', file.name, userEmail, {
+        jobId: responseData.job_id,
+        status: responseData.status,
+        processingMessage: responseData.processing_message,
         component: 'FileUpload'
       });
 
-      toast.success('File uploaded successfully!');
+      // UPDATED: Show appropriate message for asynchronous processing
+      toast.success('Document submitted for processing! It will appear in your library once processing is complete.');
       
-      // Trigger a page refresh to update document list
-      setTimeout(() => window.location.reload(), 1000);
+      // UPDATED: Add informational toast about processing time
+      setTimeout(() => {
+        toast('📄 Processing may take a few minutes depending on document size and complexity.', {
+          duration: 5000,
+          icon: '⏳'
+        });
+      }, 1000);
+
+      // REMOVED: No longer automatically refresh the page since processing is asynchronous
+      // Documents will appear in the library once TxAgent completes processing
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
@@ -152,6 +167,9 @@ export function FileUpload() {
         <div>
           <p className="text-gray-600">Drag & drop a file here, or click to select</p>
           <p className="text-sm text-gray-500 mt-2">Supported formats: PDF, DOCX, TXT, MD</p>
+          <p className="text-xs text-gray-400 mt-2">
+            📋 Note: Documents are processed by TxAgent and may take a few minutes to appear in your library
+          </p>
         </div>
       )}
     </div>

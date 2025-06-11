@@ -86,9 +86,9 @@ export function Chat() {
       });
 
       try {
-        // Check agent status using GET method (this is correct for status endpoint)
+        // Check agent status using GET method
         const response = await fetch(`${import.meta.env.VITE_API_URL}/api/agent/status`, {
-          method: 'GET', // Explicitly specify GET method for status check
+          method: 'GET',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
           },
@@ -277,20 +277,19 @@ export function Chat() {
     setIsLoading(true);
 
     try {
-      // STEP 2 IMPLEMENTATION: Choose endpoint based on selected agent
+      // UPDATED: Choose endpoint based on selected agent
       const endpoint = selectedAgent === 'txagent' ? '/api/chat' : '/api/openai-chat';
       
       logApiCall(endpoint, 'POST', userEmail, 'initiated', {
         messageLength: messageContent.length,
-        contextMessages: messages.slice(-5).length,
         selectedAgent: selectedAgent,
         component: 'Chat'
       });
 
-      // Prepare request body based on agent type
+      // UPDATED: Prepare request body based on agent type
       let requestBody;
       if (selectedAgent === 'txagent') {
-        // TxAgent expects: query, top_k, temperature
+        // TxAgent expects: message (will be converted to query in backend)
         requestBody = {
           message: messageContent,
           top_k: 5,
@@ -306,7 +305,7 @@ export function Chat() {
 
       // CRITICAL: Ensure we're using POST method for chat requests
       const response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
-        method: 'POST', // Explicitly specify POST method
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
@@ -314,15 +313,18 @@ export function Chat() {
         body: JSON.stringify(requestBody),
       });
 
-      // Check if response is HTML (error page) instead of JSON
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const htmlText = await response.text();
-        throw new Error(`Server returned HTML instead of JSON. Status: ${response.status}. This usually indicates a server error.`);
-      }
-
+      // Enhanced error handling for different response types
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        let errorData;
+        const contentType = response.headers.get('content-type');
+        
+        if (contentType && contentType.includes('application/json')) {
+          errorData = await response.json();
+        } else {
+          // Handle HTML error pages
+          const htmlText = await response.text();
+          throw new Error(`Server returned HTML instead of JSON. Status: ${response.status}. This usually indicates a server error.`);
+        }
         
         logApiCall(endpoint, 'POST', userEmail, 'error', {
           status: response.status,
@@ -332,7 +334,16 @@ export function Chat() {
           component: 'Chat'
         });
 
-        throw new Error(errorData.details || errorData.error || `HTTP ${response.status}: Chat request failed`);
+        // Enhanced error messages based on status codes
+        if (response.status === 503) {
+          throw new Error(errorData.details || 'TxAgent is not running. Please start the agent from the Monitor page.');
+        } else if (response.status === 422) {
+          throw new Error(errorData.details || 'Request format error. The TxAgent container may need to be updated.');
+        } else if (response.status === 401) {
+          throw new Error('Authentication failed. Please refresh the page and try again.');
+        } else {
+          throw new Error(errorData.details || errorData.error || `HTTP ${response.status}: Chat request failed`);
+        }
       }
 
       const data = await response.json();
@@ -363,9 +374,11 @@ export function Chat() {
           agentId: data.agent_id,
           sourcesCount: data.sources?.length || 0,
           processingTime: data.processing_time,
+          model: data.model,
+          tokensUsed: data.tokens_used,
           component: 'Chat'
         });
-        toast.success('Response from TxAgent container');
+        toast.success(`Response from TxAgent${data.processing_time ? ` (${data.processing_time}ms)` : ''}`);
       } else {
         logAgentOperation('OpenAI Response Received', userEmail, {
           agentId: data.agent_id,
@@ -389,7 +402,7 @@ export function Chat() {
 
       toast.error(errorMessage);
       
-      // Add error message
+      // Add error message with helpful suggestions
       const errorMessage_obj: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
@@ -397,7 +410,15 @@ export function Chat() {
           <div>
             <p>I apologize, but I encountered an error processing your request with {currentAgent.name}.</p>
             <p className="mt-2">Error: {errorMessage}</p>
-            <p className="mt-2">Please try again or switch to a different agent.</p>
+            <div className="mt-2 text-sm">
+              <p className="font-medium">Suggestions:</p>
+              <ul className="list-disc pl-5 mt-1">
+                <li>If using TxAgent, ensure it's running from the <Link to="/monitor" className="text-healing-teal underline">Monitor page</Link></li>
+                <li>Try switching to OpenAI as an alternative</li>
+                <li>Check your internet connection</li>
+                <li>Refresh the page and try again</li>
+              </ul>
+            </div>
           </div>
         ),
         timestamp: new Date()
