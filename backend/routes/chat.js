@@ -63,14 +63,25 @@ export function createChatRouter(supabaseClient) {
         component: 'TxAgentChat'
       });
       
+      // DETAILED LOGGING: Exact payload being sent to /embed
+      const embedPayload = { text: message };
+      console.log('🔍 EMBED REQUEST PAYLOAD:', JSON.stringify(embedPayload, null, 2));
+      console.log('🔍 EMBED REQUEST URL:', `${baseUrl}/embed`);
+      console.log('🔍 EMBED REQUEST HEADERS:', {
+        Authorization: req.headers.authorization ? 'Bearer [REDACTED]' : 'None',
+        'Content-Type': 'application/json'
+      });
+      
       const { data: embedResp } = await axios.post(
         `${baseUrl}/embed`,
-        { text: message },
+        embedPayload,
         { 
           headers: { Authorization: req.headers.authorization },
           timeout: 30000
         }
       );
+      
+      console.log('🔍 EMBED RESPONSE:', JSON.stringify(embedResp, null, 2));
       
       const queryEmbedding = embedResp.embedding; // 768-dim array
 
@@ -98,19 +109,30 @@ export function createChatRouter(supabaseClient) {
         component: 'TxAgentChat'
       });
 
+      // DETAILED LOGGING: Exact payload being sent to /chat
+      const chatPayload = {
+        query: message,
+        context: similarDocs, // container can skip its own DB hit
+        temperature,
+        top_k
+      };
+      console.log('🔍 CHAT REQUEST PAYLOAD:', JSON.stringify(chatPayload, null, 2));
+      console.log('🔍 CHAT REQUEST URL:', chatUrl);
+      console.log('🔍 CHAT REQUEST HEADERS:', {
+        Authorization: req.headers.authorization ? 'Bearer [REDACTED]' : 'None',
+        'Content-Type': 'application/json'
+      });
+
       const { data: chatResp } = await axios.post(
         chatUrl,
-        {
-          query: message,
-          context: similarDocs, // container can skip its own DB hit
-          temperature,
-          top_k
-        },
+        chatPayload,
         { 
           headers: { Authorization: req.headers.authorization },
           timeout: 60000 // Longer timeout for chat processing
         }
       );
+
+      console.log('🔍 CHAT RESPONSE:', JSON.stringify(chatResp, null, 2));
 
       // 5. Return the formatted response to the frontend
       errorLogger.success('TxAgent chat completed', {
@@ -131,6 +153,13 @@ export function createChatRouter(supabaseClient) {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      console.log('🔍 CHAT ERROR:', {
+        message: errorMessage,
+        stack: error.stack,
+        response: error.response?.data,
+        status: error.response?.status
+      });
       
       errorLogger.error('TxAgent chat request failed', error, {
         user_id: req.userId,
