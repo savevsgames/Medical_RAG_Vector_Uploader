@@ -349,10 +349,10 @@ export function Chat() {
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
-        content: data.response,
+        content: data.response || data.answer || 'No response received',
         timestamp: new Date(),
         sources: data.sources || [],
-        agent_id: data.agent_id
+        agent_id: data.agent_id || selectedAgent
       };
 
       setMessages(prev => [...prev, assistantMessage]);
@@ -366,7 +366,7 @@ export function Chat() {
           component: 'Chat'
         });
         toast.success('Response from TxAgent container');
-      } else if (data.agent_id === 'openai') {
+      } else {
         logAgentOperation('OpenAI Response Received', userEmail, {
           agentId: data.agent_id,
           sourcesCount: data.sources?.length || 0,
