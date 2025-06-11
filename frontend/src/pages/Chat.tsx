@@ -277,7 +277,8 @@ export function Chat() {
     setIsLoading(true);
 
     try {
-      const endpoint = currentAgent.endpoint;
+      // STEP 2 IMPLEMENTATION: Choose endpoint based on selected agent
+      const endpoint = selectedAgent === 'txagent' ? '/api/chat' : '/api/openai-chat';
       
       logApiCall(endpoint, 'POST', userEmail, 'initiated', {
         messageLength: messageContent.length,
@@ -286,6 +287,23 @@ export function Chat() {
         component: 'Chat'
       });
 
+      // Prepare request body based on agent type
+      let requestBody;
+      if (selectedAgent === 'txagent') {
+        // TxAgent expects: query, top_k, temperature
+        requestBody = {
+          message: messageContent,
+          top_k: 5,
+          temperature: 0.7
+        };
+      } else {
+        // OpenAI expects: message, context
+        requestBody = {
+          message: messageContent,
+          context: messages.slice(-5) // Send last 5 messages for context
+        };
+      }
+
       // CRITICAL: Ensure we're using POST method for chat requests
       const response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
         method: 'POST', // Explicitly specify POST method
@@ -293,10 +311,7 @@ export function Chat() {
           'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          message: messageContent,
-          context: messages.slice(-5) // Send last 5 messages for context
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       // Check if response is HTML (error page) instead of JSON
@@ -343,7 +358,7 @@ export function Chat() {
       setMessages(prev => [...prev, assistantMessage]);
 
       // Show success toast based on agent used
-      if (data.agent_id === 'txagent') {
+      if (data.agent_id === 'txagent' || selectedAgent === 'txagent') {
         logAgentOperation('TxAgent Response Received', userEmail, {
           agentId: data.agent_id,
           sourcesCount: data.sources?.length || 0,
@@ -368,7 +383,8 @@ export function Chat() {
         user: userEmail,
         error: errorMessage,
         messageLength: messageContent.length,
-        selectedAgent: selectedAgent
+        selectedAgent: selectedAgent,
+        endpoint: currentAgent.endpoint
       });
 
       toast.error(errorMessage);
