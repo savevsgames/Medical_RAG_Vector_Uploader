@@ -2,7 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import { AgentService } from '../core/agentService.js';
 import { ContainerService } from '../core/containerService.js';
-import { verifyToken } from '../middleware/agentMiddleware.js';
+import { verifyToken } from '../../middleware/auth.js';
 import { errorLogger } from '../shared/logger.js';
 
 export function createAgentRouter(supabaseClient) {
