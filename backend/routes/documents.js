@@ -61,19 +61,46 @@ export function createDocumentsRouter(supabaseClient) {
     return true;
   };
 
-  // Enhanced document upload endpoint with chunking support
+  // Enhanced document upload endpoint with comprehensive logging
   router.post('/upload', upload.single('file'), async (req, res) => {
     const startTime = Date.now();
     
+    // ENHANCED: Log request arrival at the very beginning
+    errorLogger.info('📥 UPLOAD REQUEST RECEIVED', {
+      user_id: req.userId,
+      ip: req.ip,
+      userAgent: req.get('User-Agent')?.substring(0, 100),
+      contentType: req.get('Content-Type'),
+      contentLength: req.get('Content-Length'),
+      hasFile: !!req.file,
+      component: 'DocumentUpload',
+      timestamp: new Date().toISOString()
+    });
+
     try {
       if (!req.file) {
         errorLogger.warn('Upload failed - no file provided', { 
           user_id: req.userId,
           ip: req.ip,
+          headers: req.headers,
+          body: req.body,
           component: 'DocumentUpload'
         });
         return res.status(400).json({ error: 'No file provided' });
       }
+
+      // ENHANCED: Log detailed file information
+      errorLogger.info('📄 FILE DETAILS RECEIVED', {
+        user_id: req.userId,
+        filename: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+        encoding: req.file.encoding,
+        fieldname: req.file.fieldname,
+        bufferLength: req.file.buffer?.length || 0,
+        ip: req.ip,
+        component: 'DocumentUpload'
+      });
 
       errorLogger.info('Processing upload with chunking', {
         user_id: req.userId,
@@ -84,17 +111,38 @@ export function createDocumentsRouter(supabaseClient) {
         component: 'DocumentUpload'
       });
 
+      // ENHANCED: Log text extraction attempt
+      errorLogger.debug('🔍 STARTING TEXT EXTRACTION', {
+        user_id: req.userId,
+        filename: req.file.originalname,
+        bufferSize: req.file.buffer.length,
+        mimetype: req.file.mimetype,
+        component: 'DocumentUpload'
+      });
+
       // Extract text and create chunks
       const { chunks, originalMetadata } = await documentProcessor.extractText(
         req.file.buffer, 
         req.file.originalname
       );
 
+      // ENHANCED: Log text extraction results
+      errorLogger.info('📝 TEXT EXTRACTION COMPLETED', {
+        user_id: req.userId,
+        filename: req.file.originalname,
+        chunksCreated: chunks?.length || 0,
+        originalLength: originalMetadata?.original_length || 0,
+        extractionSuccessful: !!(chunks && chunks.length > 0),
+        originalMetadata,
+        component: 'DocumentUpload'
+      });
+
       if (!chunks || chunks.length === 0) {
         errorLogger.warn('Upload failed - no chunks created', {
           user_id: req.userId,
           filename: req.file.originalname,
           originalMetadata,
+          extractedText: originalMetadata?.extracted_text?.substring(0, 200) || 'none',
           component: 'DocumentUpload'
         });
         return res.status(400).json({ error: 'Could not extract text from document' });
@@ -122,18 +170,20 @@ export function createDocumentsRouter(supabaseClient) {
         const chunkId = uuidv4();
 
         try {
-          errorLogger.debug(`Processing chunk ${i + 1}/${chunks.length}`, {
+          // ENHANCED: Log chunk processing start
+          errorLogger.debug(`🔄 PROCESSING CHUNK ${i + 1}/${chunks.length}`, {
             user_id: req.userId,
             chunk_id: chunkId,
             chunk_index: i,
             chunk_length: chunk.content.length,
+            chunk_preview: chunk.content.substring(0, 100) + '...',
             component: 'DocumentUpload'
           });
 
           // CRITICAL FIX: Sanitize chunk content before processing
           const sanitizedContent = sanitizeTextForDatabase(chunk.content);
           
-          errorLogger.debug(`Sanitized chunk content`, {
+          errorLogger.debug(`🧹 CONTENT SANITIZED`, {
             user_id: req.userId,
             chunk_id: chunkId,
             original_length: chunk.content.length,
@@ -147,6 +197,16 @@ export function createDocumentsRouter(supabaseClient) {
           let embeddingSource = 'unknown';
           
           try {
+            // ENHANCED: Log embedding generation attempt
+            errorLogger.debug('🧠 ATTEMPTING EMBEDDING GENERATION', {
+              user_id: req.userId,
+              chunk_id: chunkId,
+              content_length: sanitizedContent.length,
+              runpod_configured: !!process.env.RUNPOD_EMBEDDING_URL,
+              runpod_url: process.env.RUNPOD_EMBEDDING_URL,
+              component: 'DocumentUpload'
+            });
+
             // Try TxAgent first if available
             if (process.env.RUNPOD_EMBEDDING_URL) {
               errorLogger.debug('Attempting TxAgent embedding', {
@@ -159,43 +219,49 @@ export function createDocumentsRouter(supabaseClient) {
               embedding = await embeddingService.generateEmbedding(sanitizedContent, req.headers.authorization);
               embeddingSource = 'runpod';
               
-              errorLogger.debug('TxAgent embedding completed', {
+              errorLogger.debug('✅ TXAGENT EMBEDDING COMPLETED', {
                 user_id: req.userId,
                 chunk_id: chunkId,
                 dimensions: embedding?.length || 0,
+                embedding_preview: embedding?.slice(0, 5) || [],
                 component: 'DocumentUpload'
               });
             } else {
               throw new Error('TxAgent not configured - RUNPOD_EMBEDDING_URL missing');
             }
           } catch (embeddingError) {
-            errorLogger.warn(`TxAgent embedding failed for chunk ${i + 1}, trying OpenAI fallback`, {
+            errorLogger.warn(`❌ TxAgent embedding failed for chunk ${i + 1}, trying OpenAI fallback`, {
               user_id: req.userId,
               chunk_id: chunkId,
               error: embeddingError.message,
+              error_stack: embeddingError.stack,
               component: 'DocumentUpload'
             });
             
             try {
-              errorLogger.debug('Attempting OpenAI embedding fallback', {
+              errorLogger.debug('🔄 ATTEMPTING OPENAI EMBEDDING FALLBACK', {
                 user_id: req.userId,
                 chunk_id: chunkId,
+                openai_configured: !!process.env.OPENAI_API_KEY,
                 component: 'DocumentUpload'
               });
 
               embedding = await embeddingService.generateEmbedding(sanitizedContent, req.headers.authorization);
               embeddingSource = 'openai';
               
-              errorLogger.debug('OpenAI embedding completed', {
+              errorLogger.debug('✅ OPENAI EMBEDDING COMPLETED', {
                 user_id: req.userId,
                 chunk_id: chunkId,
                 dimensions: embedding?.length || 0,
+                embedding_preview: embedding?.slice(0, 5) || [],
                 component: 'DocumentUpload'
               });
             } catch (localEmbeddingError) {
-              errorLogger.error(`Both embedding services failed for chunk ${i + 1}`, localEmbeddingError, {
+              errorLogger.error(`❌ BOTH EMBEDDING SERVICES FAILED for chunk ${i + 1}`, localEmbeddingError, {
                 user_id: req.userId,
                 chunk_id: chunkId,
+                txagent_error: embeddingError.message,
+                openai_error: localEmbeddingError.message,
                 component: 'DocumentUpload'
               });
               throw localEmbeddingError;
@@ -206,7 +272,7 @@ export function createDocumentsRouter(supabaseClient) {
           try {
             validateEmbeddingDimensions(embedding, embeddingSource);
             
-            errorLogger.debug('Embedding dimension validation passed', {
+            errorLogger.debug('✅ EMBEDDING DIMENSION VALIDATION PASSED', {
               user_id: req.userId,
               chunk_id: chunkId,
               dimensions: embedding.length,
@@ -215,7 +281,7 @@ export function createDocumentsRouter(supabaseClient) {
               component: 'DocumentUpload'
             });
           } catch (dimensionError) {
-            errorLogger.error('Embedding dimension validation failed', dimensionError, {
+            errorLogger.error('❌ EMBEDDING DIMENSION VALIDATION FAILED', dimensionError, {
               user_id: req.userId,
               chunk_id: chunkId,
               actual_dimensions: embedding?.length || 0,
@@ -247,11 +313,13 @@ export function createDocumentsRouter(supabaseClient) {
             user_id: req.userId
           };
 
-          errorLogger.debug(`Attempting database insert for chunk ${i + 1}`, {
+          // ENHANCED: Log database insertion attempt
+          errorLogger.debug(`💾 ATTEMPTING DATABASE INSERT for chunk ${i + 1}`, {
             user_id: req.userId,
             chunk_id: chunkId,
             content_length: sanitizedContent.length,
             embedding_dimensions: embedding.length,
+            metadata_keys: Object.keys(chunkData.metadata),
             component: 'DocumentUpload'
           });
 
@@ -263,13 +331,14 @@ export function createDocumentsRouter(supabaseClient) {
             .single();
 
           if (error) {
-            errorLogger.error(`Database insert failed for chunk ${i + 1}`, error, {
+            errorLogger.error(`❌ DATABASE INSERT FAILED for chunk ${i + 1}`, error, {
               user_id: req.userId,
               chunk_id: chunkId,
               error_code: error.code,
               error_message: error.message,
               error_details: error.details,
               error_hint: error.hint,
+              supabase_error: error,
               component: 'DocumentUpload'
             });
             throw error;
@@ -281,10 +350,11 @@ export function createDocumentsRouter(supabaseClient) {
             content_length: sanitizedContent.length,
             embedding_dimensions: embedding.length,
             embedding_source: embeddingSource,
-            content_sanitized: chunk.content !== sanitizedContent
+            content_sanitized: chunk.content !== sanitizedContent,
+            database_id: data.id
           });
 
-          errorLogger.debug(`Chunk ${i + 1}/${chunks.length} processed successfully`, {
+          errorLogger.debug(`✅ CHUNK ${i + 1}/${chunks.length} PROCESSED SUCCESSFULLY`, {
             user_id: req.userId,
             chunk_id: chunkId,
             embedding_dimensions: embedding.length,
@@ -295,13 +365,15 @@ export function createDocumentsRouter(supabaseClient) {
         } catch (chunkError) {
           const chunkErrorMessage = chunkError instanceof Error ? chunkError.message : 'Unknown chunk error';
           
-          errorLogger.error(`Failed to process chunk ${i + 1}`, chunkError, {
+          errorLogger.error(`❌ FAILED TO PROCESS CHUNK ${i + 1}`, chunkError, {
             user_id: req.userId,
             chunk_id: chunkId,
             chunk_index: i,
             error: chunkErrorMessage,
             error_code: chunkError.code,
             error_details: chunkError.details,
+            error_stack: chunkError.stack,
+            content_preview: chunk.content.substring(0, 100) + '...',
             component: 'DocumentUpload'
           });
 
@@ -316,13 +388,26 @@ export function createDocumentsRouter(supabaseClient) {
 
       const processingTime = Date.now() - startTime;
 
+      // ENHANCED: Log final processing results
+      errorLogger.info('🏁 UPLOAD PROCESSING COMPLETED', {
+        user_id: req.userId,
+        filename: req.file.originalname,
+        total_chunks: chunks.length,
+        successful_chunks: processedChunks.length,
+        failed_chunks: failedChunks.length,
+        processing_time_ms: processingTime,
+        success_rate: `${Math.round((processedChunks.length / chunks.length) * 100)}%`,
+        component: 'DocumentUpload'
+      });
+
       // Determine response based on success/failure ratio
       if (processedChunks.length === 0) {
-        errorLogger.error('All chunks failed to process', new Error('Complete upload failure'), {
+        errorLogger.error('❌ ALL CHUNKS FAILED TO PROCESS', new Error('Complete upload failure'), {
           user_id: req.userId,
           filename: req.file.originalname,
           total_chunks: chunks.length,
           failed_chunks: failedChunks.length,
+          failures: failedChunks,
           component: 'DocumentUpload'
         });
 
@@ -339,7 +424,7 @@ export function createDocumentsRouter(supabaseClient) {
       // Success response (partial or complete)
       const isPartialSuccess = failedChunks.length > 0;
       
-      errorLogger.success('Document upload completed', {
+      errorLogger.success('✅ DOCUMENT UPLOAD COMPLETED', {
         user_id: req.userId,
         filename: req.file.originalname,
         total_chunks: chunks.length,
@@ -374,7 +459,7 @@ export function createDocumentsRouter(supabaseClient) {
     } catch (error) {
       const processingTime = Date.now() - startTime;
       
-      errorLogger.error('Upload processing failed', error, {
+      errorLogger.error('💥 UPLOAD PROCESSING FAILED', error, {
         user_id: req.userId,
         filename: req.file?.originalname,
         processing_time_ms: processingTime,

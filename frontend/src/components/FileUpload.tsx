@@ -13,17 +13,38 @@ export function FileUpload() {
       return;
     }
 
+    // ENHANCED: Log detailed file information
+    logger.debug('File upload initiated with detailed info', {
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      lastModified: file.lastModified,
+      webkitRelativePath: file.webkitRelativePath || 'none',
+      component: 'FileUpload'
+    });
+
     logFileOperation('Upload Started', file.name, null, {
       fileSize: file.size,
       fileType: file.type,
       component: 'FileUpload'
     });
 
-    // Get the current session
-    logger.debug('Checking user session for upload', { component: 'FileUpload' });
+    // ENHANCED: Log session retrieval attempt with detailed debugging
+    logger.debug('Attempting to retrieve user session for upload', { 
+      component: 'FileUpload',
+      timestamp: new Date().toISOString()
+    });
+
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     
+    // ENHANCED: Log session retrieval results
     if (sessionError) {
+      logger.error('Session retrieval failed', {
+        sessionError: sessionError.message,
+        sessionErrorCode: sessionError.status,
+        sessionErrorDetails: sessionError,
+        component: 'FileUpload'
+      });
       logSupabaseOperation('getSession', null, 'error', {
         error: sessionError.message,
         component: 'FileUpload'
@@ -33,6 +54,10 @@ export function FileUpload() {
     }
 
     if (!session) {
+      logger.warn('No session found for upload', {
+        sessionExists: !!session,
+        component: 'FileUpload'
+      });
       logUserAction('Upload Blocked - No Session', null, {
         component: 'FileUpload',
         fileName: file.name
@@ -41,7 +66,19 @@ export function FileUpload() {
       return;
     }
 
+    // ENHANCED: Log session details (safely)
     const userEmail = session.user?.email;
+    logger.debug('Session retrieved successfully for upload', {
+      hasSession: !!session,
+      hasUser: !!session.user,
+      userEmail: userEmail,
+      hasAccessToken: !!session.access_token,
+      tokenPreview: session.access_token ? session.access_token.substring(0, 20) + '...' : 'none',
+      tokenLength: session.access_token?.length || 0,
+      expiresAt: session.expires_at,
+      component: 'FileUpload'
+    });
+
     logUserAction('File Upload Initiated', userEmail, {
       fileName: file.name,
       fileSize: file.size,
@@ -49,15 +86,54 @@ export function FileUpload() {
       component: 'FileUpload'
     });
 
+    // ENHANCED: Log FormData preparation
+    logger.debug('Preparing FormData for upload', {
+      fileName: file.name,
+      fileSize: file.size,
+      component: 'FileUpload'
+    });
+
     const formData = new FormData();
     formData.append('file', file);
+
+    // ENHANCED: Log FormData details
+    logger.debug('FormData prepared successfully', {
+      fileName: file.name,
+      formDataEntries: Array.from(formData.entries()).map(([key, value]) => ({
+        key,
+        valueType: typeof value,
+        valueName: value instanceof File ? value.name : String(value),
+        valueSize: value instanceof File ? value.size : String(value).length
+      })),
+      component: 'FileUpload'
+    });
 
     try {
       const apiUrl = `${import.meta.env.VITE_API_URL}/upload`;
       
+      // ENHANCED: Log API call preparation
+      logger.debug('Preparing API call for upload', {
+        apiUrl,
+        method: 'POST',
+        fileName: file.name,
+        hasAuthToken: !!session.access_token,
+        authTokenPreview: session.access_token ? session.access_token.substring(0, 20) + '...' : 'none',
+        component: 'FileUpload'
+      });
+      
       logApiCall('/upload', 'POST', userEmail, 'initiated', {
         fileName: file.name,
         fileSize: file.size,
+        apiUrl,
+        component: 'FileUpload'
+      });
+
+      // ENHANCED: Log fetch request initiation
+      logger.debug('Starting fetch request to backend', {
+        url: apiUrl,
+        method: 'POST',
+        hasFormData: !!formData,
+        hasAuthHeader: !!session.access_token,
         component: 'FileUpload'
       });
 
@@ -69,8 +145,53 @@ export function FileUpload() {
         },
       });
 
+      // ENHANCED: Log detailed response information
+      logger.debug('Fetch response received from backend', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        url: response.url,
+        type: response.type,
+        redirected: response.redirected,
+        headers: Object.fromEntries(response.headers.entries()),
+        component: 'FileUpload'
+      });
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
+        let errorData;
+        const contentType = response.headers.get('content-type');
+        
+        // ENHANCED: Log content type and response parsing attempt
+        logger.debug('Response not OK, attempting to parse error', {
+          status: response.status,
+          statusText: response.statusText,
+          contentType,
+          component: 'FileUpload'
+        });
+
+        try {
+          if (contentType && contentType.includes('application/json')) {
+            errorData = await response.json();
+            logger.debug('Error response parsed as JSON', {
+              errorData,
+              component: 'FileUpload'
+            });
+          } else {
+            const textResponse = await response.text();
+            logger.debug('Error response parsed as text', {
+              textResponse: textResponse.substring(0, 500) + (textResponse.length > 500 ? '...' : ''),
+              textLength: textResponse.length,
+              component: 'FileUpload'
+            });
+            errorData = { error: `Server returned non-JSON response: ${response.status}` };
+          }
+        } catch (parseError) {
+          logger.error('Failed to parse error response', {
+            parseError: parseError instanceof Error ? parseError.message : 'Unknown parse error',
+            component: 'FileUpload'
+          });
+          errorData = { error: `Failed to parse server response: ${response.status}` };
+        }
         
         logApiCall('/upload', 'POST', userEmail, 'error', {
           status: response.status,
@@ -90,7 +211,23 @@ export function FileUpload() {
         }
       }
 
+      // ENHANCED: Log successful response parsing
+      logger.debug('Attempting to parse successful response', {
+        status: response.status,
+        component: 'FileUpload'
+      });
+
       const responseData = await response.json();
+      
+      // ENHANCED: Log response data details
+      logger.debug('Response data parsed successfully', {
+        responseData,
+        responseKeys: Object.keys(responseData),
+        hasMessage: !!responseData.message,
+        hasFilename: !!responseData.filename,
+        hasChunks: !!responseData.chunks,
+        component: 'FileUpload'
+      });
       
       logApiCall('/upload', 'POST', userEmail, 'success', {
         status: response.status,
@@ -99,29 +236,51 @@ export function FileUpload() {
         component: 'FileUpload'
       });
 
-      logFileOperation('Upload Submitted', file.name, userEmail, {
-        jobId: responseData.job_id,
-        status: responseData.status,
-        processingMessage: responseData.processing_message,
+      logFileOperation('Upload Completed Successfully', file.name, userEmail, {
+        totalChunks: responseData.total_chunks,
+        successfulChunks: responseData.successful_chunks,
+        failedChunks: responseData.failed_chunks,
+        processingTimeMs: responseData.processing_time_ms,
         component: 'FileUpload'
       });
 
-      // UPDATED: Show appropriate message for asynchronous processing
-      toast.success('Document submitted for processing! It will appear in your library once processing is complete.');
-      
-      // UPDATED: Add informational toast about processing time
-      setTimeout(() => {
-        toast('📄 Processing may take a few minutes depending on document size and complexity.', {
-          duration: 5000,
-          icon: '⏳'
-        });
-      }, 1000);
+      // ENHANCED: Show appropriate success message
+      if (responseData.successful_chunks > 0) {
+        toast.success(`Document processed successfully! ${responseData.successful_chunks} chunks created.`);
+        
+        if (responseData.failed_chunks > 0) {
+          setTimeout(() => {
+            toast(`⚠️ ${responseData.failed_chunks} chunks failed to process. Check the document for issues.`, {
+              duration: 5000,
+              icon: '⚠️'
+            });
+          }, 1000);
+        }
+      } else {
+        toast.error('Document upload failed - no chunks were processed successfully.');
+      }
 
-      // REMOVED: No longer automatically refresh the page since processing is asynchronous
-      // Documents will appear in the library once TxAgent completes processing
+      // ENHANCED: Add informational toast about processing
+      setTimeout(() => {
+        toast('📄 Document is now available for AI analysis in the chat interface.', {
+          duration: 4000,
+          icon: '✅'
+        });
+      }, 2000);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown upload error';
+      
+      // ENHANCED: Log detailed error information
+      logger.error('Upload process failed with detailed error info', {
+        fileName: file.name,
+        fileSize: file.size,
+        error: errorMessage,
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        errorStack: error instanceof Error ? error.stack : undefined,
+        apiUrl: `${import.meta.env.VITE_API_URL}/upload`,
+        component: 'FileUpload'
+      });
       
       logFileOperation('Upload Failed', file.name, userEmail, {
         error: errorMessage,
@@ -143,11 +302,16 @@ export function FileUpload() {
     },
     maxFiles: 1,
     onDropRejected: (fileRejections) => {
-      logger.warn('File upload rejected', {
+      logger.warn('File upload rejected with detailed info', {
         component: 'FileUpload',
         rejections: fileRejections.map(rejection => ({
           fileName: rejection.file.name,
-          errors: rejection.errors.map(e => e.message)
+          fileSize: rejection.file.size,
+          fileType: rejection.file.type,
+          errors: rejection.errors.map(e => ({
+            code: e.code,
+            message: e.message
+          }))
         }))
       });
     }
@@ -168,7 +332,7 @@ export function FileUpload() {
           <p className="text-gray-600">Drag & drop a file here, or click to select</p>
           <p className="text-sm text-gray-500 mt-2">Supported formats: PDF, DOCX, TXT, MD</p>
           <p className="text-xs text-gray-400 mt-2">
-            📋 Note: Documents are processed by TxAgent and may take a few minutes to appear in your library
+            📋 Note: Documents are processed with BioBERT embeddings for medical AI analysis
           </p>
         </div>
       )}
