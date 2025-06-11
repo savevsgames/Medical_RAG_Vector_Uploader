@@ -110,12 +110,15 @@ export function createChatRouter(supabaseClient) {
       });
 
       // DETAILED LOGGING: Exact payload being sent to /chat
+      // CRITICAL FIX: Add missing 'history' and 'stream' fields required by container
       const chatPayload = {
         query: message,
-        context: similarDocs, // container can skip its own DB hit
+        history: [], // Required by container - conversation history
+        top_k,
         temperature,
-        top_k
+        stream: false // Required by container - disable streaming for now
       };
+      
       console.log('🔍 CHAT REQUEST PAYLOAD:', JSON.stringify(chatPayload, null, 2));
       console.log('🔍 CHAT REQUEST URL:', chatUrl);
       console.log('🔍 CHAT REQUEST HEADERS:', {
@@ -138,13 +141,13 @@ export function createChatRouter(supabaseClient) {
       errorLogger.success('TxAgent chat completed', {
         user_id: userId,
         response_length: chatResp.response?.length || 0,
-        sources_count: chatResp.sources?.length || similarDocs?.length || 0,
+        sources_count: chatResp.sources?.length || 0,
         component: 'TxAgentChat'
       });
 
       res.json({
         response: chatResp.response,
-        sources: chatResp.sources || similarDocs, // safety-fallback
+        sources: chatResp.sources || [],
         agent_id: 'txagent',
         processing_time: chatResp.processing_time || null,
         timestamp: new Date().toISOString(),
