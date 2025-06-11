@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Activity, RefreshCw } from 'lucide-react';
+import { Activity, RefreshCw, Server, ExternalLink, Copy, Zap, Clock, Database } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { PageLayout, StatsLayout } from '../components/layouts';
 import { AsyncState } from '../components/feedback';
@@ -41,6 +41,24 @@ export function Monitor() {
       if (interval) clearInterval(interval);
     };
   }, [autoRefresh, agentStatus?.agent_active, fetchAgentStatus, performDetailedStatusCheck]);
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${label} copied to clipboard`);
+  };
+
+  const formatUptime = (startTime: string) => {
+    const start = new Date(startTime);
+    const now = new Date();
+    const diffMs = now.getTime() - start.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffDays > 0) return `${diffDays}d ${diffHours % 24}h`;
+    if (diffHours > 0) return `${diffHours}h ${diffMins % 60}m`;
+    return `${diffMins}m`;
+  };
 
   const getStatusStats = () => {
     return [
@@ -105,7 +123,7 @@ export function Monitor() {
       >
         {/* Agent Controls */}
         <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-heading font-bold text-deep-midnight">Agent Controls</h2>
             <div className="flex space-x-2">
               <Button
@@ -128,7 +146,7 @@ export function Monitor() {
             </div>
           </div>
           
-          <div className="flex space-x-3">
+          <div className="flex space-x-3 mb-6">
             {agentStatus?.agent_active ? (
               <Button
                 variant="danger"
@@ -147,10 +165,256 @@ export function Monitor() {
               </Button>
             )}
           </div>
+
+          {/* Container Details Section */}
+          {agentStatus?.agent_active && agentStatus?.session_data && (
+            <div className="border-t border-soft-gray/20 pt-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center space-x-2">
+                  <Server className="w-5 h-5 text-healing-teal" />
+                  <h3 className="text-md font-subheading font-semibold text-deep-midnight">
+                    Container Details
+                  </h3>
+                </div>
+                {agentStatus.session_data.runpod_endpoint && (
+                  <a
+                    href={agentStatus.session_data.runpod_endpoint}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-1 text-sm text-healing-teal hover:text-healing-teal/80 transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Open Container</span>
+                  </a>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Basic Container Info */}
+                <div className="bg-sky-blue/20 rounded-xl p-4">
+                  <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
+                    <Database className="w-4 h-4 mr-2 text-healing-teal" />
+                    Session Information
+                  </h4>
+                  <div className="space-y-2 text-sm">
+                    {agentStatus.agent_id && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-soft-gray font-body">Agent ID:</span>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-mono text-deep-midnight text-xs">
+                            {agentStatus.agent_id.substring(0, 12)}...
+                          </span>
+                          <button
+                            onClick={() => copyToClipboard(agentStatus.agent_id!, 'Agent ID')}
+                            className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
+                          >
+                            <Copy className="w-3 h-3 text-soft-gray" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {agentStatus.session_data.container_id && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-soft-gray font-body">Container ID:</span>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-mono text-deep-midnight text-xs">
+                            {agentStatus.session_data.container_id.substring(0, 12)}...
+                          </span>
+                          <button
+                            onClick={() => copyToClipboard(agentStatus.session_data.container_id, 'Container ID')}
+                            className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
+                          >
+                            <Copy className="w-3 h-3 text-soft-gray" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {agentStatus.session_data.started_at && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-soft-gray font-body">Started:</span>
+                        <span className="text-deep-midnight font-body text-xs">
+                          {new Date(agentStatus.session_data.started_at).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+
+                    {agentStatus.session_data.started_at && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-soft-gray font-body">Uptime:</span>
+                        <div className="flex items-center space-x-1">
+                          <Clock className="w-3 h-3 text-healing-teal" />
+                          <span className="text-deep-midnight font-body text-xs">
+                            {formatUptime(agentStatus.session_data.started_at)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Container Health */}
+                {agentStatus.container_health && typeof agentStatus.container_health === 'object' && (
+                  <div className="bg-healing-teal/10 rounded-xl p-4">
+                    <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
+                      <Zap className="w-4 h-4 mr-2 text-healing-teal" />
+                      TxAgent Health
+                    </h4>
+                    <div className="space-y-2 text-sm">
+                      {agentStatus.container_health.status && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-soft-gray font-body">Status:</span>
+                          <span className="text-healing-teal font-subheading font-medium">
+                            {agentStatus.container_health.status}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {agentStatus.container_health.model && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-soft-gray font-body">Model:</span>
+                          <span className="text-deep-midnight font-body">
+                            {agentStatus.container_health.model}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {agentStatus.container_health.device && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-soft-gray font-body">Device:</span>
+                          <span className="text-deep-midnight font-body">
+                            {agentStatus.container_health.device}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {agentStatus.container_health.version && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-soft-gray font-body">Version:</span>
+                          <span className="text-deep-midnight font-body">
+                            {agentStatus.container_health.version}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* RunPod Endpoint */}
+              {agentStatus.session_data.runpod_endpoint && (
+                <div className="mt-4 bg-guardian-gold/10 rounded-xl p-4">
+                  <h4 className="font-subheading font-medium text-deep-midnight mb-2 flex items-center">
+                    <ExternalLink className="w-4 h-4 mr-2 text-guardian-gold" />
+                    RunPod Endpoint
+                  </h4>
+                  <div className="flex items-center justify-between bg-cloud-ivory rounded-lg p-3">
+                    <span className="font-mono text-xs text-deep-midnight break-all">
+                      {agentStatus.session_data.runpod_endpoint}
+                    </span>
+                    <button
+                      onClick={() => copyToClipboard(agentStatus.session_data.runpod_endpoint, 'RunPod Endpoint')}
+                      className="ml-2 p-2 hover:bg-sky-blue/20 rounded transition-colors flex-shrink-0"
+                    >
+                      <Copy className="w-4 h-4 text-soft-gray" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Capabilities */}
+              {agentStatus.session_data.capabilities && Array.isArray(agentStatus.session_data.capabilities) && (
+                <div className="mt-4">
+                  <h4 className="font-subheading font-medium text-deep-midnight mb-2">
+                    Capabilities
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {agentStatus.session_data.capabilities.map((capability: string, index: number) => (
+                      <span
+                        key={index}
+                        className="px-3 py-1 bg-healing-teal/10 text-healing-teal rounded-full text-xs font-body"
+                      >
+                        {capability}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Additional monitoring content would go here */}
-        {/* Container info, detailed status, and logs components */}
+        {/* Connection Test Results */}
+        {detailedStatus && (
+          <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
+            <h2 className="text-lg font-heading font-bold text-deep-midnight mb-4">
+              Connection Test Results
+            </h2>
+            <div className="text-xs text-soft-gray mb-4 font-body">
+              Last tested: {new Date(detailedStatus.last_test_time).toLocaleString()}
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Health Endpoint */}
+              <div className="bg-sky-blue/20 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-subheading font-medium text-deep-midnight">Health Check</span>
+                  <span className={`px-2 py-1 rounded-full text-xs font-body ${
+                    detailedStatus.test_results.health.status === 200 
+                      ? 'bg-healing-teal/20 text-healing-teal' 
+                      : 'bg-red-100 text-red-600'
+                  }`}>
+                    {detailedStatus.test_results.health.status || 'Failed'}
+                  </span>
+                </div>
+                {detailedStatus.test_results.health.error && (
+                  <p className="text-red-600 text-xs font-body">
+                    {detailedStatus.test_results.health.error}
+                  </p>
+                )}
+              </div>
+
+              {/* Chat Endpoint */}
+              <div className="bg-sky-blue/20 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-subheading font-medium text-deep-midnight">Chat Endpoint</span>
+                  <span className={`px-2 py-1 rounded-full text-xs font-body ${
+                    detailedStatus.test_results.chat.status === 200 
+                      ? 'bg-healing-teal/20 text-healing-teal' 
+                      : 'bg-red-100 text-red-600'
+                  }`}>
+                    {detailedStatus.test_results.chat.status || 'Failed'}
+                  </span>
+                </div>
+                {detailedStatus.test_results.chat.error && (
+                  <p className="text-red-600 text-xs font-body">
+                    {detailedStatus.test_results.chat.error}
+                  </p>
+                )}
+              </div>
+
+              {/* Embed Endpoint */}
+              <div className="bg-sky-blue/20 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-subheading font-medium text-deep-midnight">Embed Endpoint</span>
+                  <span className={`px-2 py-1 rounded-full text-xs font-body ${
+                    detailedStatus.test_results.embed.status === 200 
+                      ? 'bg-healing-teal/20 text-healing-teal' 
+                      : 'bg-red-100 text-red-600'
+                  }`}>
+                    {detailedStatus.test_results.embed.status || 'Failed'}
+                  </span>
+                </div>
+                {detailedStatus.test_results.embed.error && (
+                  <p className="text-red-600 text-xs font-body">
+                    {detailedStatus.test_results.embed.error}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </AsyncState>
     </PageLayout>
   );
