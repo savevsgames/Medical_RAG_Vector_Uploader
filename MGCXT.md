@@ -322,7 +322,7 @@ BEGIN
     UPDATE public.agents 
     SET status = 'terminated', terminated_at = now()
     WHERE user_id = user_uuid 
-        AND status IN ('active', 'initializing')
+        AND public.agents.status IN ('active', 'initializing')
         AND terminated_at IS NULL;
     
     -- Create new agent session
