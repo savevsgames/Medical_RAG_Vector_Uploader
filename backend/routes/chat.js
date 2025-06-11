@@ -53,16 +53,16 @@ export function createChatRouter(supabaseClient) {
         });
         return res.status(503).json({ error: 'TxAgent not running. Please start the agent first.' });
       }
-
+      
       const baseUrl = agent.session_data.runpod_endpoint.replace(/\/+$/, '');
-
+      
       // 2. Get a BioBERT embedding for the query (container /embed) - ensures 768-dim consistency
       errorLogger.debug('Getting BioBERT embedding for query', {
         user_id: userId,
         base_url: baseUrl,
         component: 'TxAgentChat'
       });
-
+      
       const { data: embedResp } = await axios.post(
         `${baseUrl}/embed`,
         { text: message },
@@ -71,6 +71,7 @@ export function createChatRouter(supabaseClient) {
           timeout: 30000
         }
       );
+      
       const queryEmbedding = embedResp.embedding; // 768-dim array
 
       // 3. Similarity search in Supabase (top_k docs)
