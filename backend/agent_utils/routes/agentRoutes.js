@@ -136,7 +136,7 @@ export function createAgentRouter(supabaseClient) {
         throw new Error('No RunPod endpoint configured in session data');
       }
 
-      const healthUrl = `${agent.session_data.runpod_endpoint.replace(/\/+$/, '')}/health`;
+      const healthUrl = `${agent.session_data.runpod_endpoint}`.replace(/\/+$/,'') + '/health';
       
       errorLogger.debug('Checking container health', {
         agentId: agent.id,
