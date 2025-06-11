@@ -20,6 +20,16 @@ export function setupRoutes(app, supabaseClient) {
   // Health check (no auth required)
   app.use('/health', healthRouter);
   
+  // FIXED: Handle vite.svg requests to prevent 401 errors
+  app.get('/vite.svg', (req, res) => {
+    errorLogger.debug('Serving vite.svg placeholder', {
+      ip: req.ip,
+      userAgent: req.get('User-Agent')?.substring(0, 100),
+      component: 'StaticAssets'
+    });
+    res.sendStatus(200);
+  });
+  
   // Create routers with Supabase client dependency injection
   const documentsRouter = createDocumentsRouter(supabaseClient);
   const chatRouter = createChatRouter(supabaseClient);
@@ -118,6 +128,7 @@ export function setupRoutes(app, supabaseClient) {
   errorLogger.success('Routes setup completed with clean structure:', {
     routes: [
       'GET /health',
+      'GET /vite.svg (placeholder)',
       'POST /upload',
       'POST /api/chat',
       'POST /api/openai-chat', 
