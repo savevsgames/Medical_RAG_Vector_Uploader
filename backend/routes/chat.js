@@ -18,81 +18,133 @@ export function createChatRouter(supabaseClient) {
   // Apply authentication to all chat routes
   router.use(verifyToken);
 
-  // Initialize chat service with injected Supabase client
+  // Initialize services with injected Supabase client
   const chatService = new ChatService(supabaseClient);
   const agentService = new AgentService(supabaseClient);
   const searchService = new DocumentSearchService(supabaseClient);
 
-  // POST /chat – proxy to the user's TxAgent container
+  // TxAgent Chat endpoint - proxy to the user's TxAgent container with BioBERT embedding
   router.post('/chat', async (req, res) => {
-    const { message, top_k = 5, temperature = 0.7 } = req.body || {};
-    if (!message || typeof message !== 'string') {
-    return res.status(400).json({ error: 'Message is required' });
-  }
-  
-  
-  try {
-    // 1. find active agent session to get runpod_endpoint
-    const agent = await agentService.getActiveAgent(req.userId);
-    if (!agent?.session_data?.runpod_endpoint) {
-      return res.status(503).json({ error: 'TxAgent not running' });
-    }
-  
-    const chatUrl = `${agent.session_data.runpod_endpoint.replace(/\/+$/, '')}/chat`;
-  
-    const { data } = await axios.post(
-      chatUrl,
-      { query: message, top_k, temperature },
-      { headers: { Authorization: req.headers.authorization } }
-    );
-  
-    return res.json(data);              
+    try {
+      const { message, top_k = 5, temperature = 0.7 } = req.body || {};
+      const userId = req.userId;
+      
+      if (!message || typeof message !== 'string') {
+        errorLogger.warn('Invalid TxAgent chat request - missing message', { 
+          user_id: userId,
+          component: 'TxAgentChat'
+        });
+        return res.status(400).json({ error: 'Message is required' });
+      }
 
-    // Use Embeddings to search Vector DB
-    const baseUrl = agent.session_data.runpod_endpoint.replace(/\/+$/, '');
-+
-+    // 2️⃣ Get a BioBERT embedding for the **query**  (container /embed)
-+    const { data: embedResp } = await axios.post(
-+      `${baseUrl}/embed`,
-+      { text: message },
-+      { headers: { Authorization: req.headers.authorization } }
-+    );
-+    const queryEmbedding = embedResp.embedding;           // ← 768-dim array
-+
-+    // 3️⃣ Similarity search in Supabase (top_k docs)
-+    const similarDocs = await searchService.searchRelevantDocuments(
-+      req.userId,
-+      queryEmbedding,
-+      top_k
-+    );
-+
-+    // 4️⃣ Call the container’s /chat endpoint, sending the docs for context
-+    const chatUrl = `${baseUrl}/chat`;
-+    const { data: chatResp } = await axios.post(
-+      chatUrl,
-+      {
-+        query: message,
-+        context: similarDocs,          // container can skip its own DB hit
-+        temperature
-+      },
-+      { headers: { Authorization: req.headers.authorization } }
-+    );
-+
-+    // 5️⃣ Return the formatted response to the frontend
-+    return res.json({
-+      response: chatResp.response,
-+      sources : chatResp.sources || similarDocs,   // safety-fallback
-+      agent_id: 'txagent',
-+      processing_time: chatResp.processing_time ?? null,
-+      status: 'success'
-+    });
-    
-  } catch (err) {
-    errorLogger.error('TxAgent chat failed', err);
-    return res.status(502).json({ error: err.message });
-  }
+      errorLogger.info('Processing TxAgent chat request', {
+        user_id: userId,
+        message_length: message.length,
+        message_preview: message.substring(0, 100),
+        component: 'TxAgentChat'
+      });
+
+      // 1. Find active agent session to get runpod_endpoint
+      const agent = await agentService.getActiveAgent(userId);
+      if (!agent?.session_data?.runpod_endpoint) {
+        errorLogger.warn('TxAgent chat request failed - no active agent', { 
+          user_id: userId,
+          component: 'TxAgentChat'
+        });
+        return res.status(503).json({ error: 'TxAgent not running. Please start the agent first.' });
+      }
+
+      const baseUrl = agent.session_data.runpod_endpoint.replace(/\/+$/, '');
+
+      // 2. Get a BioBERT embedding for the query (container /embed) - ensures 768-dim consistency
+      errorLogger.debug('Getting BioBERT embedding for query', {
+        user_id: userId,
+        base_url: baseUrl,
+        component: 'TxAgentChat'
+      });
+
+      const { data: embedResp } = await axios.post(
+        `${baseUrl}/embed`,
+        { text: message },
+        { 
+          headers: { Authorization: req.headers.authorization },
+          timeout: 30000
+        }
+      );
+      const queryEmbedding = embedResp.embedding; // 768-dim array
+
+      // 3. Similarity search in Supabase (top_k docs)
+      errorLogger.debug('Performing similarity search', {
+        user_id: userId,
+        top_k: top_k,
+        embedding_dimensions: queryEmbedding?.length || 0,
+        component: 'TxAgentChat'
+      });
+
+      const similarDocs = await searchService.searchRelevantDocuments(
+        userId,
+        queryEmbedding,
+        top_k
+      );
+
+      // 4. Call the container's /chat endpoint, sending the docs for context
+      const chatUrl = `${baseUrl}/chat`;
+      
+      errorLogger.debug('Calling TxAgent chat endpoint', {
+        user_id: userId,
+        chat_url: chatUrl,
+        similar_docs_count: similarDocs?.length || 0,
+        component: 'TxAgentChat'
+      });
+
+      const { data: chatResp } = await axios.post(
+        chatUrl,
+        {
+          query: message,
+          context: similarDocs, // container can skip its own DB hit
+          temperature,
+          top_k
+        },
+        { 
+          headers: { Authorization: req.headers.authorization },
+          timeout: 60000 // Longer timeout for chat processing
+        }
+      );
+
+      // 5. Return the formatted response to the frontend
+      errorLogger.success('TxAgent chat completed', {
+        user_id: userId,
+        response_length: chatResp.response?.length || 0,
+        sources_count: chatResp.sources?.length || similarDocs?.length || 0,
+        component: 'TxAgentChat'
+      });
+
+      res.json({
+        response: chatResp.response,
+        sources: chatResp.sources || similarDocs, // safety-fallback
+        agent_id: 'txagent',
+        processing_time: chatResp.processing_time || null,
+        timestamp: new Date().toISOString(),
+        status: 'success'
+      });
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      errorLogger.error('TxAgent chat request failed', error, {
+        user_id: req.userId,
+        error_message: errorMessage,
+        error_stack: error.stack,
+        component: 'TxAgentChat'
+      });
+      
+      res.status(502).json({ 
+        error: 'TxAgent chat processing failed',
+        details: errorMessage
+      });
+    }
   });
-  
+
   // OpenAI Chat endpoint - dedicated endpoint for OpenAI RAG
   router.post('/openai-chat', async (req, res) => {
     try {
@@ -123,7 +175,7 @@ export function createChatRouter(supabaseClient) {
       });
 
       // Use ChatService for OpenAI RAG processing
-      const result = await chatService.processQuery(req.userId, message, 'openai');
+      const result = await chatService.processQuery(userId, message);
 
       errorLogger.success('OpenAI chat completed', {
         user_id: userId,
