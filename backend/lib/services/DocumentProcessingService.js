@@ -1,9 +1,9 @@
 import { errorLogger } from "../../agent_utils/shared/logger.js";
-// import { createWorker } from "tesseract.js";
 import mammoth from "mammoth";
+
 export class DocumentProcessingService {
   constructor() {
-    this.supportedFormats = [".pdf", ".docx", ".txt", ".md"];
+    this.supportedFormats = ["pdf", "docx", "txt", "md"];
     this.logger = errorLogger;
   }
 
@@ -39,8 +39,8 @@ export class DocumentProcessingService {
           extractedText = buffer.toString("utf8");
           // Clean the text
           extractedText = extractedText
-            .replace(/\x00/g, "") // Remove null bytes
-            .replace(/[\uD800-\uDFFF]/g, "?") // Replace invalid Unicode surrogates
+            .replace(/\x00/g, "")
+            .replace(/[\uD800-\uDFFF]/g, "?")
             .replace(/\r\n/g, "\n")
             .replace(/\r/g, "\n")
             .trim();
@@ -58,7 +58,6 @@ export class DocumentProcessingService {
         throw new Error("No text content extracted from document");
       }
 
-      // FIXED: Use the new chunking method with proper size limits
       const chunks = this.splitIntoChunks(extractedText, 3000, 200);
 
       this.logger.info("Document processing completed", {
@@ -91,7 +90,6 @@ export class DocumentProcessingService {
 
   async extractPdfText(buffer) {
     try {
-      // Dynamic import for pdf-parse
       const pdfParse = (await import("pdf-parse")).default;
 
       this.logger.debug("Starting PDF text extraction", {
@@ -100,7 +98,6 @@ export class DocumentProcessingService {
       });
 
       const data = await pdfParse(buffer, {
-        // Options for better text extraction
         normalizeWhitespace: true,
         disableCombineTextItems: false,
       });
@@ -111,13 +108,12 @@ export class DocumentProcessingService {
         throw new Error("No text content found in PDF");
       }
 
-      // Clean the extracted text
       const cleanText = extractedText
-        .replace(/\x00/g, "") // Remove null bytes
-        .replace(/[\uD800-\uDFFF]/g, "?") // Replace invalid Unicode surrogates
+        .replace(/\x00/g, "")
+        .replace(/[\uD800-\uDFFF]/g, "?")
         .replace(/\r\n/g, "\n")
         .replace(/\r/g, "\n")
-        .replace(/\s+/g, " ") // Normalize whitespace
+        .replace(/\s+/g, " ")
         .trim();
 
       this.logger.info("PDF text extraction completed", {
@@ -160,13 +156,12 @@ export class DocumentProcessingService {
         throw new Error("No text content found in DOCX");
       }
 
-      // Clean the extracted text
       const cleanText = extractedText
-        .replace(/\x00/g, "") // Remove null bytes
-        .replace(/[\uD800-\uDFFF]/g, "?") // Replace invalid Unicode surrogates
+        .replace(/\x00/g, "")
+        .replace(/[\uD800-\uDFFF]/g, "?")
         .replace(/\r\n/g, "\n")
         .replace(/\r/g, "\n")
-        .replace(/\s+/g, " ") // Normalize whitespace
+        .replace(/\s+/g, " ")
         .trim();
 
       this.logger.info("DOCX text extraction completed", {
@@ -193,36 +188,14 @@ export class DocumentProcessingService {
     }
   }
 
-  // async extractFromText(buffer, filename) {
-  //   try {
-  //     const text = buffer.toString("utf8");
-
-  //     return {
-  //       text,
-  //       metadata: {
-  //         char_count: text.length,
-  //         extraction_method: "utf8",
-  //       },
-  //     };
-  //   } catch (error) {
-  //     errorLogger.error("Text extraction failed", error, {
-  //       filename,
-  //       component: "DocumentProcessingService",
-  //     });
-  //     throw new Error(`Text extraction failed: ${error.message}`);
-  //   }
-  // }
-
   splitIntoChunks(text, maxCharsPerChunk = 3000, overlap = 200) {
     if (!text || typeof text !== "string") {
       throw new Error("Invalid text input for chunking");
     }
 
-    // Clean the text first
-
     const cleanText = text
-      .replace(/\x00/g, "") // Remove null bytes
-      .replace(/[\uD800-\uDFFF]/g, "?") // Replace invalid Unicode surrogates
+      .replace(/\x00/g, "")
+      .replace(/[\uD800-\uDFFF]/g, "?")
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n")
       .trim();
@@ -237,13 +210,11 @@ export class DocumentProcessingService {
     while (startIndex < cleanText.length) {
       let endIndex = Math.min(startIndex + maxCharsPerChunk, cleanText.length);
 
-      // Try to break at sentence boundaries if possible
       if (endIndex < cleanText.length) {
         const lastPeriod = cleanText.lastIndexOf(".", endIndex);
         const lastNewline = cleanText.lastIndexOf("\n", endIndex);
         const lastSpace = cleanText.lastIndexOf(" ", endIndex);
 
-        // Use the best break point
         const breakPoint = Math.max(lastPeriod, lastNewline, lastSpace);
         if (breakPoint > startIndex + maxCharsPerChunk * 0.5) {
           endIndex = breakPoint + 1;
@@ -265,10 +236,8 @@ export class DocumentProcessingService {
         });
       }
 
-      // Move start index with overlap
       startIndex = Math.max(endIndex - overlap, startIndex + 1);
 
-      // Prevent infinite loop
       if (startIndex >= endIndex) {
         startIndex = endIndex;
       }
@@ -287,7 +256,8 @@ export class DocumentProcessingService {
   }
 
   getFileExtension(filename) {
-    return filename.toLowerCase().substring(filename.lastIndexOf("."));
+    // Return extension without the leading dot
+    return filename.toLowerCase().substring(filename.lastIndexOf(".") + 1);
   }
 
   isSupported(filename) {
