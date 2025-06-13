@@ -91,7 +91,9 @@ export class DocumentProcessingService {
 
   // PDF extraction using pdfjs-dist (no fs access)
   async #extractPdfText(buffer) {
-    const loadingTask = pdfjsLib.getDocument({ data: buffer });
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(pdfBuffer),
+    });
     const pdf = await loadingTask.promise;
 
     let text = "";
