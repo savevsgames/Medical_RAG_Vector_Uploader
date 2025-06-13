@@ -1,12 +1,12 @@
 import path from "path";
-import { createRequire } from "module";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 import mammoth from "mammoth";
 import { errorLogger } from "../../agent_utils/shared/logger.js";
+import { createRequire } from "module";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const require = createRequire(import.meta.url);
 pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve(
-  "pdfjs-dist/legacy/build/pdf.worker.js"
+  "pdfjs-dist/legacy/build/pdf.worker.mjs"
 );
 
 export class DocumentProcessingService {
