@@ -1,13 +1,29 @@
-import { errorLogger } from "../../agent_utils/shared/logger.js";
+import path from "path";
+import { createRequire } from "module";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 import mammoth from "mammoth";
+import { errorLogger } from "../../agent_utils/shared/logger.js";
+
+const require = createRequire(import.meta.url);
+pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve(
+  "pdfjs-dist/legacy/build/pdf.worker.js"
+);
 
 export class DocumentProcessingService {
+  static MAX_CHUNK_SIZE = 2000;
+  static OVERLAP = 200;
+
   constructor() {
-    this.supportedFormats = ["pdf", "docx", "txt", "md"];
     this.logger = errorLogger;
+    this.supportedFormats = [".pdf", ".docx", ".txt", ".md"];
   }
 
   async extractText(buffer, filename) {
+    const ext = path.extname(filename).toLowerCase();
+
+    let rawText = "";
+    let metadata = {};
+
     try {
       this.logger.info("Starting text extraction", {
         filename,
@@ -15,67 +31,52 @@ export class DocumentProcessingService {
         component: "DocumentProcessingService",
       });
 
-      let extractedText = "";
-      let extractionMetadata = {};
-
-      // Determine file type and extract accordingly
-      const fileExtension = this.getFileExtension(filename);
-
-      switch (fileExtension) {
-        case "pdf":
-          const pdfResult = await this.extractPdfText(buffer);
-          extractedText = pdfResult.text;
-          extractionMetadata = pdfResult.metadata;
+      switch (ext) {
+        case ".pdf":
+          ({ rawText, metadata } = await this.#extractPdfText(buffer));
           break;
-
-        case "docx":
-          const docxResult = await this.extractDocxText(buffer);
-          extractedText = docxResult.text;
-          extractionMetadata = docxResult.metadata;
+        case ".docx":
+          ({ rawText, metadata } = await this.#extractDocxText(buffer));
           break;
-
-        case "txt":
-        case "md":
-          extractedText = buffer.toString("utf8");
-          // Clean the text
-          extractedText = extractedText
+        case ".txt":
+        case ".md":
+          rawText = buffer
+            .toString("utf8")
             .replace(/\x00/g, "")
             .replace(/[\uD800-\uDFFF]/g, "?")
             .replace(/\r\n/g, "\n")
             .replace(/\r/g, "\n")
             .trim();
-
-          extractionMetadata = {
-            originalLength: extractedText.length,
-            extractionMethod: "utf8-decode",
+          metadata = {
+            mime_type: ext === ".txt" ? "text/plain" : "text/markdown",
+            extraction_method: "utf8-decode",
           };
           break;
         default:
-          throw new Error(`Unsupported file type: ${fileExtension}`);
+          throw new Error(`Unsupported file type: ${ext}`);
       }
 
-      if (!extractedText || extractedText.trim().length === 0) {
+      if (!rawText || rawText.trim().length === 0) {
         throw new Error("No text content extracted from document");
       }
 
-      const chunks = this.splitIntoChunks(extractedText, 3000, 200);
+      const chunks = this.#chunkText(rawText);
 
       this.logger.info("Document processing completed", {
         filename,
-        extractedLength: extractedText.length,
+        extractedLength: rawText.length,
         chunksCreated: chunks.length,
-        avgChunkSize: Math.round(extractedText.length / chunks.length),
+        avgChunkSize: Math.round(rawText.length / chunks.length),
         component: "DocumentProcessingService",
       });
 
       return {
         chunks,
         originalMetadata: {
+          ...metadata,
           filename,
-          original_length: extractedText.length,
+          original_length: rawText.length,
           chunk_count: chunks.length,
-          extraction_method: extractionMetadata.extractionMethod,
-          ...extractionMetadata,
         },
       };
     } catch (error) {
@@ -88,180 +89,74 @@ export class DocumentProcessingService {
     }
   }
 
-  async extractPdfText(buffer) {
-    try {
-      const pdfParse = (await import("pdf-parse")).default;
+  // PDF extraction using pdfjs-dist (no fs access)
+  async #extractPdfText(buffer) {
+    const loadingTask = pdfjsLib.getDocument({ data: buffer });
+    const pdf = await loadingTask.promise;
 
-      this.logger.debug("Starting PDF text extraction", {
-        bufferSize: buffer.length,
-        component: "DocumentProcessingService",
-      });
-
-      const data = await pdfParse(buffer, {
-        normalizeWhitespace: true,
-        disableCombineTextItems: false,
-      });
-
-      const extractedText = data.text;
-
-      if (!extractedText || extractedText.trim().length === 0) {
-        throw new Error("No text content found in PDF");
-      }
-
-      const cleanText = extractedText
-        .replace(/\x00/g, "")
-        .replace(/[\uD800-\uDFFF]/g, "?")
-        .replace(/\r\n/g, "\n")
-        .replace(/\r/g, "\n")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      this.logger.info("PDF text extraction completed", {
-        originalLength: extractedText.length,
-        cleanedLength: cleanText.length,
-        pageCount: data.numpages,
-        component: "DocumentProcessingService",
-      });
-
-      return {
-        text: cleanText,
-        metadata: {
-          pageCount: data.numpages,
-          originalLength: extractedText.length,
-          cleanedLength: cleanText.length,
-          extractionMethod: "pdf-parse",
-        },
-      };
-    } catch (error) {
-      this.logger.error("PDF text extraction failed", {
-        error: error.message,
-        bufferSize: buffer.length,
-        component: "DocumentProcessingService",
-      });
-      throw new Error(`PDF text extraction failed: ${error.message}`);
+    let text = "";
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const { items } = await page.getTextContent();
+      text += items.map((i) => i.str).join(" ") + "\n";
     }
+
+    return {
+      rawText: text,
+      metadata: {
+        mime_type: "application/pdf",
+        page_count: pdf.numPages,
+        extraction_method: "pdfjs-dist",
+      },
+    };
   }
 
-  async extractDocxText(buffer) {
-    try {
-      this.logger.debug("Starting DOCX text extraction", {
-        bufferSize: buffer.length,
-        component: "DocumentProcessingService",
-      });
+  // DOCX extraction using mammoth
+  async #extractDocxText(buffer) {
+    const result = await mammoth.extractRawText({ buffer });
+    const extractedText = result.value;
 
-      const result = await mammoth.extractRawText({ buffer });
-      const extractedText = result.value;
-
-      if (!extractedText || extractedText.trim().length === 0) {
-        throw new Error("No text content found in DOCX");
-      }
-
-      const cleanText = extractedText
-        .replace(/\x00/g, "")
-        .replace(/[\uD800-\uDFFF]/g, "?")
-        .replace(/\r\n/g, "\n")
-        .replace(/\r/g, "\n")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      this.logger.info("DOCX text extraction completed", {
-        originalLength: extractedText.length,
-        cleanedLength: cleanText.length,
-        component: "DocumentProcessingService",
-      });
-
-      return {
-        text: cleanText,
-        metadata: {
-          originalLength: extractedText.length,
-          cleanedLength: cleanText.length,
-          extractionMethod: "mammoth",
-        },
-      };
-    } catch (error) {
-      this.logger.error("DOCX text extraction failed", {
-        error: error.message,
-        bufferSize: buffer.length,
-        component: "DocumentProcessingService",
-      });
-      throw new Error(`DOCX text extraction failed: ${error.message}`);
-    }
-  }
-
-  splitIntoChunks(text, maxCharsPerChunk = 3000, overlap = 200) {
-    if (!text || typeof text !== "string") {
-      throw new Error("Invalid text input for chunking");
+    if (!extractedText || extractedText.trim().length === 0) {
+      throw new Error("No text content found in DOCX");
     }
 
-    const cleanText = text
+    const cleanText = extractedText
       .replace(/\x00/g, "")
       .replace(/[\uD800-\uDFFF]/g, "?")
       .replace(/\r\n/g, "\n")
       .replace(/\r/g, "\n")
+      .replace(/\s+/g, " ")
       .trim();
 
-    if (cleanText.length === 0) {
-      throw new Error("No valid text content after cleaning");
-    }
+    return {
+      rawText: cleanText,
+      metadata: {
+        mime_type:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        extraction_method: "mammoth",
+      },
+    };
+  }
 
+  // Chunking helper (simple, non-overlapping for clarity; add overlap if needed)
+  #chunkText(text) {
     const chunks = [];
-    let startIndex = 0;
-
-    while (startIndex < cleanText.length) {
-      let endIndex = Math.min(startIndex + maxCharsPerChunk, cleanText.length);
-
-      if (endIndex < cleanText.length) {
-        const lastPeriod = cleanText.lastIndexOf(".", endIndex);
-        const lastNewline = cleanText.lastIndexOf("\n", endIndex);
-        const lastSpace = cleanText.lastIndexOf(" ", endIndex);
-
-        const breakPoint = Math.max(lastPeriod, lastNewline, lastSpace);
-        if (breakPoint > startIndex + maxCharsPerChunk * 0.5) {
-          endIndex = breakPoint + 1;
-        }
-      }
-
-      const chunk = cleanText.slice(startIndex, endIndex).trim();
-
-      if (chunk.length > 0) {
-        chunks.push({
-          content: chunk,
-          metadata: {
-            chunk_index: chunks.length,
-            start_char: startIndex,
-            end_char: endIndex,
-            char_count: chunk.length,
-            word_count: chunk.split(/\s+/).length,
-          },
-        });
-      }
-
-      startIndex = Math.max(endIndex - overlap, startIndex + 1);
-
-      if (startIndex >= endIndex) {
-        startIndex = endIndex;
-      }
+    for (
+      let i = 0;
+      i < text.length;
+      i += DocumentProcessingService.MAX_CHUNK_SIZE
+    ) {
+      const slice = text.slice(i, i + DocumentProcessingService.MAX_CHUNK_SIZE);
+      chunks.push({
+        content: slice,
+        metadata: {
+          chunk_index: chunks.length,
+          chunk_count: Math.ceil(
+            text.length / DocumentProcessingService.MAX_CHUNK_SIZE
+          ),
+        },
+      });
     }
-
-    this.logger.info("Text chunking completed", {
-      originalLength: cleanText.length,
-      chunksCreated: chunks.length,
-      avgChunkSize: Math.round(cleanText.length / chunks.length),
-      maxChunkSize: Math.max(...chunks.map((c) => c.content.length)),
-      minChunkSize: Math.min(...chunks.map((c) => c.content.length)),
-      component: "DocumentProcessingService",
-    });
-
     return chunks;
-  }
-
-  getFileExtension(filename) {
-    // Return extension without the leading dot
-    return filename.toLowerCase().substring(filename.lastIndexOf(".") + 1);
-  }
-
-  isSupported(filename) {
-    const extension = this.getFileExtension(filename);
-    return this.supportedFormats.includes(extension);
   }
 }
