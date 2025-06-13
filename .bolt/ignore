@@ -7,10 +7,10 @@ frontend/src/components/documents/
 frontend/src/components/upload/
 
 # Ignore stable backend services
-backend/lib/services/
+#backend/lib/services/
 backend/agent_utils/core/
 backend/agent_utils/middleware/
-backend/agent_utils/routes/
+#backend/agent_utils/routes/
 backend/agent_utils/shared/
 
 # Ignore config & context (stable, unlikely to change)
