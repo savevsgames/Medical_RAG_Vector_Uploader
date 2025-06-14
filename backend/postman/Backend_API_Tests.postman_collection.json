@@ -1,0 +1,813 @@
+{
+  "info": {
+    "name": "Medical RAG Backend API Tests - Step 2",
+    "description": "Comprehensive test collection for the Medical RAG Backend API endpoints that communicate with TxAgent container",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "2.0.0"
+  },
+  "variable": [
+    {
+      "key": "backend_url",
+      "value": "https://medical-rag-vector-uploader.onrender.com",
+      "type": "string",
+      "description": "Backend API URL (your deployed backend)"
+    },
+    {
+      "key": "local_backend_url",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "Local backend URL for development"
+    },
+    {
+      "key": "jwt_token",
+      "value": "your_supabase_jwt_token_here",
+      "type": "string",
+      "description": "Valid Supabase JWT token with sub, aud, and role claims"
+    },
+    {
+      "key": "agent_id",
+      "value": "",
+      "type": "string",
+      "description": "Agent session ID from start agent endpoint"
+    },
+    {
+      "key": "document_id",
+      "value": "",
+      "type": "string",
+      "description": "Document ID from upload endpoint"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Status",
+      "item": [
+        {
+          "name": "1. Backend Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has status field\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('timestamp');",
+                  "    pm.expect(jsonData).to.have.property('services');",
+                  "    console.log('Backend Status:', jsonData.status);",
+                  "    console.log('Database:', jsonData.services.database ? '✅' : '❌');",
+                  "    console.log('Supabase:', jsonData.services.supabase_configured ? '✅' : '❌');",
+                  "    console.log('RunPod:', jsonData.services.runpod_configured ? '✅' : '❌');",
+                  "});",
+                  "",
+                  "console.log('✅ Backend health check successful');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backend_url}}/health",
+              "host": ["{{backend_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check backend health and service status"
+          }
+        },
+        {
+          "name": "2. Agent Status Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has agent status fields\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('agent_active');",
+                  "    pm.expect(jsonData).to.have.property('agent_id');",
+                  "    pm.expect(jsonData).to.have.property('container_status');",
+                  "    ",
+                  "    console.log('Agent Active:', jsonData.agent_active ? '✅' : '❌');",
+                  "    console.log('Agent ID:', jsonData.agent_id || 'None');",
+                  "    console.log('Container Status:', jsonData.container_status || 'Unknown');",
+                  "    ",
+                  "    if (jsonData.agent_id) {",
+                  "        pm.collectionVariables.set('agent_id', jsonData.agent_id);",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Agent status check completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{backend_url}}/api/agent/status",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "status"]
+            },
+            "description": "Check current agent session status"
+          }
+        }
+      ],
+      "description": "Basic health and status checks"
+    },
+    {
+      "name": "Agent Lifecycle",
+      "item": [
+        {
+          "name": "3. Start TxAgent Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Agent session started successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('agent_id');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Agent Started Successfully');",
+                  "    console.log('Agent ID:', jsonData.agent_id);",
+                  "    console.log('Status:', jsonData.status);",
+                  "    console.log('RunPod Endpoint:', jsonData.runpod_endpoint || 'Not provided');",
+                  "    ",
+                  "    pm.collectionVariables.set('agent_id', jsonData.agent_id);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has session data\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('session_data');",
+                  "    pm.expect(jsonData).to.have.property('processing_time_ms');",
+                  "    console.log('Processing Time:', jsonData.processing_time_ms + 'ms');",
+                  "});",
+                  "",
+                  "console.log('✅ TxAgent session activation successful');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/start",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "start"]
+            },
+            "description": "Start a new TxAgent session"
+          }
+        },
+        {
+          "name": "4. Agent Health Check (Detailed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Health check has test results\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('agent_id');",
+                  "    pm.expect(jsonData).to.have.property('container_reachable');",
+                  "    pm.expect(jsonData).to.have.property('test_results');",
+                  "    ",
+                  "    console.log('Container Reachable:', jsonData.container_reachable ? '✅' : '❌');",
+                  "    console.log('JWT Valid:', jsonData.jwt_valid ? '✅' : '❌');",
+                  "    console.log('Endpoints Working:', jsonData.endpoints_working ? '✅' : '❌');",
+                  "});",
+                  "",
+                  "pm.test(\"Test results show endpoint status\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    var results = jsonData.test_results;",
+                  "    ",
+                  "    console.log('Health Endpoint:', results.health.status || 'Failed');",
+                  "    console.log('Chat Endpoint:', results.chat.status || 'Failed');",
+                  "    console.log('Embed Endpoint:', results.embed.status || 'Failed');",
+                  "    ",
+                  "    if (results.health.error) console.log('Health Error:', results.health.error);",
+                  "    if (results.chat.error) console.log('Chat Error:', results.chat.error);",
+                  "    if (results.embed.error) console.log('Embed Error:', results.embed.error);",
+                  "});",
+                  "",
+                  "console.log('✅ Detailed health check completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/health-check",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "health-check"]
+            },
+            "description": "Perform detailed health check of TxAgent container"
+          }
+        },
+        {
+          "name": "5. Stop TxAgent Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Agent session stopped successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('message');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Agent Stopped Successfully');",
+                  "    console.log('Message:', jsonData.message);",
+                  "    console.log('Processing Time:', jsonData.processing_time_ms + 'ms');",
+                  "});",
+                  "",
+                  "console.log('✅ TxAgent session deactivation successful');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/stop",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "stop"]
+            },
+            "description": "Stop the current TxAgent session"
+          }
+        }
+      ],
+      "description": "Agent lifecycle management tests"
+    },
+    {
+      "name": "Chat & Embedding",
+      "item": [
+        {
+          "name": "6. TxAgent Chat Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 503\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 503]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Chat response successful\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('response');",
+                  "        pm.expect(jsonData).to.have.property('agent_id');",
+                  "        pm.expect(jsonData).to.have.property('status');",
+                  "        ",
+                  "        console.log('✅ Chat Response Received');",
+                  "        console.log('Agent ID:', jsonData.agent_id);",
+                  "        console.log('Response Length:', jsonData.response.length);",
+                  "        console.log('Sources Count:', jsonData.sources ? jsonData.sources.length : 0);",
+                  "        console.log('Processing Time:', jsonData.processing_time || 'Not provided');",
+                  "        console.log('Model:', jsonData.model || 'Not specified');",
+                  "    });",
+                  "} else if (pm.response.code === 503) {",
+                  "    pm.test(\"TxAgent not running (expected if not started)\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('error');",
+                  "        console.log('⚠️ TxAgent not running:', jsonData.error);",
+                  "        console.log('💡 Start TxAgent first using the Start Agent endpoint');",
+                  "    });",
+                  "}",
+                  "",
+                  "console.log('✅ TxAgent chat test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What are the symptoms of diabetes?\",\n  \"top_k\": 5,\n  \"temperature\": 0.7\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/chat",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "chat"]
+            },
+            "description": "Send chat request to TxAgent through backend"
+          }
+        },
+        {
+          "name": "7. OpenAI Chat Fallback",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 503\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 503]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"OpenAI chat response successful\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('response');",
+                  "        pm.expect(jsonData).to.have.property('agent_id');",
+                  "        pm.expect(jsonData.agent_id).to.eql('openai');",
+                  "        ",
+                  "        console.log('✅ OpenAI Chat Response Received');",
+                  "        console.log('Response Length:', jsonData.response.length);",
+                  "        console.log('Sources Count:', jsonData.sources ? jsonData.sources.length : 0);",
+                  "        console.log('Model:', jsonData.model || 'GPT-4');",
+                  "    });",
+                  "} else {",
+                  "    pm.test(\"OpenAI not configured (expected)\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('error');",
+                  "        console.log('⚠️ OpenAI not configured:', jsonData.error);",
+                  "    });",
+                  "}",
+                  "",
+                  "console.log('✅ OpenAI fallback test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What are the symptoms of diabetes?\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/openai-chat",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "openai-chat"]
+            },
+            "description": "Test OpenAI chat fallback endpoint"
+          }
+        },
+        {
+          "name": "8. Direct Embedding Generation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Embedding generated successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('vector_dimensions');",
+                  "    pm.expect(jsonData).to.have.property('processing_time_ms');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Embedding Generated Successfully');",
+                  "    console.log('Vector Dimensions:', jsonData.vector_dimensions);",
+                  "    console.log('Processing Time:', jsonData.processing_time_ms + 'ms');",
+                  "    console.log('Embedding Source:', jsonData.embedding_source || 'Not specified');",
+                  "    ",
+                  "    // Check if it's BioBERT (768) or OpenAI (1536)",
+                  "    if (jsonData.vector_dimensions === 768) {",
+                  "        console.log('🧠 Using BioBERT embeddings (TxAgent)');",
+                  "    } else if (jsonData.vector_dimensions === 1536) {",
+                  "        console.log('🤖 Using OpenAI embeddings (fallback)');",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Direct embedding test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentText\": \"Patient presents with chest pain and shortness of breath\",\n  \"metadata\": {\n    \"test\": true,\n    \"source\": \"postman_test\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/embed",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "embed"]
+            },
+            "description": "Generate embedding directly through backend"
+          }
+        }
+      ],
+      "description": "Chat and embedding functionality tests"
+    },
+    {
+      "name": "Document Management",
+      "item": [
+        {
+          "name": "9. Test Upload System",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Upload system test results\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('txagent_health');",
+                  "    pm.expect(jsonData).to.have.property('embedding_test');",
+                  "    pm.expect(jsonData).to.have.property('supabase_test');",
+                  "    ",
+                  "    console.log('TxAgent Health:', jsonData.txagent_health ? '✅' : '❌');",
+                  "    console.log('Embedding Test:', jsonData.embedding_test.error ? '❌ ' + jsonData.embedding_test.error : '✅');",
+                  "    console.log('Supabase Test:', jsonData.supabase_test.error ? '❌ ' + jsonData.supabase_test.error : '✅');",
+                  "    ",
+                  "    console.log('Environment Variables:');",
+                  "    console.log('  - RunPod URL:', jsonData.env_vars.has_runpod_url ? '✅' : '❌');",
+                  "    console.log('  - Supabase URL:', jsonData.env_vars.has_supabase_url ? '✅' : '❌');",
+                  "});",
+                  "",
+                  "console.log('✅ Upload system test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/test-upload",
+              "host": ["{{backend_url}}"],
+              "path": ["test-upload"]
+            },
+            "description": "Test the upload system connectivity"
+          }
+        },
+        {
+          "name": "10. Document Upload (Small Test File)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 500\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 500]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Document upload successful\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('success');",
+                  "        pm.expect(jsonData.success).to.eql(true);",
+                  "        ",
+                  "        console.log('✅ Document Upload Successful');",
+                  "        console.log('Document ID:', jsonData.document_id || 'Not provided');",
+                  "        console.log('Content Length:', jsonData.content_length || 'Not provided');",
+                  "        console.log('Vector Dimensions:', jsonData.vector_dimensions || 'Not provided');",
+                  "        console.log('Embedding Source:', jsonData.embedding_source || 'Not provided');",
+                  "        ",
+                  "        if (jsonData.document_id) {",
+                  "            pm.collectionVariables.set('document_id', jsonData.document_id);",
+                  "        }",
+                  "    });",
+                  "} else {",
+                  "    pm.test(\"Document upload failed (expected if TxAgent not running)\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('error');",
+                  "        console.log('❌ Upload failed:', jsonData.error);",
+                  "        console.log('💡 This is expected if TxAgent container is not running');",
+                  "    });",
+                  "}",
+                  "",
+                  "console.log('✅ Document upload test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Upload a small test file (PDF, DOCX, TXT, or MD)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{backend_url}}/upload",
+              "host": ["{{backend_url}}"],
+              "path": ["upload"]
+            },
+            "description": "Upload a document for processing (requires file attachment)"
+          }
+        }
+      ],
+      "description": "Document upload and management tests"
+    },
+    {
+      "name": "Error Handling",
+      "item": [
+        {
+          "name": "11. Test Invalid JWT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test(\"Authentication error response\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('error');",
+                  "    console.log('✅ Authentication properly rejected invalid token');",
+                  "    console.log('Error:', jsonData.error);",
+                  "});",
+                  "",
+                  "console.log('✅ Invalid JWT test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer invalid_token_for_testing",
+                "description": "Invalid JWT token"
+              }
+            ],
+            "url": {
+              "raw": "{{backend_url}}/api/agent/status",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "status"]
+            },
+            "description": "Test authentication with invalid JWT token"
+          }
+        },
+        {
+          "name": "12. Test Missing Authorization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test(\"Missing auth error response\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('error');",
+                  "    console.log('✅ Authentication properly rejected missing token');",
+                  "    console.log('Error:', jsonData.error);",
+                  "});",
+                  "",
+                  "console.log('✅ Missing authorization test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"This should fail without auth\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/chat",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "chat"]
+            },
+            "description": "Test endpoint without authorization header"
+          }
+        },
+        {
+          "name": "13. Test Invalid Route",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "console.log('✅ Invalid route properly returns 404');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backend_url}}/api/nonexistent/route",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "nonexistent", "route"]
+            },
+            "description": "Test non-existent route handling"
+          }
+        }
+      ],
+      "description": "Error handling and edge case tests"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Pre-request script for the entire collection",
+          "console.log('🚀 Starting Medical RAG Backend API Tests (Step 2)');",
+          "console.log('📋 Testing Backend Routes:');",
+          "console.log('   - Health and status endpoints');",
+          "console.log('   - Agent lifecycle management');",
+          "console.log('   - Chat and embedding proxying');",
+          "console.log('   - Document upload processing');",
+          "console.log('   - Error handling and authentication');",
+          "",
+          "// Validate that required variables are set",
+          "if (!pm.collectionVariables.get('backend_url') || pm.collectionVariables.get('backend_url') === 'https://medical-rag-vector-uploader.onrender.com') {",
+          "    console.warn('⚠️ Using default backend URL. Update if different.');",
+          "}",
+          "",
+          "if (!pm.collectionVariables.get('jwt_token') || pm.collectionVariables.get('jwt_token') === 'your_supabase_jwt_token_here') {",
+          "    console.warn('⚠️ Please update the jwt_token collection variable with a valid Supabase JWT token');",
+          "    console.warn('   Token must have: sub (user_id), aud: \"authenticated\", role: \"authenticated\"');",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Post-response script for the entire collection",
+          "// Log response time for performance monitoring",
+          "if (pm.response.responseTime) {",
+          "    console.log('⏱️ Response time: ' + pm.response.responseTime + 'ms');",
+          "}"
+        ]
+      }
+    }
+  ]
+}
