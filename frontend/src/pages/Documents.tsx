@@ -1,18 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, Upload, Plus, TestTube } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
-import { useAuth } from '../contexts/AuthContext';
-import { UploadModal } from '../components/upload';
-import { 
-  DocumentCard, 
-  DocumentViewModal, 
-  DocumentEditModal 
-} from '../components/documents';
-import { Button, Input, Select, EmptyState } from '../components/ui';
-import { PageLayout, StatsLayout } from '../components/layouts';
-import { AsyncState } from '../components/feedback';
-import { logger, logSupabaseOperation, logUserAction } from '../utils/logger';
-import toast from 'react-hot-toast';
+import React, { useState, useEffect } from "react";
+import { FileText, Upload, Plus, TestTube } from "lucide-react";
+import { supabase } from "../lib/supabaseClient";
+import { useAuth } from "../contexts/AuthContext";
+import { UploadModal } from "../components/upload";
+import {
+  DocumentCard,
+  DocumentViewModal,
+  DocumentEditModal,
+} from "../components/documents";
+import { Button, Input, Select, EmptyState } from "../components/ui";
+import { PageLayout, StatsLayout } from "../components/layouts";
+import { AsyncState } from "../components/feedback";
+import { logger, logSupabaseOperation, logUserAction } from "../utils/logger";
+import toast from "react-hot-toast";
 
 interface Document {
   id: string;
@@ -36,10 +36,10 @@ export function Documents() {
   const [filteredDocuments, setFilteredDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('all');
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterType, setFilterType] = useState("all");
   const [testingEmbed, setTestingEmbed] = useState(false);
-  
+
   // Modal states
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewDocument, setViewDocument] = useState<Document | null>(null);
@@ -47,44 +47,45 @@ export function Documents() {
 
   const fetchDocuments = async () => {
     const userEmail = user?.email;
-    
-    logger.info('Fetching user documents', {
-      component: 'Documents',
-      user: userEmail
+
+    logger.info("Fetching user documents", {
+      component: "Documents",
+      user: userEmail,
     });
 
     try {
       setError(null);
       const { data, error } = await supabase
-        .from('documents')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .from("documents")
+        .select("*")
+        .order("created_at", { ascending: false });
 
       if (error) {
-        logSupabaseOperation('fetchDocuments', userEmail, 'error', {
+        logSupabaseOperation("fetchDocuments", userEmail, "error", {
           error: error.message,
           code: error.code,
           details: error.details,
-          component: 'Documents'
+          component: "Documents",
         });
         throw error;
       }
 
-      logSupabaseOperation('fetchDocuments', userEmail, 'success', {
+      logSupabaseOperation("fetchDocuments", userEmail, "success", {
         documentsCount: data?.length || 0,
-        component: 'Documents'
+        component: "Documents",
       });
 
       setDocuments(data || []);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to load documents';
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to load documents";
       setError(errorMessage);
-      logger.error('Failed to fetch documents', {
-        component: 'Documents',
+      logger.error("Failed to fetch documents", {
+        component: "Documents",
         user: userEmail,
-        error: errorMessage
+        error: errorMessage,
       });
-      toast.error('Failed to load documents');
+      toast.error("Failed to load documents");
     } finally {
       setLoading(false);
     }
@@ -92,44 +93,43 @@ export function Documents() {
 
   const handleDeleteDocument = async (documentId: string) => {
     const userEmail = user?.email;
-    
+
     try {
       const { error } = await supabase
-        .from('documents')
+        .from("documents")
         .delete()
-        .eq('id', documentId);
+        .eq("id", documentId);
 
       if (error) {
-        logSupabaseOperation('deleteDocument', userEmail, 'error', {
+        logSupabaseOperation("deleteDocument", userEmail, "error", {
           error: error.message,
           documentId,
-          component: 'Documents'
+          component: "Documents",
         });
         throw error;
       }
 
-      logSupabaseOperation('deleteDocument', userEmail, 'success', {
+      logSupabaseOperation("deleteDocument", userEmail, "success", {
         documentId,
-        component: 'Documents'
+        component: "Documents",
       });
 
-      setDocuments(prev => prev.filter(doc => doc.id !== documentId));
-      
+      setDocuments((prev) => prev.filter((doc) => doc.id !== documentId));
     } catch (error) {
-      logger.error('Failed to delete document', {
-        component: 'Documents',
+      logger.error("Failed to delete document", {
+        component: "Documents",
         user: userEmail,
         documentId,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : "Unknown error",
       });
       throw error;
     }
   };
 
   const handleEditDocument = (updatedDocument: Document) => {
-    setDocuments(prev => prev.map(doc => 
-      doc.id === updatedDocument.id ? updatedDocument : doc
-    ));
+    setDocuments((prev) =>
+      prev.map((doc) => (doc.id === updatedDocument.id ? updatedDocument : doc))
+    );
     setEditDocument(null);
   };
 
@@ -141,27 +141,31 @@ export function Documents() {
   const testEmbedEndpoint = async () => {
     try {
       setTestingEmbed(true);
-      
+
       // Change this URL to use your new test endpoint
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/documents/test-upload`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session?.access_token}`,
-          'Content-Type': 'application/json'
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/test-upload`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session?.access_token}`,
+            "Content-Type": "application/json",
+          },
         }
-      });
+      );
 
       const result = await response.json();
-      console.log('🧪 Upload System Test Results:', result);
-      
+      console.log("🧪 Upload System Test Results:", result);
+
       if (response.ok) {
-        toast.success('Upload system test completed! Check console for details.');
+        toast.success(
+          "Upload system test completed! Check console for details."
+        );
       } else {
         toast.error(`Test failed: ${result.error}`);
       }
-      
     } catch (error) {
-      console.error('🧪 Test Error:', error);
+      console.error("🧪 Test Error:", error);
       toast.error(`Test failed: ${error.message}`);
     } finally {
       setTestingEmbed(false);
@@ -173,22 +177,23 @@ export function Documents() {
     let filtered = documents;
 
     if (searchTerm) {
-      filtered = filtered.filter(doc => 
-        doc.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        doc.content.toLowerCase().includes(searchTerm.toLowerCase())
+      filtered = filtered.filter(
+        (doc) =>
+          doc.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          doc.content.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
-    if (filterType !== 'all') {
-      filtered = filtered.filter(doc => {
-        const mimeType = doc.metadata.mime_type || '';
+    if (filterType !== "all") {
+      filtered = filtered.filter((doc) => {
+        const mimeType = doc.metadata.mime_type || "";
         switch (filterType) {
-          case 'pdf':
-            return mimeType.includes('pdf');
-          case 'word':
-            return mimeType.includes('word') || mimeType.includes('document');
-          case 'text':
-            return mimeType.includes('text') || mimeType.includes('markdown');
+          case "pdf":
+            return mimeType.includes("pdf");
+          case "word":
+            return mimeType.includes("word") || mimeType.includes("document");
+          case "text":
+            return mimeType.includes("text") || mimeType.includes("markdown");
           default:
             return true;
         }
@@ -206,36 +211,42 @@ export function Documents() {
 
   const getDocumentStats = () => {
     const totalDocs = documents.length;
-    const totalSize = documents.reduce((sum, doc) => sum + (doc.metadata.file_size || 0), 0);
-    const totalChars = documents.reduce((sum, doc) => sum + doc.metadata.char_count, 0);
-    
+    const totalSize = documents.reduce(
+      (sum, doc) => sum + (doc.metadata.file_size || 0),
+      0
+    );
+    const totalChars = documents.reduce(
+      (sum, doc) => sum + doc.metadata.char_count,
+      0
+    );
+
     return [
       {
-        label: 'Total Documents',
+        label: "Total Documents",
         value: totalDocs,
         icon: <FileText className="w-5 h-5" />,
-        color: 'healing-teal' as const
+        color: "healing-teal" as const,
       },
       {
-        label: 'Total Size',
+        label: "Total Size",
         value: `${(totalSize / 1024 / 1024).toFixed(1)} MB`,
         icon: <Upload className="w-5 h-5" />,
-        color: 'guardian-gold' as const
+        color: "guardian-gold" as const,
       },
       {
-        label: 'Total Content',
+        label: "Total Content",
         value: `${(totalChars / 1000).toFixed(0)}K chars`,
         icon: <FileText className="w-5 h-5" />,
-        color: 'healing-teal' as const
-      }
+        color: "healing-teal" as const,
+      },
     ];
   };
 
   const filterOptions = [
-    { value: 'all', label: 'All Types' },
-    { value: 'pdf', label: 'PDF' },
-    { value: 'word', label: 'Word' },
-    { value: 'text', label: 'Text' }
+    { value: "all", label: "All Types" },
+    { value: "pdf", label: "PDF" },
+    { value: "word", label: "Word" },
+    { value: "text", label: "Text" },
   ];
 
   return (
@@ -252,9 +263,9 @@ export function Documents() {
             loading={testingEmbed}
             icon={<TestTube className="w-5 h-5" />}
           >
-            {testingEmbed ? 'Testing...' : 'Test Embed'}
+            {testingEmbed ? "Testing..." : "Test Embed"}
           </Button>
-          
+
           <Button
             onClick={() => setShowUploadModal(true)}
             icon={<Plus className="w-5 h-5" />}
@@ -285,10 +296,7 @@ export function Documents() {
             />
           </div>
 
-          <Button
-            variant="ghost"
-            onClick={fetchDocuments}
-          >
+          <Button variant="ghost" onClick={fetchDocuments}>
             Refresh
           </Button>
         </div>
@@ -303,17 +311,25 @@ export function Documents() {
           {filteredDocuments.length === 0 ? (
             <EmptyState
               icon={<FileText className="w-16 h-16" />}
-              title={documents.length === 0 ? 'No documents yet' : 'No documents match your search'}
-              description={
-                documents.length === 0 
-                  ? 'Upload your first medical document to get started with AI analysis'
-                  : 'Try adjusting your search terms or filters'
+              title={
+                documents.length === 0
+                  ? "No documents yet"
+                  : "No documents match your search"
               }
-              action={documents.length === 0 ? {
-                label: 'Upload Your First Document',
-                onClick: () => setShowUploadModal(true),
-                icon: <Upload className="w-5 h-5" />
-              } : undefined}
+              description={
+                documents.length === 0
+                  ? "Upload your first medical document to get started with AI analysis"
+                  : "Try adjusting your search terms or filters"
+              }
+              action={
+                documents.length === 0
+                  ? {
+                      label: "Upload Your First Document",
+                      onClick: () => setShowUploadModal(true),
+                      icon: <Upload className="w-5 h-5" />,
+                    }
+                  : undefined
+              }
             />
           ) : (
             <>
@@ -331,7 +347,8 @@ export function Documents() {
 
               {/* Results Info */}
               <div className="mt-6 pt-6 border-t border-soft-gray/20 text-sm text-soft-gray text-center font-body">
-                Showing {filteredDocuments.length} of {documents.length} documents
+                Showing {filteredDocuments.length} of {documents.length}{" "}
+                documents
                 {searchTerm && ` matching "${searchTerm}"`}
               </div>
             </>
