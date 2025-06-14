@@ -139,97 +139,30 @@ export function Documents() {
 
   // FIXED: Test embed endpoint with proper response handling and debugging
   const testEmbedEndpoint = async () => {
-    if (!session) {
-      toast.error('No session available for testing');
-      return;
-    }
-
-    setTestingEmbed(true);
-    
     try {
-      logger.info('Testing embed endpoint directly', {
-        component: 'Documents',
-        user: user?.email,
-        apiUrl: import.meta.env.VITE_API_URL
-      });
-
-      const testPayload = {
-        documentText: 'This is a test document for embedding generation. It contains medical terminology like cardiology, diagnosis, and treatment.',
-        file_path: 'test-document.txt',
-        metadata: {
-          file_size: 128,
-          mime_type: 'text/plain',
-          test: true
-        }
-      };
-
-      logger.debug('Test embed payload', {
-        payload: testPayload,
-        component: 'Documents'
-      });
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/embed`, {
+      setTestingEmbed(true);
+      
+      // Change this URL to use your new test endpoint
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/api/documents/test-upload`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify(testPayload)
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      logger.debug('Test embed response received', {
-        status: response.status,
-        statusText: response.statusText,
-        ok: response.ok,
-        component: 'Documents'
-      });
-
-      // CRITICAL FIX: Check response.ok instead of calling response.success()
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        logger.error('Test embed request failed', {
-          status: response.status,
-          statusText: response.statusText,
-          errorData,
-          component: 'Documents'
-        });
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      const result = await response.json();
+      console.log('🧪 Upload System Test Results:', result);
+      
+      if (response.ok) {
+        toast.success('Upload system test completed! Check console for details.');
+      } else {
+        toast.error(`Test failed: ${result.error}`);
       }
-
-      // CRITICAL FIX: Parse JSON response properly
-      const responseData = await response.json();
       
-      // DEBUG: Log the exact response data structure
-      console.log('🧪 Test Embed Response Data:', responseData);
-      console.log('🧪 Response Data Type:', typeof responseData);
-      console.log('🧪 Response Data Keys:', Object.keys(responseData));
-      console.log('🧪 Success Property:', responseData.success, typeof responseData.success);
-      
-      logger.success('Test embed completed successfully', {
-        responseData,
-        component: 'Documents'
-      });
-
-      // FIXED: Use simple static string for toast to avoid function call issues
-      toast.success('Embed test completed successfully!');
-      
-      // Additional success message with details
-      if (responseData.vector_dimensions) {
-        setTimeout(() => {
-          toast.success(`Generated ${responseData.vector_dimensions} dimensional embedding`);
-        }, 500);
-      }
-
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      logger.error('Test embed failed', {
-        error: errorMessage,
-        component: 'Documents'
-      });
-
-      toast.error(`Embed test failed: ${errorMessage}`);
-      console.error('🧪 Test Embed Error:', error);
+      console.error('🧪 Test Error:', error);
+      toast.error(`Test failed: ${error.message}`);
     } finally {
       setTestingEmbed(false);
     }
