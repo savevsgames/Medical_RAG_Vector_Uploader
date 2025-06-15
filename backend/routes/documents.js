@@ -141,14 +141,20 @@ export function createDocumentsRouter(supabaseClient) {
         embeddingTest = { error: e.message };
       }
 
-      // Test 3: Can we write to Supabase?
+      // Test 3: Can we write to Supabase? (FIXED QUERY)
       let supabaseTest = null;
       try {
-        const { data, error } = await supabaseClient
+        const { data, error, count } = await supabaseClient
           .from("documents")
-          .select("count(*)")
+          .select("*", { count: "exact", head: true })
           .limit(1);
-        supabaseTest = error ? { error: error.message } : { success: true };
+
+        supabaseTest = error
+          ? { error: error.message }
+          : {
+              success: true,
+              total_documents: count,
+            };
       } catch (e) {
         supabaseTest = { error: e.message };
       }

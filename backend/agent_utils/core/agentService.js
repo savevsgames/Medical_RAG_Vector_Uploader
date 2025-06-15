@@ -191,4 +191,47 @@ export class AgentService {
       throw error;
     }
   }
+
+  async updateAgentStatus(agentId, status) {
+    try {
+      errorLogger.info('Updating agent status', {
+        agentId,
+        status,
+        component: 'AgentService'
+      });
+
+      const { data, error } = await this.supabaseClient
+        .from('agents')
+        .update({ 
+          status,
+          last_active: new Date().toISOString()
+        })
+        .eq('id', agentId)
+        .select();
+
+      if (error) {
+        errorLogger.error('Failed to update agent status', error, {
+          agentId,
+          status,
+          component: 'AgentService'
+        });
+        throw error;
+      }
+
+      errorLogger.success('Agent status updated successfully', {
+        agentId,
+        status,
+        component: 'AgentService'
+      });
+
+      return data?.[0] || data;
+    } catch (error) {
+      errorLogger.error('Update agent status failed', error, {
+        agentId,
+        status,
+        component: 'AgentService'
+      });
+      throw error;
+    }
+  }
 }

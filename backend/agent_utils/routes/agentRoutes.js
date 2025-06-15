@@ -1,14 +1,14 @@
-import express from 'express';
-import axios from 'axios';
-import { AgentService } from '../core/agentService.js';
-import { ContainerService } from '../core/containerService.js';
-import { verifyToken } from '../../middleware/auth.js';
-import { errorLogger } from '../shared/logger.js';
+import express from "express";
+import axios from "axios";
+import { AgentService } from "../core/agentService.js";
+import { ContainerService } from "../core/containerService.js";
+import { verifyToken } from "../../middleware/auth.js";
+import { errorLogger } from "../shared/logger.js";
 
 export function createAgentRouter(supabaseClient) {
   // Validate Supabase client
-  if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-    throw new Error('Invalid Supabase client provided to createAgentRouter');
+  if (!supabaseClient || typeof supabaseClient.from !== "function") {
+    throw new Error("Invalid Supabase client provided to createAgentRouter");
   }
 
   const router = express.Router();
@@ -29,62 +29,62 @@ export function createAgentRouter(supabaseClient) {
 
     async getStatus(req, res) {
       const startTime = Date.now();
-      
+
       try {
         const userId = req.userId;
-        
-        errorLogger.info('Agent status request received', {
+
+        errorLogger.info("Agent status request received", {
           userId,
           ip: req.ip,
-          userAgent: req.get('User-Agent')?.substring(0, 100),
-          component: 'AgentStatusOperations'
+          userAgent: req.get("User-Agent")?.substring(0, 100),
+          component: "AgentStatusOperations",
         });
 
         // Get active agent from database
         const agent = await this.agentService.getActiveAgent(userId);
-        
+
         if (!agent) {
-          errorLogger.info('No active agent found for user', {
+          errorLogger.info("No active agent found for user", {
             userId,
-            component: 'AgentStatusOperations'
+            component: "AgentStatusOperations",
           });
 
           return res.json({
             agent_active: false,
             agent_id: null,
             last_active: null,
-            container_status: 'stopped',
+            container_status: "stopped",
             container_health: null,
-            session_data: null
+            session_data: null,
           });
         }
 
-        errorLogger.info('Active agent found', {
+        errorLogger.info("Active agent found", {
           userId,
           agentId: agent.id,
           agentStatus: agent.status,
           lastActive: agent.last_active,
           hasSessionData: !!agent.session_data,
-          component: 'AgentStatusOperations'
+          component: "AgentStatusOperations",
         });
 
         // Check container health if agent is active
-        let containerStatus = 'unknown';
+        let containerStatus = "unknown";
         let containerHealth = null;
 
-        if (agent.status === 'active' || agent.status === 'initializing') {
+        if (agent.status === "active" || agent.status === "initializing") {
           try {
             const healthCheck = await this.checkContainerHealth(agent);
             containerStatus = healthCheck.status;
             containerHealth = healthCheck.data;
           } catch (healthError) {
-            errorLogger.warn('Container health check failed', {
+            errorLogger.warn("Container health check failed", {
               userId,
               agentId: agent.id,
               error: healthError.message,
-              component: 'AgentStatusOperations'
+              component: "AgentStatusOperations",
             });
-            containerStatus = 'unreachable';
+            containerStatus = "unreachable";
             containerHealth = { error: healthError.message };
           }
         }
@@ -92,40 +92,40 @@ export function createAgentRouter(supabaseClient) {
         const processingTime = Date.now() - startTime;
 
         const response = {
-          agent_active: agent.status === 'active',
+          agent_active: agent.status === "active",
           agent_id: agent.id,
           last_active: agent.last_active,
           container_status: containerStatus,
           container_health: containerHealth,
-          session_data: agent.session_data
+          session_data: agent.session_data,
         };
 
-        errorLogger.success('Agent status retrieved successfully', {
+        errorLogger.success("Agent status retrieved successfully", {
           userId,
           agentId: agent.id,
           containerStatus,
           processingTime,
-          component: 'AgentStatusOperations'
+          component: "AgentStatusOperations",
         });
 
         res.json(response);
-
       } catch (error) {
         const processingTime = Date.now() - startTime;
-        const errorMessage = error instanceof Error ? error.message : 'Unknown status error';
-        
-        errorLogger.error('Agent status request failed', error, {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown status error";
+
+        errorLogger.error("Agent status request failed", error, {
           userId: req.userId,
           processingTime,
           error_message: errorMessage,
           error_code: error.code,
-          component: 'AgentStatusOperations'
+          component: "AgentStatusOperations",
         });
-        
-        res.status(500).json({ 
-          error: 'Failed to get agent status', 
+
+        res.status(500).json({
+          error: "Failed to get agent status",
           details: errorMessage,
-          processing_time_ms: processingTime
+          processing_time_ms: processingTime,
         });
       }
     }
@@ -133,28 +133,29 @@ export function createAgentRouter(supabaseClient) {
     async checkContainerHealth(agent) {
       // Validate session data
       if (!agent.session_data?.runpod_endpoint) {
-        throw new Error('No RunPod endpoint configured in session data');
+        throw new Error("No RunPod endpoint configured in session data");
       }
 
-      const healthUrl = `${agent.session_data.runpod_endpoint}`.replace(/\/+$/,'') + '/health';
-      
-      errorLogger.debug('Checking container health', {
+      const healthUrl =
+        `${agent.session_data.runpod_endpoint}`.replace(/\/+$/, "") + "/health";
+
+      errorLogger.debug("Checking container health", {
         agentId: agent.id,
         healthUrl,
-        component: 'AgentStatusOperations'
+        component: "AgentStatusOperations",
       });
 
       try {
         const { status, data } = await axios.get(healthUrl, {
           timeout: 8000,
-          headers: { 'Accept': 'application/json' }
+          headers: { Accept: "application/json" },
         });
 
-        errorLogger.debug('Health-ping response', {
+        errorLogger.debug("Health-ping response", {
           healthUrl,
           status,
           data,
-          component: 'AgentStatusOperations'
+          component: "AgentStatusOperations",
         });
 
         if (status !== 200) {
@@ -162,26 +163,25 @@ export function createAgentRouter(supabaseClient) {
         }
 
         return {
-          status: 'running',
-          data: data
+          status: "running",
+          data: data,
         };
-
       } catch (error) {
-        errorLogger.error('Container health check failed', error, {
+        errorLogger.error("Container health check failed", error, {
           healthUrl,
           error_code: error.code,
           error_status: error.response?.status,
           error_data: error.response?.data,
-          component: 'AgentStatusOperations'
+          component: "AgentStatusOperations",
         });
 
         return {
-          status: 'unreachable',
-          data: { 
+          status: "unreachable",
+          data: {
             error: error.message,
             code: error.code,
-            response_status: error.response?.status
-          }
+            response_status: error.response?.status,
+          },
         };
       }
     }
@@ -196,152 +196,156 @@ export function createAgentRouter(supabaseClient) {
 
     async startAgent(req, res) {
       const startTime = Date.now();
-      
+
       try {
         const userId = req.userId;
-        
-        errorLogger.info('Agent start request received', {
+
+        errorLogger.info("Agent start request received", {
           userId,
           ip: req.ip,
-          userAgent: req.get('User-Agent')?.substring(0, 100),
-          component: 'AgentLifecycleOperations'
+          userAgent: req.get("User-Agent")?.substring(0, 100),
+          component: "AgentLifecycleOperations",
         });
 
         // CRITICAL: Ensure RUNPOD_EMBEDDING_URL is configured
         if (!process.env.RUNPOD_EMBEDDING_URL) {
-          throw new Error('RUNPOD_EMBEDDING_URL is not set in environment variables');
+          throw new Error(
+            "RUNPOD_EMBEDDING_URL is not set in environment variables"
+          );
         }
 
         // Prepare session data with RunPod endpoint
         const sessionData = {
           runpod_endpoint: process.env.RUNPOD_EMBEDDING_URL,
           started_at: new Date().toISOString(),
-          capabilities: ['chat', 'embed', 'health']
+          capabilities: ["chat", "embed", "health"],
         };
 
-        errorLogger.info('Starting agent (alias for createAgentSession)', {
+        errorLogger.info("Starting agent (alias for createAgentSession)", {
           userId,
           sessionData,
-          component: 'AgentService'
+          component: "AgentService",
         });
 
         // FIXED: Call the correct method with proper parameters
         const agent = await this.agentService.createAgentSession(
           userId,
-          'initializing',
+          "initializing",
           sessionData
         );
 
         if (!agent) {
-          throw new Error('Failed to create agent session - no data returned');
+          throw new Error("Failed to create agent session - no data returned");
         }
 
         // Update agent status to active
-        await this.agentService.updateAgentStatus(agent.id, 'active');
+        await this.agentService.updateAgentStatus(agent.id, "active");
 
         const processingTime = Date.now() - startTime;
 
-        errorLogger.success('Agent session created successfully', {
+        errorLogger.success("Agent session created successfully", {
           userId,
           agentId: agent.id,
           sessionData: agent.session_data,
           processingTime,
-          component: 'AgentLifecycleOperations'
+          component: "AgentLifecycleOperations",
         });
 
         res.json({
           success: true,
           agent_id: agent.id,
-          status: 'active',
+          status: "active",
           session_data: agent.session_data,
           container_id: agent.session_data?.container_id || null,
           runpod_endpoint: agent.session_data?.runpod_endpoint || null,
           processing_time_ms: processingTime,
-          message: 'TxAgent session activated successfully'
+          message: "TxAgent session activated successfully",
         });
-
       } catch (error) {
         const processingTime = Date.now() - startTime;
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        
-        errorLogger.error('Agent start failed', {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+
+        errorLogger.error("Agent start failed", {
           userId: req.userId,
           processingTime,
           error: errorMessage,
-          component: 'AgentLifecycleOperations',
+          component: "AgentLifecycleOperations",
           error_message: errorMessage,
-          error_code: error.code
+          error_code: error.code,
         });
-        
-        res.status(500).json({ 
-          error: 'Failed to start agent session', 
+
+        res.status(500).json({
+          error: "Failed to start agent session",
           details: errorMessage,
-          processing_time_ms: processingTime
+          processing_time_ms: processingTime,
         });
       }
     }
 
     async stopAgent(req, res) {
       const startTime = Date.now();
-      
+
       try {
         const userId = req.userId;
-        
-        errorLogger.info('Agent stop request received', {
+
+        errorLogger.info("Agent stop request received", {
           userId,
           ip: req.ip,
-          userAgent: req.get('User-Agent')?.substring(0, 100),
-          component: 'AgentLifecycleOperations'
+          userAgent: req.get("User-Agent")?.substring(0, 100),
+          component: "AgentLifecycleOperations",
         });
 
         // Terminate agent session
-        const terminated = await this.agentService.terminateAgentSession(userId);
+        const terminated = await this.agentService.terminateAgentSession(
+          userId
+        );
 
         const processingTime = Date.now() - startTime;
 
         if (terminated) {
-          errorLogger.success('Agent session terminated successfully', {
+          errorLogger.success("Agent session terminated successfully", {
             userId,
             processingTime,
-            component: 'AgentLifecycleOperations'
+            component: "AgentLifecycleOperations",
           });
 
           res.json({
             success: true,
-            message: 'TxAgent session deactivated successfully',
-            processing_time_ms: processingTime
+            message: "TxAgent session deactivated successfully",
+            processing_time_ms: processingTime,
           });
         } else {
-          errorLogger.warn('No active agent session found to terminate', {
+          errorLogger.warn("No active agent session found to terminate", {
             userId,
             processingTime,
-            component: 'AgentLifecycleOperations'
+            component: "AgentLifecycleOperations",
           });
 
           res.json({
             success: true,
-            message: 'No active agent session found',
-            processing_time_ms: processingTime
+            message: "No active agent session found",
+            processing_time_ms: processingTime,
           });
         }
-
       } catch (error) {
         const processingTime = Date.now() - startTime;
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        
-        errorLogger.error('Agent stop failed', {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+
+        errorLogger.error("Agent stop failed", {
           userId: req.userId,
           processingTime,
           error: errorMessage,
-          component: 'AgentLifecycleOperations',
+          component: "AgentLifecycleOperations",
           error_message: errorMessage,
-          error_code: error.code
+          error_code: error.code,
         });
-        
-        res.status(500).json({ 
-          error: 'Failed to stop agent session', 
+
+        res.status(500).json({
+          error: "Failed to stop agent session",
           details: errorMessage,
-          processing_time_ms: processingTime
+          processing_time_ms: processingTime,
         });
       }
     }
@@ -356,24 +360,24 @@ export function createAgentRouter(supabaseClient) {
 
     async performHealthCheck(req, res) {
       const startTime = Date.now();
-      
+
       try {
         const userId = req.userId;
-        
-        errorLogger.info('Detailed health check request received', {
+
+        errorLogger.info("Detailed health check request received", {
           userId,
           ip: req.ip,
-          userAgent: req.get('User-Agent')?.substring(0, 100),
-          component: 'AgentHealthOperations'
+          userAgent: req.get("User-Agent")?.substring(0, 100),
+          component: "AgentHealthOperations",
         });
 
         // Get active agent
         const agent = await this.agentService.getActiveAgent(userId);
-        
+
         if (!agent) {
           return res.status(400).json({
-            error: 'No active agent session found',
-            details: 'Start an agent session first'
+            error: "No active agent session found",
+            details: "Start an agent session first",
           });
         }
 
@@ -387,15 +391,16 @@ export function createAgentRouter(supabaseClient) {
           test_results: {
             health: { status: 0, response: null, error: null },
             chat: { status: 0, response: null, error: null },
-            embed: { status: 0, response: null, error: null }
-          }
+            embed: { status: 0, response: null, error: null },
+          },
         };
 
         // Test health endpoint
         try {
           const healthCheck = await this.checkContainerHealth(agent);
-          healthResults.container_reachable = healthCheck.status === 'running';
-          healthResults.test_results.health.status = healthCheck.status === 'running' ? 200 : 500;
+          healthResults.container_reachable = healthCheck.status === "running";
+          healthResults.test_results.health.status =
+            healthCheck.status === "running" ? 200 : 500;
           healthResults.test_results.health.response = healthCheck.data;
         } catch (error) {
           healthResults.test_results.health.error = error.message;
@@ -405,15 +410,25 @@ export function createAgentRouter(supabaseClient) {
         if (healthResults.container_reachable) {
           // Test chat endpoint (simplified)
           try {
-            const chatUrl = `${agent.session_data.runpod_endpoint.replace(/\/+$/, '')}/chat`;
-            const { status } = await axios.post(chatUrl, {
-              message: "Test connection",
-              context: []
-            }, {
-              timeout: 5000,
-              headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
-            });
-            
+            const chatUrl = `${agent.session_data.runpod_endpoint.replace(
+              /\/+$/,
+              ""
+            )}/chat`;
+            const { status } = await axios.post(
+              chatUrl,
+              {
+                message: "Test connection",
+                context: [],
+              },
+              {
+                timeout: 5000,
+                headers: {
+                  Accept: "application/json",
+                  "Content-Type": "application/json",
+                },
+              }
+            );
+
             healthResults.test_results.chat.status = status;
             healthResults.endpoints_working = true;
           } catch (error) {
@@ -422,14 +437,24 @@ export function createAgentRouter(supabaseClient) {
 
           // Test embed endpoint (simplified)
           try {
-            const embedUrl = `${agent.session_data.runpod_endpoint.replace(/\/+$/, '')}/embed`;
-            const { status } = await axios.post(embedUrl, {
-              text: "Test embedding"
-            }, {
-              timeout: 5000,
-              headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
-            });
-            
+            const embedUrl = `${agent.session_data.runpod_endpoint.replace(
+              /\/+$/,
+              ""
+            )}/embed`;
+            const { status } = await axios.post(
+              embedUrl,
+              {
+                text: "Test embedding",
+              },
+              {
+                timeout: 5000,
+                headers: {
+                  Accept: "application/json",
+                  "Content-Type": "application/json",
+                },
+              }
+            );
+
             healthResults.test_results.embed.status = status;
           } catch (error) {
             healthResults.test_results.embed.error = error.message;
@@ -438,72 +463,90 @@ export function createAgentRouter(supabaseClient) {
 
         const processingTime = Date.now() - startTime;
 
-        errorLogger.success('Detailed health check completed', {
+        errorLogger.success("Detailed health check completed", {
           userId,
           agentId: agent.id,
           containerReachable: healthResults.container_reachable,
           endpointsWorking: healthResults.endpoints_working,
           processingTime,
-          component: 'AgentHealthOperations'
+          component: "AgentHealthOperations",
         });
 
         res.json({
           ...healthResults,
-          processing_time_ms: processingTime
+          processing_time_ms: processingTime,
         });
-
       } catch (error) {
         const processingTime = Date.now() - startTime;
-        const errorMessage = error instanceof Error ? error.message : 'Unknown health check error';
-        
-        errorLogger.error('Detailed health check failed', error, {
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown health check error";
+
+        errorLogger.error("Detailed health check failed", error, {
           userId: req.userId,
           processingTime,
           error_message: errorMessage,
           error_code: error.code,
-          component: 'AgentHealthOperations'
+          component: "AgentHealthOperations",
         });
-        
-        res.status(500).json({ 
-          error: 'Health check failed', 
+
+        res.status(500).json({
+          error: "Health check failed",
           details: errorMessage,
-          processing_time_ms: processingTime
+          processing_time_ms: processingTime,
         });
       }
     }
 
     async checkContainerHealth(agent) {
       // Reuse the same logic from AgentStatusOperations
-      const statusOps = new AgentStatusOperations(this.agentService, this.containerService);
+      const statusOps = new AgentStatusOperations(
+        this.agentService,
+        this.containerService
+      );
       return statusOps.checkContainerHealth(agent);
     }
   }
 
   // Initialize operation classes
-  const statusOperations = new AgentStatusOperations(agentService, containerService);
-  const lifecycleOperations = new AgentLifecycleOperations(agentService, containerService);
-  const healthOperations = new AgentHealthOperations(agentService, containerService);
+  const statusOperations = new AgentStatusOperations(
+    agentService,
+    containerService
+  );
+  const lifecycleOperations = new AgentLifecycleOperations(
+    agentService,
+    containerService
+  );
+  const healthOperations = new AgentHealthOperations(
+    agentService,
+    containerService
+  );
 
   // ROUTES
 
   // Agent status endpoint
-  router.get('/status', (req, res) => statusOperations.getStatus(req, res));
+  router.get("/status", statusOperations.getStatus.bind(statusOperations));
 
   // Agent lifecycle endpoints
-  router.post('/start', (req, res) => lifecycleOperations.startAgent(req, res));
-  router.post('/stop', (req, res) => lifecycleOperations.stopAgent(req, res));
+  router.post(
+    "/start",
+    lifecycleOperations.startAgent.bind(lifecycleOperations)
+  );
+  router.post("/stop", lifecycleOperations.stopAgent.bind(lifecycleOperations));
 
   // Agent health endpoints
-  router.post('/health-check', (req, res) => healthOperations.performHealthCheck(req, res));
+  router.post(
+    "/health-check",
+    healthOperations.performHealthCheck.bind(healthOperations)
+  );
 
-  errorLogger.success('Agent routes created successfully', {
+  errorLogger.success("Agent routes created successfully", {
     routes: [
-      'GET /api/agent/status',
-      'POST /api/agent/start', 
-      'POST /api/agent/stop',
-      'POST /api/agent/health-check'
+      "GET /api/agent/status",
+      "POST /api/agent/start",
+      "POST /api/agent/stop",
+      "POST /api/agent/health-check",
     ],
-    component: 'createAgentRouter'
+    component: "createAgentRouter",
   });
 
   return router;
