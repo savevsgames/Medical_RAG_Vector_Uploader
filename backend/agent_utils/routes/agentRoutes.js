@@ -539,6 +539,19 @@ export function createAgentRouter(supabaseClient) {
     healthOperations.performHealthCheck.bind(healthOperations)
   );
 
+  // Routes for custom TEST endpoints
+  router.post('/test-health', verifyToken, async (req, res) => {
+    // Direct health test to container
+  });
+
+  router.post('/test-chat', verifyToken, async (req, res) => {
+    // Direct chat test to container
+  });
+
+  router.post('/test-embed', verifyToken, async (req, res) => {
+    // Direct embed test to container
+  });
+
   errorLogger.success("Agent routes created successfully", {
     routes: [
       "GET /api/agent/status",

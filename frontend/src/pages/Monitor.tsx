@@ -1,5 +1,17 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Activity, RefreshCw, Server, ExternalLink, Copy, Zap, Clock, Database, Play } from 'lucide-react';
+import {
+  Activity,
+  RefreshCw,
+  Server,
+  ExternalLink,
+  Copy,
+  Zap,
+  Clock,
+  Database,
+  Play,
+  Square,
+  TestTube,
+} from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { PageLayout, StatsLayout } from "../components/layouts";
 import { AsyncState } from "../components/feedback";
@@ -29,6 +41,12 @@ export function Monitor() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
+  const [endpointTests, setEndpointTests] = useState({
+    health: { loading: false, result: null, error: null },
+    chat: { loading: false, result: null, error: null },
+    embed: { loading: false, result: null, error: null },
+  });
+
   // Auto-refresh functionality
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
@@ -51,6 +69,125 @@ export function Monitor() {
     fetchAgentStatus,
     performDetailedStatusCheck,
   ]);
+
+  const testHealthEndpoint = async () => {
+    setEndpointTests((prev) => ({
+      ...prev,
+      health: { loading: true, result: null, error: null },
+    }));
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/agent/test-health`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session?.access_token}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const result = await response.json();
+      setEndpointTests((prev) => ({
+        ...prev,
+        health: {
+          loading: false,
+          result,
+          error: response.ok ? null : "Request failed",
+        },
+      }));
+
+      logApiCall("/api/agent/test-health", "POST", response.status);
+    } catch (error) {
+      setEndpointTests((prev) => ({
+        ...prev,
+        health: { loading: false, result: null, error: error.message },
+      }));
+    }
+  };
+
+  const testChatEndpoint = async () => {
+    setEndpointTests((prev) => ({
+      ...prev,
+      chat: { loading: true, result: null, error: null },
+    }));
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/agent/test-chat`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session?.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: "What are the symptoms of diabetes?",
+            history: [],
+            top_k: 5,
+          }),
+        }
+      );
+
+      const result = await response.json();
+      setEndpointTests((prev) => ({
+        ...prev,
+        chat: {
+          loading: false,
+          result,
+          error: response.ok ? null : "Request failed",
+        },
+      }));
+
+      logApiCall("/api/agent/test-chat", "POST", response.status);
+    } catch (error) {
+      setEndpointTests((prev) => ({
+        ...prev,
+        chat: { loading: false, result: null, error: error.message },
+      }));
+    }
+  };
+
+  const testEmbedEndpoint = async () => {
+    setEndpointTests((prev) => ({
+      ...prev,
+      embed: { loading: true, result: null, error: null },
+    }));
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/agent/test-embed`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session?.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            text: "This is a test sentence for embedding generation.",
+          }),
+        }
+      );
+
+      const result = await response.json();
+      setEndpointTests((prev) => ({
+        ...prev,
+        embed: {
+          loading: false,
+          result,
+          error: response.ok ? null : "Request failed",
+        },
+      }));
+
+      logApiCall("/api/agent/test-embed", "POST", response.status);
+    } catch (error) {
+      setEndpointTests((prev) => ({
+        ...prev,
+        embed: { loading: false, result: null, error: error.message },
+      }));
+    }
+  };
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -181,18 +318,38 @@ export function Monitor() {
         onRetry={() => fetchAgentStatus()}
         loadingText="Loading agent status..."
       >
-        {/* Agent Controls - Simplified */}
+        {/* Agent Controls - With Start/Stop Buttons */}
         <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-heading font-bold text-deep-midnight">
               Agent Session Management
             </h2>
+            <div className="flex space-x-3">
+              {agentStatus?.agent_active ? (
+                <Button
+                  variant="danger"
+                  onClick={stopAgent}
+                  loading={actionLoading}
+                  icon={<Square className="w-4 h-4" />}
+                >
+                  {actionLoading ? "Deactivating..." : "Deactivate Session"}
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={startAgent}
+                  loading={actionLoading}
+                  icon={<Play className="w-4 h-4" />}
+                >
+                  {actionLoading ? "Activating..." : "Activate TxAgent"}
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="text-sm text-soft-gray font-body">
             <p>
-              Use the "Activate TxAgent" button above to create a new agent
-              session.
+              Use the "Activate TxAgent" button to create a new agent session.
             </p>
             <p>
               The "Refresh" button will check container status and endpoint
@@ -201,7 +358,187 @@ export function Monitor() {
             <p>Multiple users can have their own independent agent sessions.</p>
           </div>
         </div>
+        // Update the Connection Test Results section with individual test
+        buttons:
+        {/* Connection Test Results - ALWAYS VISIBLE with Individual Tests */}
+        <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
+          <h2 className="text-lg font-heading font-bold text-deep-midnight mb-4">
+            Container Endpoint Testing
+          </h2>
 
+          <div className="text-sm text-soft-gray mb-4 font-body">
+            Test individual container endpoints and view raw JSON responses.
+            These use the same routes as your Postman tests.
+          </div>
+
+          <div className="grid grid-cols-1 gap-6">
+            {/* Health Endpoint Test */}
+            <div className="bg-sky-blue/20 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Health Endpoint
+                  </span>
+                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
+                    /health
+                  </code>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={testHealthEndpoint}
+                  loading={endpointTests.health.loading}
+                  icon={<TestTube className="w-4 h-4" />}
+                >
+                  {endpointTests.health.loading ? "Testing..." : "Test Health"}
+                </Button>
+              </div>
+
+              {endpointTests.health.result && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-deep-midnight">
+                      Response:
+                    </span>
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          JSON.stringify(endpointTests.health.result, null, 2),
+                          "Health response"
+                        )
+                      }
+                      className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
+                    >
+                      <Copy className="w-3 h-3 text-soft-gray" />
+                    </button>
+                  </div>
+                  <pre className="bg-white/70 rounded p-3 text-xs overflow-x-auto font-mono text-deep-midnight">
+                    {JSON.stringify(endpointTests.health.result, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {endpointTests.health.error && (
+                <div className="mt-3 p-3 bg-red-100 rounded text-red-600 text-xs">
+                  Error: {endpointTests.health.error}
+                </div>
+              )}
+            </div>
+
+            {/* Chat Endpoint Test */}
+            <div className="bg-sky-blue/20 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Chat Endpoint
+                  </span>
+                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
+                    /chat
+                  </code>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={testChatEndpoint}
+                  loading={endpointTests.chat.loading}
+                  icon={<TestTube className="w-4 h-4" />}
+                >
+                  {endpointTests.chat.loading ? "Testing..." : "Test Chat"}
+                </Button>
+              </div>
+
+              {endpointTests.chat.result && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-deep-midnight">
+                      Response:
+                    </span>
+                    <button
+                      onClick={() =>
+                        copyToClipboard(
+                          JSON.stringify(endpointTests.chat.result, null, 2),
+                          "Chat response"
+                        )
+                      }
+                      className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
+                    >
+                      <Copy className="w-3 h-3 text-soft-gray" />
+                    </button>
+                  </div>
+                  <pre className="bg-white/70 rounded p-3 text-xs overflow-x-auto font-mono text-deep-midnight">
+                    {JSON.stringify(endpointTests.chat.result, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {endpointTests.chat.error && (
+                <div className="mt-3 p-3 bg-red-100 rounded text-red-600 text-xs">
+                  Error: {endpointTests.chat.error}
+                </div>
+              )}
+            </div>
+
+            {/* Embed Endpoint Test */}
+            <div className="bg-sky-blue/20 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Embed Endpoint
+                  </span>
+                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
+                    /embed
+                  </code>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={testEmbedEndpoint}
+                  loading={endpointTests.embed.loading}
+                  icon={<TestTube className="w-4 h-4" />}
+                >
+                  {endpointTests.embed.loading ? "Testing..." : "Test Embed"}
+                </Button>
+              </div>
+
+              {endpointTests.embed.result && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-deep-midnight">
+                      Response:
+                    </span>
+                    <div className="flex items-center space-x-2">
+                      {endpointTests.embed.result.embedding && (
+                        <span className="text-xs text-healing-teal font-medium">
+                          {endpointTests.embed.result.embedding.length}D
+                        </span>
+                      )}
+                      <button
+                        onClick={() =>
+                          copyToClipboard(
+                            JSON.stringify(endpointTests.embed.result, null, 2),
+                            "Embed response"
+                          )
+                        }
+                        className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
+                      >
+                        <Copy className="w-3 h-3 text-soft-gray" />
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="bg-white/70 rounded p-3 text-xs overflow-x-auto font-mono text-deep-midnight max-h-40">
+                    {JSON.stringify(endpointTests.embed.result, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {endpointTests.embed.error && (
+                <div className="mt-3 p-3 bg-red-100 rounded text-red-600 text-xs">
+                  Error: {endpointTests.embed.error}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
         {/* Container Details Section - ALWAYS VISIBLE */}
         <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
           <div className="flex items-center justify-between mb-4">
@@ -479,7 +816,6 @@ export function Monitor() {
             )}
           </div>
         </div>
-
         {/* Connection Test Results - ALWAYS VISIBLE */}
         <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
           <h2 className="text-lg font-heading font-bold text-deep-midnight mb-4">
