@@ -1,12 +1,27 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Activity, RefreshCw, Server, ExternalLink, Copy, Zap, Clock, Database } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { PageLayout, StatsLayout } from '../components/layouts';
-import { AsyncState } from '../components/feedback';
-import { Button } from '../components/ui';
-import { useAgents } from '../hooks/useAgents';
-import toast from 'react-hot-toast';
-import { logger, logUserAction, logApiCall, logAgentOperation } from '../utils/logger';
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Activity,
+  RefreshCw,
+  Server,
+  ExternalLink,
+  Copy,
+  Zap,
+  Clock,
+  Database,
+  Play,
+} from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
+import { PageLayout, StatsLayout } from "../components/layouts";
+import { AsyncState } from "../components/feedback";
+import { Button } from "../components/ui";
+import { useAgents } from "../hooks/useAgents";
+import toast from "react-hot-toast";
+import {
+  logger,
+  logUserAction,
+  logApiCall,
+  logAgentOperation,
+} from "../utils/logger";
 
 export function Monitor() {
   const {
@@ -18,7 +33,7 @@ export function Monitor() {
     fetchAgentStatus,
     startAgent,
     stopAgent,
-    performDetailedStatusCheck
+    performDetailedStatusCheck,
   } = useAgents();
 
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -27,7 +42,7 @@ export function Monitor() {
   // Auto-refresh functionality
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
-    
+
     if (autoRefresh) {
       interval = setInterval(() => {
         fetchAgentStatus(true);
@@ -36,11 +51,16 @@ export function Monitor() {
         }
       }, 30000);
     }
-    
+
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [autoRefresh, agentStatus?.agent_active, fetchAgentStatus, performDetailedStatusCheck]);
+  }, [
+    autoRefresh,
+    agentStatus?.agent_active,
+    fetchAgentStatus,
+    performDetailedStatusCheck,
+  ]);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -63,27 +83,58 @@ export function Monitor() {
   const getStatusStats = () => {
     return [
       {
-        label: 'Session',
-        value: agentStatus?.agent_active ? 'Active' : 'Inactive',
-        color: agentStatus?.agent_active ? 'healing-teal' as const : 'red' as const
+        label: "Session",
+        value: agentStatus?.agent_active ? "Active" : "Inactive",
+        color: agentStatus?.agent_active
+          ? ("healing-teal" as const)
+          : ("red" as const),
       },
       {
-        label: 'Container',
-        value: agentStatus?.container_status || 'Unknown',
-        color: agentStatus?.container_status === 'running' ? 'healing-teal' as const : 'guardian-gold' as const
+        label: "Container",
+        value: agentStatus?.container_status || "Unknown",
+        color:
+          agentStatus?.container_status === "running"
+            ? ("healing-teal" as const)
+            : ("guardian-gold" as const),
       },
       {
-        label: 'Connection',
-        value: detailedStatus?.container_reachable ? 'Reachable' : 'Unknown',
-        color: detailedStatus?.container_reachable ? 'healing-teal' as const : 'soft-gray' as const
+        label: "Connection",
+        value: detailedStatus?.container_reachable ? "Reachable" : "Unknown",
+        color: detailedStatus?.container_reachable
+          ? ("healing-teal" as const)
+          : ("soft-gray" as const),
       },
       {
-        label: 'Endpoints',
-        value: detailedStatus?.endpoints_working ? 'Working' : 'Unknown',
-        color: detailedStatus?.endpoints_working ? 'healing-teal' as const : 'soft-gray' as const
-      }
+        label: "Endpoints",
+        value: detailedStatus?.endpoints_working ? "Working" : "Unknown",
+        color: detailedStatus?.endpoints_working
+          ? ("healing-teal" as const)
+          : ("soft-gray" as const),
+      },
     ];
   };
+
+  const handleComprehensiveRefresh = useCallback(async () => {
+    try {
+      setLastRefresh(new Date());
+
+      // First fetch the agent status
+      await fetchAgentStatus();
+
+      // If there's an active agent, also perform detailed health check
+      if (agentStatus?.agent_active) {
+        await performDetailedStatusCheck();
+      }
+
+      toast.success("Status refreshed successfully");
+    } catch (error) {
+      logger.error("Failed to refresh agent status:", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        component: "Monitor",
+      });
+      toast.error("Failed to refresh status");
+    }
+  }, [fetchAgentStatus, performDetailedStatusCheck, agentStatus?.agent_active]);
 
   return (
     <PageLayout
@@ -92,6 +143,7 @@ export function Monitor() {
       icon={<Activity className="w-6 h-6 text-healing-teal" />}
       actions={
         <div className="flex items-center space-x-4">
+          {/* Auto-refresh toggle */}
           <div className="flex items-center space-x-2">
             <input
               type="checkbox"
@@ -100,13 +152,53 @@ export function Monitor() {
               onChange={(e) => setAutoRefresh(e.target.checked)}
               className="rounded border-soft-gray/30 text-healing-teal focus:ring-healing-teal"
             />
-            <label htmlFor="auto-refresh" className="text-sm text-deep-midnight font-body">
+            <label
+              htmlFor="auto-refresh"
+              className="text-sm text-deep-midnight font-body"
+            >
               Auto-refresh (30s)
             </label>
           </div>
+
+          {/* Enhanced Refresh Button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleComprehensiveRefresh}
+            loading={loading || statusTesting}
+            icon={<RefreshCw className="w-4 h-4" />}
+          >
+            {loading || statusTesting ? "Refreshing..." : "Refresh"}
+          </Button>
+
+          {/* Agent Session Control */}
+          {agentStatus?.agent_active ? (
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={stopAgent}
+              loading={actionLoading}
+            >
+              {actionLoading ? "Deactivating..." : "Deactivate Session"}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={startAgent}
+              loading={actionLoading}
+              icon={<Play className="w-4 h-4" />}
+            >
+              {actionLoading ? "Activating..." : "Activate TxAgent"}
+            </Button>
+          )}
+
+          {/* Last updated indicator */}
           <div className="text-right">
             <p className="text-sm text-soft-gray font-body">Last updated</p>
-            <p className="text-sm font-subheading font-medium text-deep-midnight">{lastRefresh.toLocaleTimeString()}</p>
+            <p className="text-sm font-subheading font-medium text-deep-midnight">
+              {lastRefresh.toLocaleTimeString()}
+            </p>
           </div>
         </div>
       }
@@ -124,7 +216,9 @@ export function Monitor() {
         {/* Agent Controls */}
         <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-heading font-bold text-deep-midnight">Agent Controls</h2>
+            <h2 className="text-lg font-heading font-bold text-deep-midnight">
+              Agent Controls
+            </h2>
             <div className="flex space-x-2">
               <Button
                 variant="primary"
@@ -133,7 +227,7 @@ export function Monitor() {
                 disabled={statusTesting || !agentStatus?.agent_active}
                 loading={statusTesting}
               >
-                {statusTesting ? 'Testing...' : 'Test Connection'}
+                {statusTesting ? "Testing..." : "Test Connection"}
               </Button>
               <Button
                 variant="ghost"
@@ -145,7 +239,7 @@ export function Monitor() {
               </Button>
             </div>
           </div>
-          
+
           <div className="flex space-x-3 mb-6">
             {agentStatus?.agent_active ? (
               <Button
@@ -153,7 +247,7 @@ export function Monitor() {
                 onClick={stopAgent}
                 loading={actionLoading}
               >
-                {actionLoading ? 'Deactivating...' : 'Deactivate Session'}
+                {actionLoading ? "Deactivating..." : "Deactivate Session"}
               </Button>
             ) : (
               <Button
@@ -161,7 +255,7 @@ export function Monitor() {
                 onClick={startAgent}
                 loading={actionLoading}
               >
-                {actionLoading ? 'Activating...' : 'Activate TxAgent'}
+                {actionLoading ? "Activating..." : "Activate TxAgent"}
               </Button>
             )}
           </div>
@@ -199,13 +293,17 @@ export function Monitor() {
                   <div className="space-y-2 text-sm">
                     {agentStatus.agent_id && (
                       <div className="flex items-center justify-between">
-                        <span className="text-soft-gray font-body">Agent ID:</span>
+                        <span className="text-soft-gray font-body">
+                          Agent ID:
+                        </span>
                         <div className="flex items-center space-x-2">
                           <span className="font-mono text-deep-midnight text-xs">
                             {agentStatus.agent_id.substring(0, 12)}...
                           </span>
                           <button
-                            onClick={() => copyToClipboard(agentStatus.agent_id!, 'Agent ID')}
+                            onClick={() =>
+                              copyToClipboard(agentStatus.agent_id!, "Agent ID")
+                            }
                             className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
                           >
                             <Copy className="w-3 h-3 text-soft-gray" />
@@ -213,16 +311,27 @@ export function Monitor() {
                         </div>
                       </div>
                     )}
-                    
+
                     {agentStatus.session_data.container_id && (
                       <div className="flex items-center justify-between">
-                        <span className="text-soft-gray font-body">Container ID:</span>
+                        <span className="text-soft-gray font-body">
+                          Container ID:
+                        </span>
                         <div className="flex items-center space-x-2">
                           <span className="font-mono text-deep-midnight text-xs">
-                            {agentStatus.session_data.container_id.substring(0, 12)}...
+                            {agentStatus.session_data.container_id.substring(
+                              0,
+                              12
+                            )}
+                            ...
                           </span>
                           <button
-                            onClick={() => copyToClipboard(agentStatus.session_data.container_id, 'Container ID')}
+                            onClick={() =>
+                              copyToClipboard(
+                                agentStatus.session_data.container_id,
+                                "Container ID"
+                              )
+                            }
                             className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
                           >
                             <Copy className="w-3 h-3 text-soft-gray" />
@@ -233,16 +342,22 @@ export function Monitor() {
 
                     {agentStatus.session_data.started_at && (
                       <div className="flex items-center justify-between">
-                        <span className="text-soft-gray font-body">Started:</span>
+                        <span className="text-soft-gray font-body">
+                          Started:
+                        </span>
                         <span className="text-deep-midnight font-body text-xs">
-                          {new Date(agentStatus.session_data.started_at).toLocaleString()}
+                          {new Date(
+                            agentStatus.session_data.started_at
+                          ).toLocaleString()}
                         </span>
                       </div>
                     )}
 
                     {agentStatus.session_data.started_at && (
                       <div className="flex items-center justify-between">
-                        <span className="text-soft-gray font-body">Uptime:</span>
+                        <span className="text-soft-gray font-body">
+                          Uptime:
+                        </span>
                         <div className="flex items-center space-x-1">
                           <Clock className="w-3 h-3 text-healing-teal" />
                           <span className="text-deep-midnight font-body text-xs">
@@ -255,51 +370,60 @@ export function Monitor() {
                 </div>
 
                 {/* Container Health */}
-                {agentStatus.container_health && typeof agentStatus.container_health === 'object' && (
-                  <div className="bg-healing-teal/10 rounded-xl p-4">
-                    <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
-                      <Zap className="w-4 h-4 mr-2 text-healing-teal" />
-                      TxAgent Health
-                    </h4>
-                    <div className="space-y-2 text-sm">
-                      {agentStatus.container_health.status && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-soft-gray font-body">Status:</span>
-                          <span className="text-healing-teal font-subheading font-medium">
-                            {agentStatus.container_health.status}
-                          </span>
-                        </div>
-                      )}
-                      
-                      {agentStatus.container_health.model && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-soft-gray font-body">Model:</span>
-                          <span className="text-deep-midnight font-body">
-                            {agentStatus.container_health.model}
-                          </span>
-                        </div>
-                      )}
-                      
-                      {agentStatus.container_health.device && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-soft-gray font-body">Device:</span>
-                          <span className="text-deep-midnight font-body">
-                            {agentStatus.container_health.device}
-                          </span>
-                        </div>
-                      )}
-                      
-                      {agentStatus.container_health.version && (
-                        <div className="flex items-center justify-between">
-                          <span className="text-soft-gray font-body">Version:</span>
-                          <span className="text-deep-midnight font-body">
-                            {agentStatus.container_health.version}
-                          </span>
-                        </div>
-                      )}
+                {agentStatus.container_health &&
+                  typeof agentStatus.container_health === "object" && (
+                    <div className="bg-healing-teal/10 rounded-xl p-4">
+                      <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
+                        <Zap className="w-4 h-4 mr-2 text-healing-teal" />
+                        TxAgent Health
+                      </h4>
+                      <div className="space-y-2 text-sm">
+                        {agentStatus.container_health.status && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-soft-gray font-body">
+                              Status:
+                            </span>
+                            <span className="text-healing-teal font-subheading font-medium">
+                              {agentStatus.container_health.status}
+                            </span>
+                          </div>
+                        )}
+
+                        {agentStatus.container_health.model && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-soft-gray font-body">
+                              Model:
+                            </span>
+                            <span className="text-deep-midnight font-body">
+                              {agentStatus.container_health.model}
+                            </span>
+                          </div>
+                        )}
+
+                        {agentStatus.container_health.device && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-soft-gray font-body">
+                              Device:
+                            </span>
+                            <span className="text-deep-midnight font-body">
+                              {agentStatus.container_health.device}
+                            </span>
+                          </div>
+                        )}
+
+                        {agentStatus.container_health.version && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-soft-gray font-body">
+                              Version:
+                            </span>
+                            <span className="text-deep-midnight font-body">
+                              {agentStatus.container_health.version}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
               </div>
 
               {/* RunPod Endpoint */}
@@ -314,7 +438,12 @@ export function Monitor() {
                       {agentStatus.session_data.runpod_endpoint}
                     </span>
                     <button
-                      onClick={() => copyToClipboard(agentStatus.session_data.runpod_endpoint, 'RunPod Endpoint')}
+                      onClick={() =>
+                        copyToClipboard(
+                          agentStatus.session_data.runpod_endpoint,
+                          "RunPod Endpoint"
+                        )
+                      }
                       className="ml-2 p-2 hover:bg-sky-blue/20 rounded transition-colors flex-shrink-0"
                     >
                       <Copy className="w-4 h-4 text-soft-gray" />
@@ -324,23 +453,26 @@ export function Monitor() {
               )}
 
               {/* Capabilities */}
-              {agentStatus.session_data.capabilities && Array.isArray(agentStatus.session_data.capabilities) && (
-                <div className="mt-4">
-                  <h4 className="font-subheading font-medium text-deep-midnight mb-2">
-                    Capabilities
-                  </h4>
-                  <div className="flex flex-wrap gap-2">
-                    {agentStatus.session_data.capabilities.map((capability: string, index: number) => (
-                      <span
-                        key={index}
-                        className="px-3 py-1 bg-healing-teal/10 text-healing-teal rounded-full text-xs font-body"
-                      >
-                        {capability}
-                      </span>
-                    ))}
+              {agentStatus.session_data.capabilities &&
+                Array.isArray(agentStatus.session_data.capabilities) && (
+                  <div className="mt-4">
+                    <h4 className="font-subheading font-medium text-deep-midnight mb-2">
+                      Capabilities
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {agentStatus.session_data.capabilities.map(
+                        (capability: string, index: number) => (
+                          <span
+                            key={index}
+                            className="px-3 py-1 bg-healing-teal/10 text-healing-teal rounded-full text-xs font-body"
+                          >
+                            {capability}
+                          </span>
+                        )
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
             </div>
           )}
         </div>
@@ -352,20 +484,25 @@ export function Monitor() {
               Connection Test Results
             </h2>
             <div className="text-xs text-soft-gray mb-4 font-body">
-              Last tested: {new Date(detailedStatus.last_test_time).toLocaleString()}
+              Last tested:{" "}
+              {new Date(detailedStatus.last_test_time).toLocaleString()}
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Health Endpoint */}
               <div className="bg-sky-blue/20 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-subheading font-medium text-deep-midnight">Health Check</span>
-                  <span className={`px-2 py-1 rounded-full text-xs font-body ${
-                    detailedStatus.test_results.health.status === 200 
-                      ? 'bg-healing-teal/20 text-healing-teal' 
-                      : 'bg-red-100 text-red-600'
-                  }`}>
-                    {detailedStatus.test_results.health.status || 'Failed'}
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Health Check
+                  </span>
+                  <span
+                    className={`px-2 py-1 rounded-full text-xs font-body ${
+                      detailedStatus.test_results.health.status === 200
+                        ? "bg-healing-teal/20 text-healing-teal"
+                        : "bg-red-100 text-red-600"
+                    }`}
+                  >
+                    {detailedStatus.test_results.health.status || "Failed"}
                   </span>
                 </div>
                 {detailedStatus.test_results.health.error && (
@@ -378,13 +515,17 @@ export function Monitor() {
               {/* Chat Endpoint */}
               <div className="bg-sky-blue/20 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-subheading font-medium text-deep-midnight">Chat Endpoint</span>
-                  <span className={`px-2 py-1 rounded-full text-xs font-body ${
-                    detailedStatus.test_results.chat.status === 200 
-                      ? 'bg-healing-teal/20 text-healing-teal' 
-                      : 'bg-red-100 text-red-600'
-                  }`}>
-                    {detailedStatus.test_results.chat.status || 'Failed'}
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Chat Endpoint
+                  </span>
+                  <span
+                    className={`px-2 py-1 rounded-full text-xs font-body ${
+                      detailedStatus.test_results.chat.status === 200
+                        ? "bg-healing-teal/20 text-healing-teal"
+                        : "bg-red-100 text-red-600"
+                    }`}
+                  >
+                    {detailedStatus.test_results.chat.status || "Failed"}
                   </span>
                 </div>
                 {detailedStatus.test_results.chat.error && (
@@ -397,13 +538,17 @@ export function Monitor() {
               {/* Embed Endpoint */}
               <div className="bg-sky-blue/20 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-subheading font-medium text-deep-midnight">Embed Endpoint</span>
-                  <span className={`px-2 py-1 rounded-full text-xs font-body ${
-                    detailedStatus.test_results.embed.status === 200 
-                      ? 'bg-healing-teal/20 text-healing-teal' 
-                      : 'bg-red-100 text-red-600'
-                  }`}>
-                    {detailedStatus.test_results.embed.status || 'Failed'}
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Embed Endpoint
+                  </span>
+                  <span
+                    className={`px-2 py-1 rounded-full text-xs font-body ${
+                      detailedStatus.test_results.embed.status === 200
+                        ? "bg-healing-teal/20 text-healing-teal"
+                        : "bg-red-100 text-red-600"
+                    }`}
+                  >
+                    {detailedStatus.test_results.embed.status || "Failed"}
                   </span>
                 </div>
                 {detailedStatus.test_results.embed.error && (
