@@ -45,6 +45,51 @@ export function Documents() {
   const [viewDocument, setViewDocument] = useState<Document | null>(null);
   const [editDocument, setEditDocument] = useState<Document | null>(null);
 
+  // Debugging states
+  const [debugResult, setDebugResult] = useState(null);
+  const [debugLoading, setDebugLoading] = useState(false);
+
+  const debugUpload = async () => {
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".pdf,.docx,.txt,.md";
+
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setDebugLoading(true);
+      setDebugResult(null);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/debug-upload`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${session?.access_token}`,
+            },
+            body: formData,
+          }
+        );
+
+        const result = await response.json();
+        setDebugResult(result);
+        console.log("🔍 Debug Upload Result:", result);
+      } catch (error) {
+        setDebugResult({ error: error.message });
+        console.error("🔍 Debug Upload Error:", error);
+      } finally {
+        setDebugLoading(false);
+      }
+    };
+
+    fileInput.click();
+  };
+
   const fetchDocuments = async () => {
     const userEmail = user?.email;
 
@@ -266,6 +311,14 @@ export function Documents() {
             {testingEmbed ? "Testing..." : "Test Embed"}
           </Button>
 
+          <button
+            onClick={debugUpload}
+            disabled={debugLoading}
+            className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50"
+          >
+            {debugLoading ? "Testing Upload..." : "Debug Upload Flow"}
+          </button>
+
           <Button
             onClick={() => setShowUploadModal(true)}
             icon={<Plus className="w-5 h-5" />}
@@ -346,6 +399,15 @@ export function Documents() {
               </div>
 
               {/* Results Info */}
+              {debugResult && (
+                <div className="mt-4 p-4 bg-gray-100 rounded-lg">
+                  <h4 className="font-bold mb-2">Debug Upload Results:</h4>
+                  <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(debugResult, null, 2)}
+                  </pre>
+                </div>
+              )}
+
               <div className="mt-6 pt-6 border-t border-soft-gray/20 text-sm text-soft-gray text-center font-body">
                 Showing {filteredDocuments.length} of {documents.length}{" "}
                 documents

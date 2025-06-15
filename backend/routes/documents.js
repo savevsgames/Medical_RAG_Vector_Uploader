@@ -173,6 +173,121 @@ export function createDocumentsRouter(supabaseClient) {
     }
   });
 
+  // Add this to your documents.js router
+  router.post("/debug-upload", upload.single("file"), async (req, res) => {
+    try {
+      const debugInfo = {
+        step1_file_received: false,
+        step2_supabase_storage: false,
+        step3_txagent_reachable: false,
+        step4_txagent_process: false,
+        errors: [],
+        details: {},
+      };
+
+      // Step 1: Check if file was received
+      if (req.file) {
+        debugInfo.step1_file_received = true;
+        debugInfo.details.file = {
+          name: req.file.originalname,
+          size: req.file.size,
+          mimetype: req.file.mimetype,
+          userId: req.userId,
+        };
+      } else {
+        debugInfo.errors.push("No file received in request");
+        return res.json(debugInfo);
+      }
+
+      // Step 2: Test Supabase Storage Upload
+      try {
+        const { data: uploadData, error: uploadError } =
+          await supabaseClient.storage
+            .from("documents")
+            .upload(`${req.userId}/${req.file.originalname}`, req.file.buffer);
+
+        if (uploadError) {
+          debugInfo.errors.push(
+            `Supabase upload error: ${uploadError.message}`
+          );
+          debugInfo.details.supabase_error = uploadError;
+        } else {
+          debugInfo.step2_supabase_storage = true;
+          debugInfo.details.supabase_upload = uploadData;
+        }
+      } catch (e) {
+        debugInfo.errors.push(`Supabase upload exception: ${e.message}`);
+      }
+
+      // Step 3: Test TxAgent Reachability
+      try {
+        const healthResponse = await fetch(
+          `${process.env.RUNPOD_EMBEDDING_URL}/health`
+        );
+        if (healthResponse.ok) {
+          debugInfo.step3_txagent_reachable = true;
+          debugInfo.details.txagent_health = await healthResponse.json();
+        } else {
+          debugInfo.errors.push(
+            `TxAgent health check failed: ${healthResponse.status}`
+          );
+        }
+      } catch (e) {
+        debugInfo.errors.push(`TxAgent health check exception: ${e.message}`);
+      }
+
+      // Step 4: Test TxAgent Process Document (only if storage worked)
+      if (
+        debugInfo.step2_supabase_storage &&
+        debugInfo.step3_txagent_reachable
+      ) {
+        try {
+          const txAgentResponse = await fetch(
+            `${process.env.RUNPOD_EMBEDDING_URL}/process-document`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: req.headers.authorization,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                file_path: debugInfo.details.supabase_upload.path,
+              }),
+            }
+          );
+
+          if (txAgentResponse.ok) {
+            debugInfo.step4_txagent_process = true;
+            debugInfo.details.txagent_response = await txAgentResponse.json();
+          } else {
+            debugInfo.errors.push(
+              `TxAgent process failed: ${txAgentResponse.status}`
+            );
+          }
+        } catch (e) {
+          debugInfo.errors.push(`TxAgent process exception: ${e.message}`);
+        }
+      }
+
+      debugInfo.details.environment = {
+        has_runpod_url: !!process.env.RUNPOD_EMBEDDING_URL,
+        runpod_url: process.env.RUNPOD_EMBEDDING_URL,
+        has_supabase_url: !!process.env.SUPABASE_URL,
+      };
+
+      res.json(debugInfo);
+    } catch (error) {
+      res.status(500).json({
+        error: error.message,
+        step1_file_received: false,
+        step2_supabase_storage: false,
+        step3_txagent_reachable: false,
+        step4_txagent_process: false,
+        errors: [error.message],
+      });
+    }
+  });
+
   return router;
 }
 
