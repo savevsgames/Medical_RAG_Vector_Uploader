@@ -76,43 +76,84 @@ export function createDocumentsRouter(supabaseClient) {
   // Enhanced document upload endpoint with comprehensive logging
   router.post("/upload", upload.single("file"), async (req, res) => {
     try {
-      // 1. Upload file to Supabase Storage first
+      if (!req.file) {
+        return res.status(400).json({ error: "No file provided" });
+      }
+
+      errorLogger.info("Starting file upload", {
+        filename: req.file.originalname,
+        size: req.file.size,
+        userId: req.userId,
+      });
+
+      // Step 1: Upload to Supabase Storage (use service role key for storage)
       const { data: uploadData, error: uploadError } =
         await supabaseClient.storage
           .from("documents")
           .upload(`${req.userId}/${req.file.originalname}`, req.file.buffer);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        errorLogger.error("Supabase storage upload failed", uploadError);
+        throw new Error(`Storage upload failed: ${uploadError.message}`);
+      }
 
-      // 2. Tell TxAgent to process the document
+      errorLogger.info("File uploaded to storage", {
+        filePath: uploadData.path,
+      });
+
+      // Step 2: Call TxAgent container to process the document
       const txAgentResponse = await fetch(
         `${process.env.RUNPOD_EMBEDDING_URL}/process-document`,
         {
           method: "POST",
           headers: {
-            Authorization: req.headers.authorization, // Pass through JWT
+            Authorization: req.headers.authorization, // Pass through user's JWT
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
             file_path: uploadData.path,
+            metadata: {
+              title: req.file.originalname,
+              author: "Unknown",
+              category: "medical",
+              year: new Date().getFullYear().toString(),
+              source: "User Upload",
+            },
           }),
         }
       );
 
       if (!txAgentResponse.ok) {
-        throw new Error(`TxAgent processing failed: ${txAgentResponse.status}`);
+        const errorText = await txAgentResponse.text();
+        errorLogger.error("TxAgent processing failed", {
+          status: txAgentResponse.status,
+          error: errorText,
+        });
+        throw new Error(
+          `TxAgent processing failed: ${txAgentResponse.status} - ${errorText}`
+        );
       }
 
-      const result = await txAgentResponse.json();
+      const processingResult = await txAgentResponse.json();
 
+      errorLogger.info("Document processing started", {
+        jobId: processingResult.job_id,
+        filePath: uploadData.path,
+      });
+
+      // Return success with job ID for status monitoring
       res.json({
         success: true,
         message: "Document uploaded and processing started",
         file_path: uploadData.path,
-        processing_result: result,
+        job_id: processingResult.job_id,
+        status: processingResult.status,
       });
     } catch (error) {
-      errorLogger.error("Upload failed", { error: error.message });
+      errorLogger.error("Upload failed", {
+        error: error.message,
+        stack: error.stack,
+      });
       res.status(500).json({ error: error.message });
     }
   });
@@ -285,6 +326,31 @@ export function createDocumentsRouter(supabaseClient) {
         step4_txagent_process: false,
         errors: [error.message],
       });
+    }
+  });
+
+  router.get("/job-status/:jobId", verifyToken, async (req, res) => {
+    try {
+      const { jobId } = req.params;
+
+      const response = await fetch(
+        `${process.env.RUNPOD_EMBEDDING_URL}/embedding-jobs/${jobId}`,
+        {
+          headers: {
+            Authorization: req.headers.authorization,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to get job status: ${response.status}`);
+      }
+
+      const jobStatus = await response.json();
+      res.json(jobStatus);
+    } catch (error) {
+      errorLogger.error("Job status check failed", { error: error.message });
+      res.status(500).json({ error: error.message });
     }
   });
 
