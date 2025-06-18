@@ -155,12 +155,19 @@ export function createDocumentsRouter(supabaseClient) {
         userId: req.userId,
       });
 
+      // Optional: Add job_id to response for better debugging
       res.json({
         success: true,
         message: "Document uploaded and processing started",
         file_path: uploadData.path,
-        job_id: result.job_id,
+        job_id: result.job_id, // ✅ Make sure this is returned
         status: result.status,
+        // ✅ Add debug info
+        debug: {
+          object_key: objectKey,
+          user_id: req.userId,
+          txagent_response: result,
+        },
       });
     } catch (error) {
       errorLogger.error("Upload failed", {
