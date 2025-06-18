@@ -1,35 +1,36 @@
-import { errorLogger } from '../agent_utils/shared/logger.js';
+import { errorLogger } from "../agent_utils/shared/logger.js";
 
 export function requestLogger(req, res, next) {
   const startTime = Date.now();
-  
+
   // Skip logging for health checks to reduce noise
-  if (req.path === '/health') {
+  if (req.path === "/health") {
     return next();
   }
 
-  const userEmail = req.user?.email || req.userId || 'anonymous';
-  
-  errorLogger.info('Request received', {
+  // ✅ FIX: Use proper user extraction
+  const userEmail = req.user?.email || req.userEmail || "anonymous";
+
+  errorLogger.info("Request received", {
     method: req.method,
     path: req.path,
-    user: userEmail,
+    user: userEmail, // ✅ Now will show actual email instead of 'anonymous'
     ip: req.ip,
-    userAgent: req.get('User-Agent')?.substring(0, 100),
-    component: 'RequestLogger'
+    userAgent: req.get("User-Agent")?.substring(0, 100),
+    component: "RequestLogger",
   });
 
-  res.on('finish', () => {
+  res.on("finish", () => {
     const duration = Date.now() - startTime;
-    const logLevel = res.statusCode >= 400 ? 'error' : 'info';
-    
-    errorLogger[logLevel]('Request completed', {
+    const logLevel = res.statusCode >= 400 ? "error" : "info";
+
+    errorLogger[logLevel]("Request completed", {
       method: req.method,
       path: req.path,
       status: res.statusCode,
       duration: `${duration}ms`,
-      user: userEmail,
-      component: 'RequestLogger'
+      user: userEmail, // ✅ Now will show actual email
+      component: "RequestLogger",
     });
   });
 
