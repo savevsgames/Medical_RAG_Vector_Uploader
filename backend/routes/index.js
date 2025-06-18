@@ -1,4 +1,5 @@
 import express from "express";
+import fetch from "node-fetch"; // ✅ Add this if using Node < 18
 import { healthRouter } from "./health.js";
 import { createDocumentsRouter } from "./documents.js";
 import { createChatRouter } from "./chat.js";
@@ -84,3 +85,7 @@ export function setupRoutes(app, supabaseClient) {
 }
 
 export default setupRoutes;
+
+export { ChatService } from "./ChatService.js"; // ✅ Keep this
+// export { DocumentProcessingService } from './DocumentProcessingService.js';  // ❌ Removed
+// export { EmbeddingService } from './EmbeddingService.js';                    // ❌ Removed

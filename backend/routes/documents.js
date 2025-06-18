@@ -21,6 +21,12 @@ export function createDocumentsRouter(supabaseClient) {
         return res.status(400).json({ error: "No file provided" });
       }
 
+      // ✅ Sanitize filename for Supabase Storage
+      const sanitizedFilename = req.file.originalname
+        .replace(/[^a-zA-Z0-9.-]/g, "_") // Replace special chars with underscore
+        .replace(/_{2,}/g, "_") // Replace multiple underscores with single
+        .substring(0, 100); // Limit length
+
       errorLogger.info("Starting file upload", {
         filename: req.file.originalname,
         size: req.file.size,
@@ -31,7 +37,14 @@ export function createDocumentsRouter(supabaseClient) {
       const { data: uploadData, error: uploadError } =
         await supabaseClient.storage
           .from("documents")
-          .upload(`${req.userId}/${req.file.originalname}`, req.file.buffer);
+          .upload(
+            `${req.userId}/${Date.now()}_${sanitizedFilename}`,
+            req.file.buffer,
+            {
+              contentType: req.file.mimetype,
+              upsert: false,
+            }
+          );
 
       if (uploadError) {
         errorLogger.error("Supabase storage upload failed", uploadError);
@@ -93,6 +106,14 @@ export function createDocumentsRouter(supabaseClient) {
         error: error.message,
         stack: error.stack,
       });
+      // Handle multer errors specifically
+      if (error instanceof multer.MulterError) {
+        if (error.code === "LIMIT_FILE_SIZE") {
+          return res.status(400).json({
+            error: "File too large. Maximum size is 50MB.",
+          });
+        }
+      }
       res.status(500).json({ error: error.message });
     }
   });
