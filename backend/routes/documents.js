@@ -86,7 +86,7 @@ export function createDocumentsRouter(supabaseClient) {
         userId: req.userId,
       });
 
-      // Step 1: Upload to Supabase Storage (use service role key for storage)
+      // Step 1: Upload to Supabase Storage ONLY
       const { data: uploadData, error: uploadError } =
         await supabaseClient.storage
           .from("documents")
@@ -101,22 +101,21 @@ export function createDocumentsRouter(supabaseClient) {
         filePath: uploadData.path,
       });
 
-      // Step 2: Call TxAgent container to process the document
+      // Step 2: Call TxAgent /process-document (NOT /embed)
       const txAgentResponse = await fetch(
         `${process.env.RUNPOD_EMBEDDING_URL}/process-document`,
         {
           method: "POST",
           headers: {
-            Authorization: req.headers.authorization, // Pass through user's JWT
+            Authorization: req.headers.authorization, // Pass user's JWT
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
             file_path: uploadData.path,
             metadata: {
               title: req.file.originalname,
-              author: "Unknown",
-              category: "medical",
-              year: new Date().getFullYear().toString(),
+              description: "User uploaded document",
+              tags: ["medical", "user-upload"],
               source: "User Upload",
             },
           }),
@@ -130,7 +129,7 @@ export function createDocumentsRouter(supabaseClient) {
           error: errorText,
         });
         throw new Error(
-          `TxAgent processing failed: ${txAgentResponse.status} - ${errorText}`
+          `Document processing failed: ${txAgentResponse.status}`
         );
       }
 
@@ -141,7 +140,7 @@ export function createDocumentsRouter(supabaseClient) {
         filePath: uploadData.path,
       });
 
-      // Return success with job ID for status monitoring
+      // Return job ID for status monitoring
       res.json({
         success: true,
         message: "Document uploaded and processing started",
@@ -187,7 +186,7 @@ export function createDocumentsRouter(supabaseClient) {
       try {
         const { data, error, count } = await supabaseClient
           .from("documents")
-          .select("*", { count: "exact", head: true })
+          .select("id", { count: "exact", head: true })
           .limit(1);
 
         supabaseTest = error
