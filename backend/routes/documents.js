@@ -1,16 +1,11 @@
 import express from "express";
+import multer from "multer"; // ✅ ADD THIS LINE
 import { v4 as uuidv4 } from "uuid";
 import { upload } from "../middleware/upload.js";
 import { verifyToken } from "../middleware/auth.js";
 import { errorLogger } from "../agent_utils/shared/logger.js";
 
 export function createDocumentsRouter(supabaseClient) {
-  if (!supabaseClient || typeof supabaseClient.from !== "function") {
-    throw new Error(
-      "Invalid Supabase client provided to createDocumentsRouter"
-    );
-  }
-
   const router = express.Router();
   router.use(verifyToken);
 
@@ -21,38 +16,52 @@ export function createDocumentsRouter(supabaseClient) {
         return res.status(400).json({ error: "No file provided" });
       }
 
-      // ✅ Sanitize filename for Supabase Storage
-      const sanitizedFilename = req.file.originalname
-        .replace(/[^a-zA-Z0-9.-]/g, "_") // Replace special chars with underscore
-        .replace(/_{2,}/g, "_") // Replace multiple underscores with single
-        .substring(0, 100); // Limit length
-
       errorLogger.info("Starting file upload", {
         filename: req.file.originalname,
         size: req.file.size,
         userId: req.userId,
+        userEmail: req.userEmail || req.user?.email, // ✅ Better logging
       });
 
-      // Step 1: Upload to Supabase Storage
+      // ✅ Use existing service role client with proper file path
+      const timestamp = Date.now();
+      const sanitizedFilename = req.file.originalname
+        .replace(/[^a-zA-Z0-9.-]/g, "_")
+        .replace(/_{2,}/g, "_")
+        .substring(0, 100);
+
+      const filePath = `${req.userId}/${timestamp}_${sanitizedFilename}`;
+
+      // ✅ Upload using your existing service role client
       const { data: uploadData, error: uploadError } =
         await supabaseClient.storage
           .from("documents")
-          .upload(
-            `${req.userId}/${Date.now()}_${sanitizedFilename}`,
-            req.file.buffer,
-            {
-              contentType: req.file.mimetype,
-              upsert: false,
-            }
-          );
+          .upload(filePath, req.file.buffer, {
+            contentType: req.file.mimetype,
+            upsert: false,
+            // ✅ Add metadata for debugging
+            metadata: {
+              uploadedBy: req.userId,
+              originalName: req.file.originalname,
+              uploadTime: new Date().toISOString(),
+            },
+          });
 
       if (uploadError) {
-        errorLogger.error("Supabase storage upload failed", uploadError);
+        errorLogger.error("Supabase storage upload failed", {
+          error_message: uploadError.message,
+          error_code: uploadError.status,
+          file_path: filePath,
+          user_id: req.userId,
+          bucket: "documents",
+        });
         throw new Error(`Storage upload failed: ${uploadError.message}`);
       }
 
       errorLogger.info("File uploaded to storage", {
         filePath: uploadData.path,
+        fullPath: uploadData.fullPath,
+        userId: req.userId,
       });
 
       // Step 2: Call TxAgent to process the document
@@ -61,7 +70,7 @@ export function createDocumentsRouter(supabaseClient) {
         {
           method: "POST",
           headers: {
-            Authorization: req.headers.authorization, // Pass user's JWT
+            Authorization: req.headers.authorization,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -70,6 +79,7 @@ export function createDocumentsRouter(supabaseClient) {
               title: req.file.originalname,
               description: "User uploaded document",
               tags: ["medical", "user-upload"],
+              user_id: req.userId,
             },
           }),
         }
@@ -80,33 +90,34 @@ export function createDocumentsRouter(supabaseClient) {
         errorLogger.error("TxAgent processing failed", {
           status: txAgentResponse.status,
           error: errorText,
+          file_path: uploadData.path,
         });
-        throw new Error(
-          `Document processing failed: ${txAgentResponse.status}`
-        );
+        throw new Error(`TxAgent processing failed: ${txAgentResponse.status}`);
       }
 
-      const processingResult = await txAgentResponse.json();
+      const result = await txAgentResponse.json();
 
-      errorLogger.info("Document processing started", {
-        jobId: processingResult.job_id,
+      errorLogger.success("Document processing started", {
+        jobId: result.job_id,
         filePath: uploadData.path,
+        userId: req.userId,
       });
 
-      // Return job ID for status monitoring
       res.json({
         success: true,
         message: "Document uploaded and processing started",
         file_path: uploadData.path,
-        job_id: processingResult.job_id,
-        status: processingResult.status,
+        job_id: result.job_id,
+        status: result.status,
       });
     } catch (error) {
       errorLogger.error("Upload failed", {
         error: error.message,
         stack: error.stack,
+        userId: req.userId,
       });
-      // Handle multer errors specifically
+
+      // ✅ Handle multer errors properly
       if (error instanceof multer.MulterError) {
         if (error.code === "LIMIT_FILE_SIZE") {
           return res.status(400).json({
@@ -114,6 +125,7 @@ export function createDocumentsRouter(supabaseClient) {
           });
         }
       }
+
       res.status(500).json({ error: error.message });
     }
   });
