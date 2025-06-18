@@ -12,91 +12,173 @@
 
 ## 🎯 **Overview**
 
-This document provides comprehensive guidance for building the **Symptom Savior Patient Mobile Application** that interfaces with the existing TxAgent infrastructure and Supabase database. The patient app will enable users to track symptoms, chat with the AI agent, and maintain their personal health records.
+This document provides comprehensive guidance for building the **Symptom Savior Patient Mobile Application** that interfaces with the existing TxAgent infrastructure and Supabase database. The patient app will enable users to track symptoms, chat with AI agents, and maintain their personal health records.
 
 **Key Differences from Doctor's Portal:**
+
 - **Patient-focused UI/UX** with symptom tracking capabilities
 - **Personal health data management** instead of medical document processing
 - **Symptom embedding storage** for personalized health insights
 - **Mobile-first design** optimized for smartphones and tablets
+- **Privacy-first architecture** with user-scoped data isolation
 
 ---
 
 ## 🏗️ **Architecture Integration**
 
-### **Existing Infrastructure You'll Use**
+### **Existing Infrastructure You'll Leverage (85% Reusable)**
 
 ```mermaid
 graph TB
-    A[Patient Mobile App] --> B[Existing Node.js Backend]
+    A[Patient Mobile App] --> B[Existing Node.js Backend API]
     B --> C[Existing Supabase Database]
     B --> D[Existing TxAgent Container]
     D --> E[BioBERT Model]
     D --> C
     F[Doctor's Portal] --> B
     F --> C
+
+    subgraph "Shared Infrastructure"
+        G[Authentication System] --> B
+        H[Vector Search Engine] --> C
+        I[Agent Management] --> D
+    end
 ```
 
-### **What's Already Built (Reusable)**
-- ✅ **Authentication System**: JWT-based auth with Supabase
-- ✅ **TxAgent Integration**: Chat endpoints and AI processing
-- ✅ **Database Infrastructure**: PostgreSQL with vector search
-- ✅ **Backend API**: RESTful endpoints with error handling
-- ✅ **Security**: Row-level security and data isolation
+### **What's Already Production-Ready (Leverage Immediately)**
 
-### **What You Need to Build**
-- 📱 **Mobile Frontend**: React Native or Flutter app
-- 🏥 **Symptom Tracking UI**: Symptom input and history views
-- 📊 **Health Dashboard**: Personal health insights and trends
-- 💬 **Patient Chat Interface**: Simplified chat for symptom discussions
+#### **✅ Authentication System (100% Reusable)**
+
+```typescript
+// Exact same Supabase Auth flow as Doctor's Portal
+const { user, session } = useAuth();
+
+// Same JWT token handling with axios interceptors
+api.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+```
+
+#### **✅ Chat API Endpoints (95% Reusable)**
+
+```typescript
+// Primary TxAgent Chat - Works for both doctors and patients
+POST /api/chat
+Headers: { Authorization: "Bearer <jwt_token>" }
+Body: {
+  "message": "I have chest pain and shortness of breath",
+  "top_k": 5,
+  "temperature": 0.7
+}
+
+// OpenAI Fallback - Universal medical advice
+POST /api/openai-chat
+Headers: { Authorization: "Bearer <jwt_token>" }
+Body: {
+  "message": "What should I do about recurring headaches?",
+  "context": []
+}
+```
+
+#### **✅ Agent Management (90% Reusable)**
+
+```typescript
+// Same agent lifecycle endpoints
+GET / api / agent / status; // Check if TxAgent is active
+POST / api / agent / start; // Start personal TxAgent session
+POST / api / agent / stop; // Stop session
+POST / api / agent / test - health; // Verify agent connectivity
+```
+
+#### **✅ Vector Search Infrastructure (100% Reusable)**
+
+```sql
+-- Same pgvector setup with BioBERT 768-dimensional embeddings
+-- Same similarity search functions
+-- Same performance optimization patterns
+```
+
+### **What You Need to Build (15% New Code)**
+
+- 📱 **Mobile Frontend**: React Native app with patient-focused UI
+- 🏥 **Symptom Tracking Components**: Input forms and history views
+- 📊 **Health Analytics**: Personal health insights and trend analysis
+- 🔒 **Patient-Specific RLS**: Modified database policies for personal data
 
 ---
 
-## 🗄️ **Database Schema for Patient App**
+## 🗄️ **Database Schema Extensions**
 
-### **New Table: `symptoms`**
-
-You'll need to create a new table for storing patient symptoms with embeddings:
+### **New Table: `symptoms` (Patient-Specific Data)**
 
 ```sql
 CREATE TABLE public.symptoms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   symptom_text TEXT NOT NULL,                    -- Patient's symptom description
-  embedding VECTOR(768),                         -- BioBERT embedding of symptom
-  severity INTEGER CHECK (severity >= 1 AND severity <= 10), -- 1-10 scale
+  embedding VECTOR(768),                         -- BioBERT embedding (same as documents)
+  severity INTEGER CHECK (severity >= 1 AND severity <= 10), -- 1-10 pain scale
   duration_hours INTEGER,                        -- How long symptom has lasted
-  metadata JSONB DEFAULT '{}'::JSONB,            -- Additional symptom data
+  metadata JSONB DEFAULT '{}'::JSONB,            -- Additional symptom details
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Indexes for performance
+-- Performance indexes (same pattern as documents table)
 CREATE INDEX symptoms_user_id_idx ON public.symptoms USING btree (user_id);
 CREATE INDEX symptoms_created_at_idx ON public.symptoms USING btree (created_at);
-CREATE INDEX symptoms_embedding_idx ON public.symptoms 
+CREATE INDEX symptoms_embedding_idx ON public.symptoms
   USING ivfflat (embedding vector_cosine_ops) WITH (lists='100');
 CREATE INDEX symptoms_severity_idx ON public.symptoms USING btree (severity);
 ```
 
-### **Row Level Security for Symptoms**
-
-**CRITICAL**: Patients can ONLY access their own symptom data:
+### **New Table: `patient_profiles` (Health History)**
 
 ```sql
--- Enable RLS
-ALTER TABLE public.symptoms ENABLE ROW LEVEL SECURITY;
+CREATE TABLE public.patient_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date_of_birth DATE,
+  medical_history JSONB DEFAULT '{}'::JSONB,     -- Past conditions, surgeries
+  current_medications JSONB DEFAULT '[]'::JSONB, -- Current medication list
+  allergies JSONB DEFAULT '[]'::JSONB,           -- Known allergies
+  emergency_contacts JSONB DEFAULT '[]'::JSONB,  -- Emergency contact info
+  privacy_settings JSONB DEFAULT '{}'::JSONB,    -- Data sharing preferences
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
 
--- Patients can only see their own symptoms
-CREATE POLICY "Users can only access their own symptoms"
-  ON public.symptoms FOR ALL TO authenticated
-  USING (auth.uid() = user_id) 
-  WITH CHECK (auth.uid() = user_id);
+CREATE INDEX patient_profiles_user_id_idx ON public.patient_profiles USING btree (user_id);
 ```
 
-### **Symptom Search Function**
+### **Modified RLS Policies (Key Difference from Doctor's Portal)**
 
-Create a function to find similar symptoms for the patient:
+```sql
+-- CRITICAL DIFFERENCE: Patients see only their own data (vs shared medical docs for doctors)
+
+-- Enable RLS on new tables
+ALTER TABLE public.symptoms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.patient_profiles ENABLE ROW LEVEL SECURITY;
+
+-- Patients can only access their own symptoms
+CREATE POLICY "Users can only access their own symptoms"
+  ON public.symptoms FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- Patients can only access their own profile
+CREATE POLICY "Users can only access their own profile"
+  ON public.patient_profiles FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- Keep existing documents policy - patients can still read medical literature for chat context
+-- (No changes to documents table RLS - patients benefit from shared medical knowledge)
+```
+
+### **Patient Symptom Search Function (Reuses Vector Search Pattern)**
 
 ```sql
 CREATE OR REPLACE FUNCTION public.match_user_symptoms(
@@ -141,153 +223,283 @@ $$;
 
 ## 🔌 **API Integration Guide**
 
-### **Existing Endpoints You Can Use**
+### **Existing Endpoints (Use As-Is)**
 
-#### **Authentication (Ready to Use)**
+#### **Authentication (100% Reusable)**
+
 ```typescript
-// Login
-POST /auth/login
-{
-  "email": "patient@example.com",
-  "password": "password123"
-}
+// Same Supabase Auth endpoints from Doctor's Portal
+import { createClient } from "@supabase/supabase-js";
 
-// Register
-POST /auth/register
-{
-  "email": "patient@example.com", 
-  "password": "password123",
-  "metadata": {
-    "user_type": "patient",
-    "first_name": "John",
-    "last_name": "Doe"
-  }
-}
+const supabase = createClient(
+  "https://your-project.supabase.co", // Same Supabase project
+  "your-anon-key" // Same anon key
+);
+
+// Same authentication flow
+const { data, error } = await supabase.auth.signInWithPassword({
+  email: "patient@example.com",
+  password: "password123",
+});
 ```
 
-#### **Chat with TxAgent (Ready to Use)**
+#### **Chat Endpoints (95% Reusable)**
+
 ```typescript
-// Chat about symptoms
+// TxAgent Chat - Same endpoint, patient-focused prompts
 POST /api/chat
 Headers: { Authorization: "Bearer <jwt_token>" }
-{
-  "message": "I have been experiencing chest pain and shortness of breath",
-  "top_k": 5,
-  "temperature": 0.7
+Body: {
+  "message": "I've been having recurring headaches for 3 days. What could cause this?",
+  "top_k": 5,                    // Same parameters
+  "temperature": 0.7             // Same AI settings
 }
 
-// Response includes medical advice and similar cases
+// Response format is identical
 {
-  "response": "Based on your symptoms...",
-  "sources": [...],
+  "response": "Recurring headaches can be caused by...",
+  "sources": [                   // Same medical literature sources
+    {
+      "filename": "neurology-guidelines.pdf",
+      "content": "Relevant medical text...",
+      "similarity": 0.89
+    }
+  ],
   "agent_id": "txagent",
   "processing_time": 1250,
   "model": "BioBERT"
 }
+
+// OpenAI Fallback - Same endpoint
+POST /api/openai-chat
+Headers: { Authorization: "Bearer <jwt_token>" }
+Body: {
+  "message": "Is it normal to have chest pain after exercise?",
+  "context": []                  // Previous conversation history
+}
 ```
 
-### **New Endpoints You Need to Request**
+#### **Agent Management (90% Reusable)**
 
-Ask the backend team to add these endpoints for symptom management:
+```typescript
+// Same agent lifecycle management
+GET / api / agent / status;
+POST / api / agent / start;
+POST / api / agent / stop;
+POST / api / agent / test - health;
+
+// Same response formats and error handling
+// Same authentication requirements
+// Same session management logic
+```
+
+### **New Endpoints You Need (Request from Backend Team)**
 
 #### **Symptom Management**
+
 ```typescript
-// Add new symptom
+// Add new symptom with embedding generation
 POST /api/symptoms
-{
-  "symptom_text": "Severe headache with nausea",
+Headers: { Authorization: "Bearer <jwt_token>" }
+Body: {
+  "symptom_text": "Severe headache with nausea and light sensitivity",
   "severity": 8,
   "duration_hours": 6,
   "metadata": {
     "triggers": ["stress", "lack_of_sleep"],
     "location": "frontal",
-    "type": "throbbing"
+    "type": "throbbing",
+    "associated_symptoms": ["nausea", "photophobia"]
   }
 }
 
-// Get user's symptom history
-GET /api/symptoms?limit=50&offset=0
-
-// Find similar symptoms
-POST /api/symptoms/search
-{
-  "query": "headache nausea",
-  "limit": 10
+Response: {
+  "id": "uuid",
+  "symptom_text": "Severe headache with nausea...",
+  "embedding": [768 float values],  // Generated by TxAgent BioBERT
+  "severity": 8,
+  "created_at": "2024-01-01T00:00:00Z"
 }
 
-// Update symptom
+// Get user's symptom history with pagination
+GET /api/symptoms?limit=50&offset=0&sort=created_at&order=desc
+Headers: { Authorization: "Bearer <jwt_token>" }
+
+Response: {
+  "symptoms": [...],
+  "total": 150,
+  "page": 1,
+  "pages": 3
+}
+
+// Find similar symptoms using vector search
+POST /api/symptoms/search
+Headers: { Authorization: "Bearer <jwt_token>" }
+Body: {
+  "query": "headache nausea light sensitivity",
+  "limit": 10,
+  "threshold": 0.7
+}
+
+Response: {
+  "similar_symptoms": [
+    {
+      "id": "uuid",
+      "symptom_text": "Migraine with aura...",
+      "similarity": 0.89,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  ]
+}
+
+// Update symptom (e.g., severity changed, duration extended)
 PUT /api/symptoms/:id
-{
-  "severity": 6,
-  "duration_hours": 8,
-  "metadata": { "status": "improving" }
+Headers: { Authorization: "Bearer <jwt_token>" }
+Body: {
+  "severity": 6,                 // Improved from 8 to 6
+  "duration_hours": 8,           // Extended duration
+  "metadata": {
+    "status": "improving",
+    "treatments_tried": ["ibuprofen", "rest"]
+  }
 }
 
 // Delete symptom
 DELETE /api/symptoms/:id
+Headers: { Authorization: "Bearer <jwt_token>" }
+```
+
+#### **Patient Profile Management**
+
+```typescript
+// Get patient profile
+GET /api/profile
+Headers: { Authorization: "Bearer <jwt_token>" }
+
+Response: {
+  "id": "uuid",
+  "date_of_birth": "1990-01-01",
+  "medical_history": {
+    "conditions": ["hypertension", "diabetes_type_2"],
+    "surgeries": ["appendectomy_2015"],
+    "family_history": ["heart_disease", "diabetes"]
+  },
+  "current_medications": [
+    {"name": "metformin", "dosage": "500mg", "frequency": "twice_daily"},
+    {"name": "lisinopril", "dosage": "10mg", "frequency": "once_daily"}
+  ],
+  "allergies": ["penicillin", "shellfish"],
+  "emergency_contacts": [
+    {"name": "John Doe", "relationship": "spouse", "phone": "+1234567890"}
+  ]
+}
+
+// Update patient profile
+PUT /api/profile
+Headers: { Authorization: "Bearer <jwt_token>" }
+Body: {
+  "medical_history": {
+    "conditions": ["hypertension", "diabetes_type_2", "migraine"],  // Added migraine
+    "recent_visits": ["cardiologist_2024_01_15"]
+  },
+  "current_medications": [
+    // Updated medication list
+  ]
+}
 ```
 
 #### **Health Analytics**
+
 ```typescript
-// Get symptom trends
-GET /api/health/trends?period=30days
+// Get symptom trends over time
+GET /api/health/trends?period=30days&symptom_type=headache
+Headers: { Authorization: "Bearer <jwt_token>" }
 
-// Get symptom patterns
-GET /api/health/patterns?symptom_type=headache
+Response: {
+  "period": "30days",
+  "symptom_counts": [
+    {"date": "2024-01-01", "count": 2, "avg_severity": 6.5},
+    {"date": "2024-01-02", "count": 0, "avg_severity": null},
+    {"date": "2024-01-03", "count": 1, "avg_severity": 7.0}
+  ],
+  "trends": {
+    "frequency_trend": "increasing",
+    "severity_trend": "stable",
+    "duration_trend": "decreasing"
+  }
+}
 
-// Export health data
-GET /api/health/export?format=pdf
+// Get symptom patterns and correlations
+GET /api/health/patterns
+Headers: { Authorization: "Bearer <jwt_token>" }
+
+Response: {
+  "common_patterns": [
+    {
+      "pattern": "headache_with_nausea",
+      "frequency": 15,
+      "avg_severity": 7.2,
+      "common_triggers": ["stress", "lack_of_sleep"]
+    }
+  ],
+  "correlations": [
+    {
+      "symptom_a": "headache",
+      "symptom_b": "fatigue",
+      "correlation": 0.78,
+      "significance": "high"
+    }
+  ]
+}
+
+// Export health data (PDF report)
+GET /api/health/export?format=pdf&period=90days
+Headers: { Authorization: "Bearer <jwt_token>" }
+
+Response: Binary PDF file with health summary
 ```
 
 ---
 
 ## 📱 **Frontend Implementation Guide**
 
-### **Recommended Tech Stack**
+### **Recommended Tech Stack (Based on Doctor's Portal Success)**
 
-#### **React Native (Recommended)**
+#### **React Native (Recommended - Mirrors Doctor's Portal Tech)**
+
 ```bash
-# Setup
+# Setup new React Native project
 npx react-native init SymptomSaviorPatient
 cd SymptomSaviorPatient
 
-# Key dependencies
-npm install @supabase/supabase-js
-npm install @react-navigation/native
-npm install react-native-vector-icons
-npm install react-native-chart-kit
-npm install react-native-date-picker
+# Install dependencies (same as Doctor's Portal where applicable)
+npm install @supabase/supabase-js axios
+npm install @react-navigation/native @react-navigation/stack
+npm install react-native-vector-icons react-native-svg
+npm install react-native-chart-kit react-native-calendars
+npm install react-native-date-picker react-native-modal
+npm install react-hook-form react-query
 ```
 
-#### **Flutter (Alternative)**
-```yaml
-# pubspec.yaml
-dependencies:
-  flutter:
-    sdk: flutter
-  supabase_flutter: ^1.10.0
-  http: ^0.13.5
-  charts_flutter: ^0.12.0
-  flutter_secure_storage: ^9.0.0
-```
+### **Reusable Code Patterns from Doctor's Portal**
 
-### **Core Components to Build**
+#### **1. Authentication Service (100% Reusable)**
 
-#### **1. Authentication Flow**
 ```typescript
-// AuthService.ts
-import { createClient } from '@supabase/supabase-js';
+// lib/auth.ts - Copy directly from Doctor's Portal
+import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
-  'https://your-project.supabase.co',
-  'your-anon-key'
+  process.env.REACT_APP_SUPABASE_URL!,
+  process.env.REACT_APP_SUPABASE_ANON_KEY!
 );
 
 export class AuthService {
+  // Same methods as Doctor's Portal
   async signIn(email: string, password: string) {
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
-      password
+      password,
     });
     return { user: data.user, session: data.session, error };
   }
@@ -296,29 +508,207 @@ export class AuthService {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: metadata }
+      options: {
+        data: {
+          ...metadata,
+          user_type: "patient", // Key difference
+        },
+      },
     });
     return { user: data.user, error };
   }
 
-  async signOut() {
-    const { error } = await supabase.auth.signOut();
-    return { error };
-  }
-
-  getSession() {
-    return supabase.auth.getSession();
-  }
+  // ... same getSession, signOut methods
 }
 ```
 
-#### **2. Symptom Input Component**
+#### **2. API Client (95% Reusable)**
+
 ```typescript
-// SymptomInput.tsx
-interface SymptomInputProps {
-  onSubmit: (symptom: SymptomData) => void;
+// lib/api.ts - Reuse axios setup from Doctor's Portal
+import axios from "axios";
+
+const API_BASE_URL = process.env.REACT_APP_API_URL || "";
+
+export const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+
+// Same JWT interceptor from Doctor's Portal
+api.interceptors.request.use((config) => {
+  const token = getStoredToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Reusable API helpers with patient-specific endpoints
+export const apiHelpers = {
+  // Same chat methods from Doctor's Portal
+  chat: (message: string, context: any[] = []) =>
+    api.post("/api/chat", { message, context }),
+
+  openaiChat: (message: string, context: any[] = []) =>
+    api.post("/api/openai-chat", { message, context }),
+
+  // Same agent methods
+  agent: {
+    getStatus: () => api.get("/api/agent/status"),
+    start: () => api.post("/api/agent/start"),
+    stop: () => api.post("/api/agent/stop"),
+    healthCheck: () => api.post("/api/agent/test-health"),
+  },
+
+  // New patient-specific methods
+  symptoms: {
+    create: (symptom: SymptomData) => api.post("/api/symptoms", symptom),
+    list: (params?: any) => api.get("/api/symptoms", { params }),
+    search: (query: string) => api.post("/api/symptoms/search", { query }),
+    update: (id: string, data: Partial<SymptomData>) =>
+      api.put(`/api/symptoms/${id}`, data),
+    delete: (id: string) => api.delete(`/api/symptoms/${id}`),
+  },
+
+  profile: {
+    get: () => api.get("/api/profile"),
+    update: (data: any) => api.put("/api/profile", data),
+  },
+
+  health: {
+    trends: (params?: any) => api.get("/api/health/trends", { params }),
+    patterns: () => api.get("/api/health/patterns"),
+    export: (format: string) => api.get(`/api/health/export?format=${format}`),
+  },
+};
+```
+
+#### **3. Chat Interface (90% Reusable)**
+
+```typescript
+// components/Chat/PatientChat.tsx - Based on Doctor's Portal chat
+import { useChat } from "../../hooks/useChat"; // Reuse hook from Doctor's Portal
+
+interface Message {
+  id: string;
+  type: "user" | "assistant" | "system";
+  content: string;
+  timestamp: Date;
+  sources?: any[];
 }
 
+export const PatientChat: React.FC = () => {
+  // Reuse chat hook from Doctor's Portal with minor modifications
+  const { messages, sendMessage, isLoading } = useChat();
+  const [inputText, setInputText] = useState("");
+
+  const handleSendMessage = async () => {
+    if (!inputText.trim() || isLoading) return;
+
+    // Same message sending logic as Doctor's Portal
+    await sendMessage(inputText);
+    setInputText("");
+  };
+
+  return (
+    <View style={styles.container}>
+      {/* Same message list component */}
+      <FlatList
+        data={messages}
+        renderItem={({ item }) => (
+          <MessageBubble
+            message={item}
+            isPatient={true} // UI variant for patient interface
+          />
+        )}
+        keyExtractor={(item) => item.id}
+      />
+
+      {/* Patient-specific input placeholder */}
+      <View style={styles.inputContainer}>
+        <TextInput
+          style={styles.textInput}
+          value={inputText}
+          onChangeText={setInputText}
+          placeholder="Describe your symptoms or ask a health question..."
+          multiline
+          maxLength={500}
+        />
+        <TouchableOpacity
+          style={[styles.sendButton, isLoading && styles.disabled]}
+          onPress={handleSendMessage}
+          disabled={isLoading || !inputText.trim()}
+        >
+          <Text style={styles.sendButtonText}>
+            {isLoading ? "Sending..." : "Send"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+```
+
+#### **4. Agent Management (85% Reusable)**
+
+```typescript
+// hooks/useAgentConnection.ts - Reuse from Doctor's Portal
+import { useAgents } from "./useAgents"; // Copy from Doctor's Portal
+
+export const PatientAgentManager: React.FC = () => {
+  // Same agent management logic from Doctor's Portal
+  const {
+    agentStatus,
+    startAgent,
+    stopAgent,
+    performDetailedStatusCheck,
+    actionLoading,
+  } = useAgents(); // Reuse entire hook
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Your AI Health Assistant</Text>
+
+      {/* Same status display with patient-friendly text */}
+      <StatusCard
+        status={agentStatus}
+        title="TxAgent Health Assistant"
+        description="Your personal medical AI assistant powered by BioBERT"
+      />
+
+      {/* Same action buttons with patient-focused labels */}
+      <View style={styles.actions}>
+        {!agentStatus?.agent_active ? (
+          <Button
+            title="Start Health Assistant"
+            onPress={startAgent}
+            loading={actionLoading}
+            style={styles.startButton}
+          />
+        ) : (
+          <Button
+            title="Stop Health Assistant"
+            onPress={stopAgent}
+            loading={actionLoading}
+            style={styles.stopButton}
+          />
+        )}
+      </View>
+    </View>
+  );
+};
+```
+
+### **New Patient-Specific Components**
+
+#### **5. Symptom Input Form**
+
+```typescript
+// components/Symptoms/SymptomInput.tsx
 interface SymptomData {
   symptom_text: string;
   severity: number;
@@ -327,189 +717,253 @@ interface SymptomData {
     triggers?: string[];
     location?: string;
     type?: string;
+    associated_symptoms?: string[];
   };
 }
 
-export const SymptomInput: React.FC<SymptomInputProps> = ({ onSubmit }) => {
-  const [symptomText, setSymptomText] = useState('');
-  const [severity, setSeverity] = useState(5);
-  const [duration, setDuration] = useState(1);
+export const SymptomInput: React.FC = () => {
+  const [formData, setFormData] = useState<SymptomData>({
+    symptom_text: '',
+    severity: 5,
+    duration_hours: 1,
+    metadata: {}
+  });
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    const symptomData: SymptomData = {
-      symptom_text: symptomText,
-      severity,
-      duration_hours: duration,
-      metadata: {
-        // Add additional metadata based on UI inputs
-      }
-    };
-    
-    await onSubmit(symptomData);
+    if (!formData.symptom_text.trim()) {
+      Alert.alert('Error', 'Please describe your symptom');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Use reusable API helper
+      await apiHelpers.symptoms.create(formData);
+
+      Alert.alert('Success', 'Symptom logged successfully');
+
+      // Reset form
+      setFormData({
+        symptom_text: '',
+        severity: 5,
+        duration_hours: 1,
+        metadata: {}
+      });
+
+      // Navigate to symptom history or dashboard
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.error || 'Failed to log symptom');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.label}>Describe your symptom:</Text>
-      <TextInput
-        style={styles.textInput}
-        value={symptomText}
-        onChangeText={setSymptomText}
-        placeholder="e.g., Severe headache with nausea"
-        multiline
-      />
-      
-      <Text style={styles.label}>Severity (1-10):</Text>
-      <Slider
-        value={severity}
-        onValueChange={setSeverity}
-        minimumValue={1}
-        maximumValue={10}
-        step={1}
-      />
-      
-      <Text style={styles.label}>Duration (hours):</Text>
-      <TextInput
-        style={styles.numberInput}
-        value={duration.toString()}
-        onChangeText={(text) => setDuration(parseInt(text) || 1)}
-        keyboardType="numeric"
-      />
-      
-      <Button title="Log Symptom" onPress={handleSubmit} />
-    </View>
+    <ScrollView style={styles.container}>
+      <Text style={styles.title}>Log Your Symptom</Text>
+
+      {/* Symptom description */}
+      <View style={styles.section}>
+        <Text style={styles.label}>Describe your symptom:</Text>
+        <TextInput
+          style={styles.textArea}
+          value={formData.symptom_text}
+          onChangeText={(text) => setFormData(prev => ({ ...prev, symptom_text: text }))}
+          placeholder="e.g., Severe headache with nausea and light sensitivity"
+          multiline
+          numberOfLines={4}
+          maxLength={500}
+        />
+      </View>
+
+      {/* Severity slider */}
+      <View style={styles.section}>
+        <Text style={styles.label}>Pain/Severity Level (1-10):</Text>
+        <View style={styles.sliderContainer}>
+          <Text style={styles.sliderLabel}>1 (Mild)</Text>
+          <Slider
+            style={styles.slider}
+            value={formData.severity}
+            onValueChange={(value) => setFormData(prev => ({ ...prev, severity: Math.round(value) }))}
+            minimumValue={1}
+            maximumValue={10}
+            step={1}
+            thumbStyle={styles.sliderThumb}
+            trackStyle={styles.sliderTrack}
+          />
+          <Text style={styles.sliderLabel}>10 (Severe)</Text>
+        </View>
+        <Text style={styles.severityValue}>Current: {formData.severity}</Text>
+      </View>
+
+      {/* Duration */}
+      <View style={styles.section}>
+        <Text style={styles.label}>How long have you had this symptom?</Text>
+        <TextInput
+          style={styles.numberInput}
+          value={formData.duration_hours.toString()}
+          onChangeText={(text) => {
+            const hours = parseInt(text) || 1;
+            setFormData(prev => ({ ...prev, duration_hours: hours }));
+          }}
+          keyboardType="numeric"
+          placeholder="Hours"
+        />
+        <Text style={styles.hint}>Enter duration in hours</Text>
+      </View>
+
+      {/* Optional metadata */}
+      <View style={styles.section}>
+        <Text style={styles.label}>Additional Details (Optional):</Text>
+
+        {/* Location picker */}
+        <Text style={styles.subLabel}>Location:</Text>
+        <TextInput
+          style={styles.input}
+          value={formData.metadata.location || ''}
+          onChangeText={(text) => setFormData(prev => ({
+            ...prev,
+            metadata: { ...prev.metadata, location: text }
+          ))}
+          placeholder="e.g., forehead, chest, abdomen"
+        />
+
+        {/* Type picker */}
+        <Text style={styles.subLabel}>Type:</Text>
+        <TextInput
+          style={styles.input}
+          value={formData.metadata.type || ''}
+          onChangeText={(text) => setFormData(prev => ({
+            ...prev,
+            metadata: { ...prev.metadata, type: text }
+          ))}
+          placeholder="e.g., throbbing, sharp, dull, burning"
+        />
+      </View>
+
+      {/* Submit button */}
+      <TouchableOpacity
+        style={[styles.submitButton, isSubmitting && styles.disabled]}
+        onPress={handleSubmit}
+        disabled={isSubmitting}
+      >
+        <Text style={styles.submitButtonText}>
+          {isSubmitting ? 'Logging Symptom...' : 'Log Symptom'}
+        </Text>
+      </TouchableOpacity>
+    </ScrollView>
   );
 };
 ```
 
-#### **3. Chat Interface for Patients**
+#### **6. Symptom History & Analytics**
+
 ```typescript
-// PatientChat.tsx
-export const PatientChat: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
-  const [loading, setLoading] = useState(false);
+// components/Symptoms/SymptomHistory.tsx
+export const SymptomHistory: React.FC = () => {
+  const [symptoms, setSymptoms] = useState<Symptom[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const sendMessage = async () => {
-    if (!inputText.trim()) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text: inputText,
-      sender: 'user',
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInputText('');
-    setLoading(true);
-
+  const loadSymptoms = async () => {
     try {
-      const session = await AuthService.getSession();
-      const response = await fetch(`${API_URL}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          message: inputText,
-          top_k: 5,
-          temperature: 0.7
-        })
+      setLoading(true);
+      const response = await apiHelpers.symptoms.list({
+        limit: 50,
+        sort: "created_at",
+        order: "desc",
       });
-
-      const data = await response.json();
-      
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: data.response,
-        sender: 'ai',
-        timestamp: new Date(),
-        sources: data.sources
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
-    } catch (error) {
-      console.error('Chat error:', error);
-      // Handle error appropriately
+      setSymptoms(response.data.symptoms);
+    } catch (error: any) {
+      Alert.alert("Error", "Failed to load symptom history");
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <FlatList
-        data={messages}
-        renderItem={({ item }) => <MessageBubble message={item} />}
-        keyExtractor={(item) => item.id}
-      />
-      
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.textInput}
-          value={inputText}
-          onChangeText={setInputText}
-          placeholder="Describe your symptoms or ask a health question..."
-          multiline
-        />
-        <Button 
-          title="Send" 
-          onPress={sendMessage} 
-          disabled={loading || !inputText.trim()}
-        />
-      </View>
-    </View>
-  );
-};
-```
-
-#### **4. Symptom History & Analytics**
-```typescript
-// SymptomHistory.tsx
-export const SymptomHistory: React.FC = () => {
-  const [symptoms, setSymptoms] = useState<Symptom[]>([]);
-  const [loading, setLoading] = useState(true);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadSymptoms();
+    setRefreshing(false);
+  };
 
   useEffect(() => {
     loadSymptoms();
   }, []);
 
-  const loadSymptoms = async () => {
-    try {
-      const session = await AuthService.getSession();
-      const response = await fetch(`${API_URL}/api/symptoms`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`
-        }
-      });
-      
-      const data = await response.json();
-      setSymptoms(data);
-    } catch (error) {
-      console.error('Error loading symptoms:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const renderSymptomCard = ({ item }: { item: Symptom }) => (
+    <TouchableOpacity
+      style={styles.symptomCard}
+      onPress={() => navigateToSymptomDetail(item)}
+    >
+      <View style={styles.cardHeader}>
+        <Text style={styles.symptomText} numberOfLines={2}>
+          {item.symptom_text}
+        </Text>
+        <View style={[styles.severityBadge, getSeverityColor(item.severity)]}>
+          <Text style={styles.severityText}>{item.severity}/10</Text>
+        </View>
+      </View>
+
+      <View style={styles.cardDetails}>
+        <Text style={styles.duration}>
+          Duration: {formatDuration(item.duration_hours)}
+        </Text>
+        <Text style={styles.date}>{formatDate(item.created_at)}</Text>
+      </View>
+
+      {item.metadata?.location && (
+        <Text style={styles.metadata}>Location: {item.metadata.location}</Text>
+      )}
+    </TouchableOpacity>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#20B2AA" />
+        <Text style={styles.loadingText}>Loading your symptom history...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Your Symptom History</Text>
-      
-      {loading ? (
-        <ActivityIndicator size="large" />
+      <View style={styles.header}>
+        <Text style={styles.title}>Your Symptom History</Text>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => navigation.navigate("SymptomInput")}
+        >
+          <Icon name="plus" size={24} color="#20B2AA" />
+        </TouchableOpacity>
+      </View>
+
+      {symptoms.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Icon name="clipboard-list" size={64} color="#95A5A6" />
+          <Text style={styles.emptyTitle}>No symptoms logged yet</Text>
+          <Text style={styles.emptyDescription}>
+            Start tracking your symptoms to get personalized health insights
+          </Text>
+          <TouchableOpacity
+            style={styles.emptyButton}
+            onPress={() => navigation.navigate("SymptomInput")}
+          >
+            <Text style={styles.emptyButtonText}>Log Your First Symptom</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <FlatList
           data={symptoms}
-          renderItem={({ item }) => (
-            <SymptomCard 
-              symptom={item} 
-              onPress={() => navigateToDetail(item)}
-            />
-          )}
+          renderItem={renderSymptomCard}
           keyExtractor={(item) => item.id}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          showsVerticalScrollIndicator={false}
         />
       )}
     </View>
@@ -519,276 +973,945 @@ export const SymptomHistory: React.FC = () => {
 
 ---
 
-## 🔒 **Security Considerations**
+## 🔒 **Security Implementation (Reuse Doctor's Portal Patterns)**
 
-### **Data Privacy (CRITICAL)**
+### **JWT Token Management (100% Reusable)**
+
 ```typescript
-// Ensure all API calls include user authentication
-const makeAuthenticatedRequest = async (url: string, options: RequestInit = {}) => {
-  const session = await supabase.auth.getSession();
-  
-  if (!session.data.session) {
-    throw new Error('User not authenticated');
-  }
+// utils/auth-storage.ts - Copy from Doctor's Portal
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...options.headers,
-      'Authorization': `Bearer ${session.data.session.access_token}`,
-      'Content-Type': 'application/json'
+const TOKEN_KEY = "sb-auth-token";
+const USER_KEY = "sb-user-data";
+
+export const AuthStorage = {
+  async setSession(session: any) {
+    try {
+      await AsyncStorage.setItem(TOKEN_KEY, JSON.stringify(session));
+      if (session.user) {
+        await AsyncStorage.setItem(USER_KEY, JSON.stringify(session.user));
+      }
+    } catch (error) {
+      console.error("Failed to store session:", error);
     }
-  });
+  },
+
+  async getSession() {
+    try {
+      const sessionData = await AsyncStorage.getItem(TOKEN_KEY);
+      return sessionData ? JSON.parse(sessionData) : null;
+    } catch (error) {
+      console.error("Failed to retrieve session:", error);
+      return null;
+    }
+  },
+
+  async clearSession() {
+    try {
+      await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+    } catch (error) {
+      console.error("Failed to clear session:", error);
+    }
+  },
 };
 ```
 
-### **Local Data Storage**
+### **Input Validation (Enhanced for Health Data)**
+
 ```typescript
-// Use secure storage for sensitive data
-import { SecureStore } from 'expo-secure-store';
+// utils/validation.ts
+export const ValidationRules = {
+  symptom: {
+    text: {
+      required: true,
+      minLength: 3,
+      maxLength: 500,
+      pattern: /^[a-zA-Z0-9\s\.,!?'-]+$/, // Allow medical terminology
+    },
+    severity: {
+      required: true,
+      min: 1,
+      max: 10,
+      type: "integer",
+    },
+    duration: {
+      required: true,
+      min: 0,
+      max: 8760, // Max 1 year in hours
+      type: "integer",
+    },
+  },
 
-// Store user preferences securely
-await SecureStore.setItemAsync('user_preferences', JSON.stringify(preferences));
+  profile: {
+    dateOfBirth: {
+      required: false,
+      maxAge: 120,
+      minAge: 0,
+    },
+    medication: {
+      name: { required: true, minLength: 2 },
+      dosage: { required: true, pattern: /^\d+(\.\d+)?\s*(mg|ml|g|mcg)$/i },
+    },
+  },
+};
 
-// Retrieve securely
-const preferences = await SecureStore.getItemAsync('user_preferences');
-```
+export const validateSymptomInput = (
+  symptom: SymptomData
+): ValidationError[] => {
+  const errors: ValidationError[] = [];
 
-### **Input Validation**
-```typescript
-// Validate symptom input
-const validateSymptomInput = (symptom: SymptomData): string[] => {
-  const errors: string[] = [];
-  
+  // Text validation
   if (!symptom.symptom_text || symptom.symptom_text.trim().length < 3) {
-    errors.push('Symptom description must be at least 3 characters');
+    errors.push({
+      field: "symptom_text",
+      message: "Symptom description must be at least 3 characters",
+    });
   }
-  
+
+  if (symptom.symptom_text && symptom.symptom_text.length > 500) {
+    errors.push({
+      field: "symptom_text",
+      message: "Symptom description too long (max 500 characters)",
+    });
+  }
+
+  // Severity validation
   if (symptom.severity < 1 || symptom.severity > 10) {
-    errors.push('Severity must be between 1 and 10');
+    errors.push({
+      field: "severity",
+      message: "Severity must be between 1 and 10",
+    });
   }
-  
+
+  // Duration validation
   if (symptom.duration_hours < 0) {
-    errors.push('Duration cannot be negative');
+    errors.push({
+      field: "duration_hours",
+      message: "Duration cannot be negative",
+    });
   }
-  
+
+  if (symptom.duration_hours > 8760) {
+    errors.push({
+      field: "duration_hours",
+      message: "Duration cannot exceed 1 year",
+    });
+  }
+
   return errors;
 };
 ```
 
----
+### **Privacy Controls (Patient-Specific)**
 
-## 📊 **UI/UX Recommendations**
+```typescript
+// components/Profile/PrivacySettings.tsx
+export const PrivacySettings: React.FC = () => {
+  const [settings, setSettings] = useState({
+    shareSymptomPatterns: false, // Share anonymized patterns for research
+    allowHealthInsights: true, // Enable AI health insights
+    dataRetentionDays: 365, // How long to keep symptom data
+    exportEnabled: true, // Allow data export
+    emergencyContactAccess: false, // Allow emergency contacts to view data
+  });
 
-### **Design Principles**
-- **Patient-Centric**: Simple, intuitive interface for non-medical users
-- **Accessibility**: Support for users with disabilities
-- **Privacy-First**: Clear data usage explanations
-- **Mobile-Optimized**: Touch-friendly controls and responsive design
+  const updatePrivacySetting = async (key: string, value: any) => {
+    try {
+      const updatedSettings = { ...settings, [key]: value };
+      setSettings(updatedSettings);
 
-### **Key Screens**
-1. **Onboarding**: Health data consent and app introduction
-2. **Dashboard**: Quick symptom logging and health overview
-3. **Symptom Input**: Detailed symptom entry with guided questions
-4. **Chat Interface**: AI consultation with medical guidance
-5. **History**: Personal health timeline and trends
-6. **Profile**: Account settings and privacy controls
+      // Update in backend
+      await apiHelpers.profile.update({
+        privacy_settings: updatedSettings,
+      });
 
-### **Color Scheme (Match Doctor's Portal)**
-```css
-/* Use the existing Symptom Savior brand colors */
-:root {
-  --sky-blue: #E6F3FF;
-  --cloud-ivory: #FEFEFE;
-  --healing-teal: #20B2AA;
-  --guardian-gold: #FFD700;
-  --deep-midnight: #2C3E50;
-  --soft-gray: #95A5A6;
-}
+      Alert.alert("Success", "Privacy settings updated");
+    } catch (error) {
+      Alert.alert("Error", "Failed to update privacy settings");
+    }
+  };
+
+  return (
+    <ScrollView style={styles.container}>
+      <Text style={styles.title}>Privacy & Data Control</Text>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Data Sharing</Text>
+
+        <SettingToggle
+          title="Share Anonymous Patterns"
+          description="Help improve medical research by sharing anonymized symptom patterns"
+          value={settings.shareSymptomPatterns}
+          onValueChange={(value) =>
+            updatePrivacySetting("shareSymptomPatterns", value)
+          }
+        />
+
+        <SettingToggle
+          title="AI Health Insights"
+          description="Allow AI to analyze your symptoms and provide health insights"
+          value={settings.allowHealthInsights}
+          onValueChange={(value) =>
+            updatePrivacySetting("allowHealthInsights", value)
+          }
+        />
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Data Retention</Text>
+
+        <SettingPicker
+          title="Keep Symptom Data For"
+          value={settings.dataRetentionDays}
+          options={[
+            { label: "30 days", value: 30 },
+            { label: "90 days", value: 90 },
+            { label: "1 year", value: 365 },
+            { label: "2 years", value: 730 },
+            { label: "Forever", value: -1 },
+          ]}
+          onValueChange={(value) =>
+            updatePrivacySetting("dataRetentionDays", value)
+          }
+        />
+      </View>
+    </ScrollView>
+  );
+};
 ```
 
 ---
 
-## 🧪 **Testing Strategy**
+## 📊 **UI/UX Design Guidelines**
 
-### **Unit Testing**
+### **Color Scheme (Match Doctor's Portal Brand)**
+
 ```typescript
-// Test symptom validation
-describe('SymptomValidation', () => {
-  test('should validate symptom input correctly', () => {
+// styles/colors.ts - Reuse from Doctor's Portal
+export const Colors = {
+  // Primary brand colors
+  skyBlue: "#E6F3FF",
+  cloudIvory: "#FEFEFE",
+  healingTeal: "#20B2AA",
+  guardianGold: "#FFD700",
+  deepMidnight: "#2C3E50",
+  softGray: "#95A5A6",
+
+  // Patient-specific variants
+  patientPrimary: "#20B2AA", // Same healing teal
+  patientSecondary: "#E6F3FF", // Same sky blue
+  patientAccent: "#FFD700", // Same guardian gold
+
+  // Severity level colors
+  severity: {
+    low: "#2ECC71", // Green (1-3)
+    medium: "#F39C12", // Orange (4-6)
+    high: "#E74C3C", // Red (7-8)
+    severe: "#8E44AD", // Purple (9-10)
+  },
+
+  // Status colors
+  success: "#2ECC71",
+  warning: "#F39C12",
+  error: "#E74C3C",
+  info: "#3498DB",
+};
+```
+
+### **Typography (Consistent with Doctor's Portal)**
+
+```typescript
+// styles/typography.ts
+export const Typography = {
+  // Same font families as Doctor's Portal
+  heading: {
+    fontFamily: "System",
+    fontWeight: "700" as const,
+  },
+  subheading: {
+    fontFamily: "System",
+    fontWeight: "600" as const,
+  },
+  body: {
+    fontFamily: "System",
+    fontWeight: "400" as const,
+  },
+
+  // Patient-specific sizes (mobile-optimized)
+  sizes: {
+    h1: 28,
+    h2: 24,
+    h3: 20,
+    h4: 18,
+    body: 16,
+    caption: 14,
+    small: 12,
+  },
+};
+```
+
+### **Component Library (Extend Doctor's Portal)**
+
+```typescript
+// components/ui/PatientCard.tsx
+interface PatientCardProps {
+  title: string;
+  subtitle?: string;
+  value?: string | number;
+  severity?: number;
+  onPress?: () => void;
+  style?: any;
+}
+
+export const PatientCard: React.FC<PatientCardProps> = ({
+  title,
+  subtitle,
+  value,
+  severity,
+  onPress,
+  style,
+}) => {
+  const getSeverityColor = (level?: number) => {
+    if (!level) return Colors.softGray;
+    if (level <= 3) return Colors.severity.low;
+    if (level <= 6) return Colors.severity.medium;
+    if (level <= 8) return Colors.severity.high;
+    return Colors.severity.severe;
+  };
+
+  return (
+    <TouchableOpacity
+      style={[styles.card, style]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        {severity && (
+          <View
+            style={[
+              styles.severityBadge,
+              { backgroundColor: getSeverityColor(severity) },
+            ]}
+          >
+            <Text style={styles.severityText}>{severity}</Text>
+          </View>
+        )}
+      </View>
+
+      {subtitle && <Text style={styles.cardSubtitle}>{subtitle}</Text>}
+
+      {value && <Text style={styles.cardValue}>{value}</Text>}
+    </TouchableOpacity>
+  );
+};
+```
+
+---
+
+## 🧪 **Testing Strategy (Build on Doctor's Portal Success)**
+
+### **Unit Testing (Reuse Patterns)**
+
+```typescript
+// __tests__/utils/validation.test.ts
+import { validateSymptomInput } from "../../utils/validation";
+
+describe("Symptom Validation", () => {
+  test("should validate correct symptom input", () => {
     const validSymptom = {
-      symptom_text: 'Headache with nausea',
+      symptom_text: "Headache with nausea",
       severity: 7,
       duration_hours: 4,
-      metadata: {}
+      metadata: {},
     };
-    
+
     const errors = validateSymptomInput(validSymptom);
     expect(errors).toHaveLength(0);
   });
+
+  test("should reject empty symptom text", () => {
+    const invalidSymptom = {
+      symptom_text: "",
+      severity: 5,
+      duration_hours: 2,
+      metadata: {},
+    };
+
+    const errors = validateSymptomInput(invalidSymptom);
+    expect(errors).toContainEqual({
+      field: "symptom_text",
+      message: expect.stringContaining("at least 3 characters"),
+    });
+  });
+
+  test("should reject invalid severity range", () => {
+    const invalidSymptom = {
+      symptom_text: "Valid symptom",
+      severity: 15,
+      duration_hours: 2,
+      metadata: {},
+    };
+
+    const errors = validateSymptomInput(invalidSymptom);
+    expect(errors).toContainEqual({
+      field: "severity",
+      message: "Severity must be between 1 and 10",
+    });
+  });
 });
 ```
 
-### **Integration Testing**
+### **Integration Testing (Focus on New Endpoints)**
+
 ```typescript
-// Test API integration
-describe('SymptomAPI', () => {
-  test('should create symptom successfully', async () => {
-    const symptom = await SymptomService.createSymptom({
-      symptom_text: 'Test symptom',
-      severity: 5,
-      duration_hours: 2
+// __tests__/api/symptoms.integration.test.ts
+import { apiHelpers } from "../../lib/api";
+import { AuthService } from "../../lib/auth";
+
+describe("Symptom API Integration", () => {
+  beforeAll(async () => {
+    // Use test authentication
+    await AuthService.signIn("test-patient@example.com", "testpassword");
+  });
+
+  test("should create symptom with embedding", async () => {
+    const symptomData = {
+      symptom_text: "Test headache with nausea",
+      severity: 6,
+      duration_hours: 3,
+      metadata: { location: "frontal" },
+    };
+
+    const response = await apiHelpers.symptoms.create(symptomData);
+
+    expect(response.status).toBe(201);
+    expect(response.data).toMatchObject({
+      id: expect.any(String),
+      symptom_text: symptomData.symptom_text,
+      severity: symptomData.severity,
+      embedding: expect.arrayContaining([expect.any(Number)]), // 768 dimensions
     });
-    
-    expect(symptom.id).toBeDefined();
-    expect(symptom.embedding).toHaveLength(768);
+
+    // Verify embedding dimensions
+    expect(response.data.embedding).toHaveLength(768);
+  });
+
+  test("should find similar symptoms", async () => {
+    // First create a symptom
+    await apiHelpers.symptoms.create({
+      symptom_text: "Migraine with aura and nausea",
+      severity: 8,
+      duration_hours: 6,
+    });
+
+    // Then search for similar
+    const searchResponse = await apiHelpers.symptoms.search("headache nausea");
+
+    expect(searchResponse.status).toBe(200);
+    expect(searchResponse.data.similar_symptoms).toBeInstanceOf(Array);
+
+    if (searchResponse.data.similar_symptoms.length > 0) {
+      expect(searchResponse.data.similar_symptoms[0]).toMatchObject({
+        id: expect.any(String),
+        symptom_text: expect.any(String),
+        similarity: expect.any(Number),
+      });
+
+      // Similarity should be between 0 and 1
+      expect(
+        searchResponse.data.similar_symptoms[0].similarity
+      ).toBeGreaterThan(0);
+      expect(
+        searchResponse.data.similar_symptoms[0].similarity
+      ).toBeLessThanOrEqual(1);
+    }
+  });
+});
+```
+
+### **E2E Testing (Critical User Flows)**
+
+```typescript
+// e2e/symptom-tracking.e2e.ts
+import { by, device, element, expect } from "detox";
+
+describe("Symptom Tracking Flow", () => {
+  beforeAll(async () => {
+    await device.launchApp();
+  });
+
+  test("complete symptom logging flow", async () => {
+    // Login
+    await element(by.id("loginButton")).tap();
+    await element(by.id("emailInput")).typeText("test-patient@example.com");
+    await element(by.id("passwordInput")).typeText("testpassword");
+    await element(by.id("signInButton")).tap();
+
+    // Navigate to symptom input
+    await element(by.id("logSymptomButton")).tap();
+
+    // Fill symptom form
+    await element(by.id("symptomTextInput")).typeText(
+      "Severe headache with light sensitivity"
+    );
+    await element(by.id("severitySlider")).swipe("right", "slow"); // Increase severity
+    await element(by.id("durationInput")).typeText("6");
+
+    // Submit symptom
+    await element(by.id("submitSymptomButton")).tap();
+
+    // Verify success
+    await expect(element(by.text("Symptom logged successfully"))).toBeVisible();
+
+    // Verify symptom appears in history
+    await element(by.id("symptomHistoryTab")).tap();
+    await expect(
+      element(by.text("Severe headache with light sensitivity"))
+    ).toBeVisible();
+  });
+
+  test("chat about symptoms", async () => {
+    // Navigate to chat
+    await element(by.id("chatTab")).tap();
+
+    // Start agent if needed
+    const agentStatus = await element(by.id("agentStatus"));
+    try {
+      await expect(agentStatus).toHaveText("Active");
+    } catch {
+      await element(by.id("startAgentButton")).tap();
+      await waitFor(element(by.id("agentStatus")))
+        .toHaveText("Active")
+        .withTimeout(30000);
+    }
+
+    // Send message about symptoms
+    await element(by.id("chatInput")).typeText(
+      "I have been having recurring headaches. What could cause this?"
+    );
+    await element(by.id("sendMessageButton")).tap();
+
+    // Wait for AI response
+    await waitFor(element(by.id("aiMessage")))
+      .toBeVisible()
+      .withTimeout(10000);
+
+    // Verify response contains medical advice
+    const response = await element(by.id("aiMessage")).getText();
+    expect(response).toMatch(/headache|pain|migraine|tension/i);
   });
 });
 ```
 
 ---
 
-## 🚀 **Deployment Guide**
+## 🚀 **Deployment & DevOps (Leverage Existing Infrastructure)**
+
+### **Development Environment Setup**
+
+```bash
+# 1. Clone and setup React Native project
+git clone https://github.com/your-org/symptom-savior-patient
+cd symptom-savior-patient
+npm install
+
+# 2. Link to existing backend (same as Doctor's Portal)
+# No new backend deployment needed - reuse existing API
+
+# 3. Configure environment variables
+cp .env.example .env.local
+
+# Add same Supabase configuration as Doctor's Portal
+REACT_APP_SUPABASE_URL=https://your-project.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=your_anon_key
+REACT_APP_API_URL=https://your-api.onrender.com
+
+# 4. iOS Setup
+cd ios
+xcodebuild -workspace SymptomSaviorPatient.xcworkspace \
+           -scheme SymptomSaviorPatient \
+           -configuration Release \
+           -archivePath build/SymptomSaviorPatient.xcarchive \
+           archive
+
+# 5. Android Setup
+# Ensure Android SDK and tools are installed
+```
+
+### **Database Migration (Add to Existing Database)**
+
+```sql
+-- migration_add_patient_tables.sql
+-- Run this against the same Supabase database as Doctor's Portal
+
+BEGIN;
+
+-- Create symptoms table
+CREATE TABLE public.symptoms (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  symptom_text TEXT NOT NULL,
+  embedding VECTOR(768),
+  severity INTEGER CHECK (severity >= 1 AND severity <= 10),
+  duration_hours INTEGER,
+  metadata JSONB DEFAULT '{}'::JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Create patient profiles table
+CREATE TABLE public.patient_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  date_of_birth DATE,
+  medical_history JSONB DEFAULT '{}'::JSONB,
+  current_medications JSONB DEFAULT '[]'::JSONB,
+  allergies JSONB DEFAULT '[]'::JSONB,
+  emergency_contacts JSONB DEFAULT '[]'::JSONB,
+  privacy_settings JSONB DEFAULT '{}'::JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Add indexes
+CREATE INDEX symptoms_user_id_idx ON public.symptoms USING btree (user_id);
+CREATE INDEX symptoms_created_at_idx ON public.symptoms USING btree (created_at);
+CREATE INDEX symptoms_embedding_idx ON public.symptoms
+  USING ivfflat (embedding vector_cosine_ops) WITH (lists='100');
+CREATE INDEX symptoms_severity_idx ON public.symptoms USING btree (severity);
+
+CREATE INDEX patient_profiles_user_id_idx ON public.patient_profiles USING btree (user_id);
+
+-- Enable RLS
+ALTER TABLE public.symptoms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.patient_profiles ENABLE ROW LEVEL SECURITY;
+
+-- Add RLS policies
+CREATE POLICY "Users can only access their own symptoms"
+  ON public.symptoms FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can only access their own profile"
+  ON public.patient_profiles FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- Add symptom search function
+CREATE OR REPLACE FUNCTION public.match_user_symptoms(
+  user_uuid UUID,
+  query_embedding VECTOR(768),
+  match_threshold FLOAT DEFAULT 0.7,
+  match_count INTEGER DEFAULT 10
+)
+RETURNS TABLE (
+  id UUID,
+  symptom_text TEXT,
+  severity INTEGER,
+  duration_hours INTEGER,
+  metadata JSONB,
+  created_at TIMESTAMPTZ,
+  similarity FLOAT
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        symptoms.id,
+        symptoms.symptom_text,
+        symptoms.severity,
+        symptoms.duration_hours,
+        symptoms.metadata,
+        symptoms.created_at,
+        1 - (symptoms.embedding <=> query_embedding) AS similarity
+    FROM public.symptoms
+    WHERE symptoms.user_id = user_uuid
+        AND symptoms.embedding IS NOT NULL
+        AND 1 - (symptoms.embedding <=> query_embedding) > match_threshold
+    ORDER BY symptoms.embedding <=> query_embedding
+    LIMIT match_count;
+END;
+$$;
+
+COMMIT;
+```
+
+### **Backend API Extensions (Request from Backend Team)**
+
+```javascript
+// backend/routes/symptoms.js - Add to existing backend
+const express = require("express");
+const router = express.Router();
+const { authenticateJWT } = require("../middleware/auth"); // Reuse existing auth
+const { supabase } = require("../lib/supabase"); // Reuse existing Supabase client
+
+// Create symptom with embedding generation
+router.post("/symptoms", authenticateJWT, async (req, res) => {
+  try {
+    const { symptom_text, severity, duration_hours, metadata } = req.body;
+    const user_id = req.user.id;
+
+    // Generate embedding using existing TxAgent infrastructure
+    const embeddingResponse = await fetch(
+      `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${req.headers.authorization.split(" ")[1]}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: symptom_text,
+          normalize: true,
+        }),
+      }
+    );
+
+    if (!embeddingResponse.ok) {
+      throw new Error("Failed to generate embedding");
+    }
+
+    const { embedding } = await embeddingResponse.json();
+
+    // Store in database
+    const { data, error } = await supabase
+      .from("symptoms")
+      .insert({
+        user_id,
+        symptom_text,
+        embedding,
+        severity,
+        duration_hours,
+        metadata,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json(data);
+  } catch (error) {
+    console.error("Create symptom error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get user symptoms
+router.get("/symptoms", authenticateJWT, async (req, res) => {
+  try {
+    const user_id = req.user.id;
+    const {
+      limit = 50,
+      offset = 0,
+      sort = "created_at",
+      order = "desc",
+    } = req.query;
+
+    const { data, error } = await supabase
+      .from("symptoms")
+      .select("*")
+      .eq("user_id", user_id)
+      .order(sort, { ascending: order === "asc" })
+      .range(offset, offset + limit - 1);
+
+    if (error) throw error;
+
+    res.json({ symptoms: data });
+  } catch (error) {
+    console.error("Get symptoms error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Search similar symptoms
+router.post("/symptoms/search", authenticateJWT, async (req, res) => {
+  try {
+    const { query, limit = 10, threshold = 0.7 } = req.body;
+    const user_id = req.user.id;
+
+    // Generate embedding for search query
+    const embeddingResponse = await fetch(
+      `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${req.headers.authorization.split(" ")[1]}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: query,
+          normalize: true,
+        }),
+      }
+    );
+
+    if (!embeddingResponse.ok) {
+      throw new Error("Failed to generate search embedding");
+    }
+
+    const { embedding } = await embeddingResponse.json();
+
+    // Search using vector similarity
+    const { data, error } = await supabase.rpc("match_user_symptoms", {
+      user_uuid: user_id,
+      query_embedding: embedding,
+      match_threshold: threshold,
+      match_count: limit,
+    });
+
+    if (error) throw error;
+
+    res.json({ similar_symptoms: data });
+  } catch (error) {
+    console.error("Search symptoms error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+module.exports = router;
+```
 
 ### **Mobile App Deployment**
 
-#### **iOS (App Store)**
-```bash
-# Build for iOS
-cd ios
-pod install
-cd ..
-npx react-native run-ios --configuration Release
+#### **iOS App Store Deployment**
 
-# Archive and upload to App Store Connect
+```bash
+# 1. Build for release
+cd ios
+xcodebuild -workspace SymptomSaviorPatient.xcworkspace \
+           -scheme SymptomSaviorPatient \
+           -configuration Release \
+           -archivePath build/SymptomSaviorPatient.xcarchive \
+           archive
+
+# 2. Upload to App Store Connect
+xcodebuild -exportArchive \
+           -archivePath build/SymptomSaviorPatient.xcarchive \
+           -exportPath build/ \
+           -exportOptionsPlist ExportOptions.plist
+
+# 3. Use Xcode or Application Loader to upload
 ```
 
-#### **Android (Google Play)**
-```bash
-# Build for Android
-npx react-native run-android --variant=release
+#### **Android Play Store Deployment**
 
-# Generate signed APK
+```bash
+# 1. Generate signed APK
 cd android
 ./gradlew assembleRelease
-```
 
-### **Environment Configuration**
-```typescript
-// config.ts
-const config = {
-  development: {
-    API_URL: 'http://localhost:8000',
-    SUPABASE_URL: 'https://your-dev-project.supabase.co',
-    SUPABASE_ANON_KEY: 'your-dev-anon-key'
-  },
-  production: {
-    API_URL: 'https://your-production-api.com',
-    SUPABASE_URL: 'https://your-prod-project.supabase.co',
-    SUPABASE_ANON_KEY: 'your-prod-anon-key'
-  }
-};
+# 2. Generate App Bundle (recommended)
+./gradlew bundleRelease
 
-export default config[__DEV__ ? 'development' : 'production'];
+# 3. Upload to Google Play Console
+# - Use build/outputs/bundle/release/app-release.aab
 ```
 
 ---
 
-## 📋 **Development Checklist**
+## 📋 **Development Timeline & Milestones**
 
-### **Phase 1: Core Setup**
-- [ ] Set up React Native/Flutter project
-- [ ] Configure Supabase authentication
-- [ ] Implement basic navigation
-- [ ] Create symptom input form
-- [ ] Test API connectivity
+### **Phase 1: Foundation (2 weeks) - 100% Backend Reuse**
 
-### **Phase 2: Core Features**
-- [ ] Implement symptom logging
-- [ ] Build chat interface
-- [ ] Create symptom history view
-- [ ] Add search functionality
-- [ ] Implement data synchronization
+- ✅ **Week 1**: Project setup, authentication integration
 
-### **Phase 3: Advanced Features**
-- [ ] Add health analytics
-- [ ] Implement offline support
-- [ ] Create export functionality
-- [ ] Add push notifications
-- [ ] Implement data backup
+  - Set up React Native project
+  - Integrate Supabase auth (copy from Doctor's Portal)
+  - Configure API client with JWT interceptors
+  - Test authentication flow
 
-### **Phase 4: Polish & Launch**
-- [ ] Comprehensive testing
-- [ ] Performance optimization
-- [ ] Accessibility compliance
-- [ ] App store submission
-- [ ] User documentation
+- ✅ **Week 2**: Core navigation and basic UI
+  - Implement navigation structure
+  - Create base components and styling
+  - Set up state management
+  - Test basic app functionality
 
----
+### **Phase 2: Core Features (3 weeks) - 80% Backend Reuse**
 
-## 🤝 **Collaboration with Backend Team**
+- 🔧 **Week 3**: Symptom input and storage
 
-### **What to Request from Backend Team**
+  - Build symptom input form
+  - Request backend team to add symptoms API endpoints
+  - Test symptom creation and embedding generation
+  - Implement input validation
 
-1. **New API Endpoints**:
-   - `POST /api/symptoms` - Create symptom
-   - `GET /api/symptoms` - List user symptoms
-   - `POST /api/symptoms/search` - Search similar symptoms
-   - `GET /api/health/trends` - Health analytics
+- 🔧 **Week 4**: Chat integration
 
-2. **Database Migration**:
-   - Create `symptoms` table with proper RLS
-   - Add symptom search function
-   - Set up proper indexes
+  - Integrate existing chat API endpoints
+  - Build patient-focused chat UI
+  - Test TxAgent communication
+  - Add agent management controls
 
-3. **Testing Support**:
-   - Test user accounts
-   - API documentation updates
-   - Postman collection for new endpoints
+- 🔧 **Week 5**: Symptom history and search
+  - Build symptom history views
+  - Implement symptom search functionality
+  - Add symptom editing/deletion
+  - Test vector similarity search
 
-### **What You Can Build Independently**
+### **Phase 3: Advanced Features (2 weeks) - 50% Backend Reuse**
 
-1. **Frontend Components**: All UI components and screens
-2. **State Management**: App state and local data management
-3. **Navigation**: App routing and screen transitions
-4. **Styling**: UI design and responsive layouts
-5. **Local Features**: Offline support and local storage
+- 🆕 **Week 6**: Health analytics and profiles
 
----
+  - Request health analytics API endpoints
+  - Build patient profile management
+  - Implement health trend visualization
+  - Add privacy controls
 
-## 📞 **Support & Resources**
+- 🆕 **Week 7**: Polish and optimization
+  - Performance optimization
+  - UI/UX refinements
+  - Accessibility improvements
+  - Comprehensive testing
 
-### **Technical Resources**
-- **Existing Codebase**: Study the Doctor's Portal for patterns
-- **API Documentation**: Use existing endpoints as reference
-- **Database Schema**: Follow the established patterns
-- **Authentication Flow**: Reuse the existing JWT implementation
+### **Phase 4: Launch Preparation (1 week) - Platform Specific**
 
-### **Getting Help**
-- **Backend Team**: For API questions and database changes
-- **Design Team**: For UI/UX guidance and brand consistency
-- **QA Team**: For testing strategies and quality assurance
-- **DevOps Team**: For deployment and infrastructure questions
+- 📱 **Week 8**: Deployment and launch
+  - App store submission preparation
+  - Final testing and bug fixes
+  - Documentation and user guides
+  - Soft launch and monitoring
+
+**Total Timeline: 8 weeks (vs 12 weeks for Doctor's Portal from scratch)**
 
 ---
 
-## 🎯 **Success Metrics**
+## 📞 **Support & Team Coordination**
 
-### **Technical Metrics**
-- **App Performance**: < 3s load time, < 1s response time
-- **Crash Rate**: < 1% crash rate in production
-- **API Success Rate**: > 99% successful API calls
-- **User Retention**: > 80% 7-day retention rate
+### **Backend Team Requests (Prioritized)**
 
-### **User Experience Metrics**
-- **Symptom Logging**: Average time to log symptom < 2 minutes
-- **Chat Response**: AI response time < 5 seconds
-- **User Satisfaction**: > 4.5 star rating in app stores
-- **Feature Adoption**: > 70% of users use chat feature
+#### **High Priority (Week 3)**
 
----
+1. **Symptoms CRUD endpoints**: POST, GET, PUT, DELETE `/api/symptoms`
+2. **Embedding generation**: Integration with existing TxAgent `/embed`
+3. **Database migration**: Add symptoms and patient_profiles tables
+4. **RLS policies**: Patient-specific data isolation
 
-<div align="center">
-  <p><strong>Good luck building the Symptom Savior Patient App! 🚀</strong></p>
-  <p><em>Remember: You're building a tool that can genuinely help people manage their health better.</em></p>
-</div>
+#### **Medium Priority (Week 6)**
+
+1. **Search functionality**: POST `/api/symptoms/search`
+2. **Health analytics**: GET `/api/health/trends`, `/api/health/patterns`
+3. **Profile management**: GET/PUT `/api/profile`
+4. **Data export**: GET `/api/health/export`
+
+#### **Low Priority (Nice to Have)**
+
+1. **Push notifications**: Symptom reminders and health tips
+2. **Data backup/sync**: Cross-device symptom synchronization
+3. **Advanced analytics**: ML-powered health insights
+
+### **Design Team Coordination**
+
+- **Brand consistency**: Reuse Doctor's Portal color scheme and typography
+- **Patient-focused UI**: Simpler, more accessible interface design
+- **Mobile optimization**: Touch-friendly controls and responsive layouts
+- **Accessibility**: Screen reader support and high contrast modes
+
+### **QA Team Support**
+
+- **Test planning**: Focus on new patient-specific features
+- **Automation**: Extend existing Detox tests for E2E coverage
+- **Performance testing**: Ensure app meets speed and responsiveness targets
+- **Security testing**: Validate JWT handling and data access controls
