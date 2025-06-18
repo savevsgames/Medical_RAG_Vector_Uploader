@@ -23,22 +23,39 @@ export function createDocumentsRouter(supabaseClient) {
         userEmail: req.userEmail || req.user?.email, // ✅ Better logging
       });
 
-      // ✅ FIX: Build object key that starts with user ID (as suggested)
+      // ✅ CRITICAL FIX: Object key MUST start with userId/
       const sanitizedFilename = req.file.originalname
         .replace(/[^a-zA-Z0-9.-]/g, "_")
         .replace(/_{2,}/g, "_")
         .substring(0, 100);
 
-      // ✅ CRITICAL: Path MUST start with userId/ for RLS policy to work
-      const objectKey = `${req.userId}/${sanitizedFilename}`;
+      // ✅ This is the key fix - ensure userId is the first folder
+      const objectKey = `${req.userId}/${Date.now()}_${sanitizedFilename}`;
 
-      errorLogger.debug("Upload path structure", {
-        userId: req.userId,
+      // ✅ Debug logging to verify the structure
+      errorLogger.debug("Object key structure check", {
         objectKey: objectKey,
-        expectedFirstFolder: req.userId,
+        expectedUserId: req.userId,
+        actualFirstFolder: objectKey.split("/")[0],
+        structureMatch: objectKey.split("/")[0] === req.userId,
+        policyWillMatch: `auth.uid()::text (${
+          req.userId
+        }) = storage.foldername(${objectKey})[1] (${objectKey.split("/")[0]})`,
       });
 
-      // ✅ Upload using your existing service role client with correct path
+      // Add this right before the storage upload call:
+      console.log("🔍 DEBUG Object Key Structure:");
+      console.log("  Object Key:", objectKey);
+      console.log("  Expected UID:", req.userId);
+      console.log("  First Folder:", objectKey.split("/")[0]);
+      console.log("  Match:", objectKey.split("/")[0] === req.userId);
+      console.log("  Policy Check: auth.uid()::text =", req.userId);
+      console.log(
+        "  Policy Check: storage.foldername(name)[1] =",
+        objectKey.split("/")[0]
+      );
+
+      // ✅ Upload with the correctly structured object key
       const { data: uploadData, error: uploadError } =
         await supabaseClient.storage
           .from("documents")
@@ -59,16 +76,21 @@ export function createDocumentsRouter(supabaseClient) {
           object_key: objectKey,
           user_id: req.userId,
           bucket: "documents",
-          policy_check: `auth.uid()=${req.userId}, folder[1]=${req.userId}`,
+          rls_check: {
+            auth_uid: req.userId,
+            folder_structure: objectKey.split("/"),
+            first_folder: objectKey.split("/")[0],
+            policy_match: objectKey.split("/")[0] === req.userId,
+          },
         });
         throw new Error(`Storage upload failed: ${uploadError.message}`);
       }
 
       errorLogger.success("File uploaded to storage", {
         filePath: uploadData.path,
-        fullPath: uploadData.fullPath,
+        objectKey: objectKey,
         userId: req.userId,
-        policyMatch: "userId matches folder structure",
+        rlsPolicyMatch: "✅ userId matches first folder",
       });
 
       // ✅ Continue with TxAgent processing...
