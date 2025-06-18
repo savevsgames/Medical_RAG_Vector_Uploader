@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { FileText, Upload, Plus, TestTube } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
+import { api } from "../lib/api"; // ✅ Add centralized API client
 import { useAuth } from "../contexts/AuthContext";
 import { UploadModal } from "../components/upload";
 import {
@@ -30,6 +31,14 @@ interface Document {
   created_at: string;
 }
 
+interface UploadStatus {
+  job_id?: string;
+  status?: string;
+  message?: string;
+  file_path?: string;
+  poll_url?: string;
+}
+
 export function Documents() {
   const { user, session } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -40,6 +49,11 @@ export function Documents() {
   const [filterType, setFilterType] = useState("all");
   const [testingEmbed, setTestingEmbed] = useState(false);
 
+  // ✅ NEW: Upload tracking states
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   // Modal states
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [viewDocument, setViewDocument] = useState<Document | null>(null);
@@ -49,13 +63,14 @@ export function Documents() {
   const [debugResult, setDebugResult] = useState(null);
   const [debugLoading, setDebugLoading] = useState(false);
 
+  // ✅ IMPROVED: Debug upload with proper error handling
   const debugUpload = async () => {
     const fileInput = document.createElement("input");
     fileInput.type = "file";
     fileInput.accept = ".pdf,.docx,.txt,.md";
 
     fileInput.onchange = async (e) => {
-      const file = e.target.files[0];
+      const file = (e.target as HTMLInputElement).files?.[0];
       if (!file) return;
 
       setDebugLoading(true);
@@ -65,23 +80,22 @@ export function Documents() {
         const formData = new FormData();
         formData.append("file", file);
 
-        const response = await fetch(
-          `${import.meta.env.VITE_API_URL}/debug-upload`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${session?.access_token}`,
-            },
-            body: formData,
-          }
-        );
+        // ✅ Use centralized API client
+        const response = await api.post("/debug-upload", formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        });
 
-        const result = await response.json();
-        setDebugResult(result);
-        console.log("🔍 Debug Upload Result:", result);
-      } catch (error) {
-        setDebugResult({ error: error.message });
+        setDebugResult(response.data);
+        console.log("🔍 Debug Upload Result:", response.data);
+        toast.success("Debug upload completed! Check console for details.");
+      } catch (error: any) {
+        const errorMessage =
+          error.response?.data?.error || error.message || "Debug upload failed";
+        setDebugResult({ error: errorMessage });
         console.error("🔍 Debug Upload Error:", error);
+        toast.error(`Debug upload failed: ${errorMessage}`);
       } finally {
         setDebugLoading(false);
       }
@@ -90,6 +104,7 @@ export function Documents() {
     fileInput.click();
   };
 
+  // ✅ IMPROVED: Fetch documents with better error handling
   const fetchDocuments = async () => {
     const userEmail = user?.email;
 
@@ -100,6 +115,8 @@ export function Documents() {
 
     try {
       setError(null);
+      setLoading(true);
+
       const { data, error } = await supabase
         .from("documents")
         .select("*")
@@ -121,9 +138,8 @@ export function Documents() {
       });
 
       setDocuments(data || []);
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to load documents";
+    } catch (error: any) {
+      const errorMessage = error?.message || "Failed to load documents";
       setError(errorMessage);
       logger.error("Failed to fetch documents", {
         component: "Documents",
@@ -136,6 +152,7 @@ export function Documents() {
     }
   };
 
+  // ✅ IMPROVED: Handle document deletion with API client
   const handleDeleteDocument = async (documentId: string) => {
     const userEmail = user?.email;
 
@@ -160,13 +177,16 @@ export function Documents() {
       });
 
       setDocuments((prev) => prev.filter((doc) => doc.id !== documentId));
-    } catch (error) {
+      toast.success("Document deleted successfully");
+    } catch (error: any) {
+      const errorMessage = error?.message || "Failed to delete document";
       logger.error("Failed to delete document", {
         component: "Documents",
         user: userEmail,
         documentId,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: errorMessage,
       });
+      toast.error(errorMessage);
       throw error;
     }
   };
@@ -178,43 +198,73 @@ export function Documents() {
     setEditDocument(null);
   };
 
-  const handleUploadComplete = () => {
+  // ✅ NEW: Handle upload completion with job tracking
+  const handleUploadComplete = (uploadResult?: UploadStatus) => {
+    if (uploadResult) {
+      setUploadStatus(uploadResult);
+
+      // If we get a job_id, we can poll for status
+      if (uploadResult.job_id) {
+        toast.success(`Upload started! Job ID: ${uploadResult.job_id}`);
+        // Optionally start polling for job status
+        pollJobStatus(uploadResult.job_id);
+      }
+    }
+
+    // Refresh documents list
     fetchDocuments();
   };
 
-  // FIXED: Test embed endpoint with proper response handling and debugging
+  // ✅ NEW: Poll job status
+  const pollJobStatus = async (jobId: string) => {
+    try {
+      const response = await api.get(`/api/documents/job-status/${jobId}`);
+      const jobStatus = response.data;
+
+      console.log(`Job ${jobId} status:`, jobStatus);
+
+      // Update upload status
+      setUploadStatus((prev) => (prev ? { ...prev, ...jobStatus } : jobStatus));
+
+      // Continue polling if not complete
+      if (jobStatus.status === "queued" || jobStatus.status === "processing") {
+        setTimeout(() => pollJobStatus(jobId), 2000); // Poll every 2 seconds
+      } else if (jobStatus.status === "completed") {
+        toast.success("Document processing completed!");
+        fetchDocuments(); // Refresh documents
+      } else if (jobStatus.status === "failed") {
+        toast.error("Document processing failed");
+      }
+    } catch (error: any) {
+      console.error("Failed to poll job status:", error);
+      // Don't spam user with polling errors
+    }
+  };
+
+  // ✅ IMPROVED: Test embed endpoint with API client
   const testEmbedEndpoint = async () => {
     try {
       setTestingEmbed(true);
 
-      // Change this URL to use your new test endpoint
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/test-upload`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session?.access_token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      // ✅ Use centralized API client
+      const response = await api.post("/api/agent/test-health");
 
-      const result = await response.json();
-      console.log("🧪 Upload System Test Results:", result);
-
-      if (response.ok) {
-        toast.success(
-          "Upload system test completed! Check console for details."
-        );
-      } else {
-        toast.error(`Test failed: ${result.error}`);
-      }
-    } catch (error) {
+      console.log("🧪 Upload System Test Results:", response.data);
+      toast.success("Upload system test completed! Check console for details.");
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error || error.message || "Test failed";
       console.error("🧪 Test Error:", error);
-      toast.error(`Test failed: ${error.message}`);
+      toast.error(`Test failed: ${errorMessage}`);
     } finally {
       setTestingEmbed(false);
     }
+  };
+
+  // ✅ NEW: Handle upload error display
+  const handleUploadError = (error: string) => {
+    setUploadError(error);
+    toast.error(error);
   };
 
   // Filter and search documents
@@ -301,24 +351,26 @@ export function Documents() {
       icon={<FileText className="w-6 h-6 text-healing-teal" />}
       actions={
         <div className="flex space-x-3">
-          {/* DIAGNOSTIC: Test Embed Button */}
+          {/* Test System Button */}
           <Button
             variant="ghost"
             onClick={testEmbedEndpoint}
             loading={testingEmbed}
             icon={<TestTube className="w-5 h-5" />}
           >
-            {testingEmbed ? "Testing..." : "Test Embed"}
+            {testingEmbed ? "Testing..." : "Test System"}
           </Button>
 
+          {/* Debug Upload Button */}
           <button
             onClick={debugUpload}
             disabled={debugLoading}
             className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:opacity-50"
           >
-            {debugLoading ? "Testing Upload..." : "Debug Upload Flow"}
+            {debugLoading ? "Testing Upload..." : "Debug Upload"}
           </button>
 
+          {/* Upload Documents Button */}
           <Button
             onClick={() => setShowUploadModal(true)}
             icon={<Plus className="w-5 h-5" />}
@@ -330,6 +382,43 @@ export function Documents() {
     >
       {/* Stats */}
       <StatsLayout stats={getDocumentStats()} columns={3} />
+
+      {/* ✅ NEW: Upload Status Display */}
+      {uploadStatus && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <h4 className="font-semibold text-blue-800 mb-2">Upload Status</h4>
+          <div className="text-sm text-blue-700">
+            <p>
+              <strong>Job ID:</strong> {uploadStatus.job_id}
+            </p>
+            <p>
+              <strong>Status:</strong> {uploadStatus.status}
+            </p>
+            <p>
+              <strong>File:</strong> {uploadStatus.file_path}
+            </p>
+            {uploadStatus.message && (
+              <p>
+                <strong>Message:</strong> {uploadStatus.message}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ✅ NEW: Upload Error Display */}
+      {uploadError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <h4 className="font-semibold text-red-800 mb-2">Upload Error</h4>
+          <p className="text-sm text-red-700">{uploadError}</p>
+          <button
+            onClick={() => setUploadError(null)}
+            className="mt-2 text-xs text-red-600 hover:text-red-800"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
@@ -398,7 +487,7 @@ export function Documents() {
                 ))}
               </div>
 
-              {/* Results Info */}
+              {/* Debug Results */}
               {debugResult && (
                 <div className="mt-4 p-4 bg-gray-100 rounded-lg">
                   <h4 className="font-bold mb-2">Debug Upload Results:</h4>
@@ -423,6 +512,7 @@ export function Documents() {
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onUploadComplete={handleUploadComplete}
+        onError={handleUploadError}
       />
 
       <DocumentViewModal

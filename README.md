@@ -1,470 +1,348 @@
-# Symptom Savior - Doctor's Portal
+# Medical RAG Vector Uploader
 
-<div align="center">
-  <img src="frontend/public/logo_transparent.png" alt="Symptom Savior Logo" width="120" height="120">
-  
-  **Smart Medical Document Portal with AI-Powered Chat**
-  
-  *Built by Vita Nova Software & "the World's Best Hackathon Team"*
-  
-  [![Powered by Bolt](https://img.shields.io/badge/Powered%20by-Bolt-blue?style=for-the-badge)](https://bolt.new)
-  [![Built with React](https://img.shields.io/badge/Built%20with-React-61DAFB?style=for-the-badge&logo=react)](https://reactjs.org)
-  [![Node.js Backend](https://img.shields.io/badge/Backend-Node.js-339933?style=for-the-badge&logo=node.js)](https://nodejs.org)
-  [![Supabase](https://img.shields.io/badge/Database-Supabase-3ECF8E?style=for-the-badge&logo=supabase)](https://supabase.com)
-</div>
+A comprehensive medical document processing and chat application with RunPod containerized AI agent integration.
 
----
+## 🏗️ Architecture
 
-## 🏥 **Project Overview**
+- **Frontend**: React + TypeScript + Vite
+- **Backend**: Node.js + Express
+- **Database**: Supabase (PostgreSQL)
+- **AI Agent**: TxAgent (RunPod containerized)
+- **Authentication**: Supabase Auth with JWT
+- **Storage**: Supabase Storage with RLS
 
-**Symptom Savior** is a revolutionary medical AI platform designed to enhance healthcare delivery through intelligent document processing and AI-powered medical consultations. The **Doctor's Portal** serves as the professional interface for healthcare providers to upload medical documents and interact with the containerized TxAgent AI system.
+## 🔐 Authentication Flow
 
-This application is part of a larger ecosystem that includes:
-- **Doctor's Portal** (this repository) - Document management and AI chat interface
-- **Patient Mobile App** (companion application) - Patient symptom tracking and consultations
-- **TxAgent Container** - GPU-accelerated BioBERT medical AI processing
+### JWT Token Flow
 
-### 🎯 **Key Features**
+1. **Frontend** → Login via Supabase Auth
+2. **Supabase** → Returns JWT token
+3. **Frontend** → Stores token in localStorage
+4. **All API calls** → Include `Authorization: Bearer {token}`
+5. **Backend** → Validates JWT with `SUPABASE_JWT_SECRET`
+6. **TxAgent** → Receives JWT and uses authenticated Supabase client
 
-- **📄 Medical Document Processing**: Upload and process PDF, DOCX, TXT, and MD medical documents
-- **🤖 AI-Powered Chat**: Interact with BioBERT-powered medical AI for document analysis
-- **🔒 Secure Authentication**: JWT-based authentication with row-level security
-- **⚡ Real-time Processing**: Asynchronous document processing with status monitoring
-- **🏥 Healthcare-Focused**: Designed specifically for medical professionals and workflows
-- **📱 Responsive Design**: Works seamlessly across desktop and mobile devices
+### Key Auth Points
 
----
+- **Backend**: Service role for admin operations
+- **TxAgent**: User JWT for RLS-compliant operations
+- **Storage**: User-scoped uploads (`userId/filename` structure)
 
-## 🏗️ **Architecture Overview**
+## 🛠️ API Endpoints
 
-### **System Components**
+### Core Application Endpoints
 
-```mermaid
-graph TB
-    A[Doctor's Portal Frontend] --> B[Node.js Backend API]
-    B --> C[Supabase Database]
-    B --> D[TxAgent Container]
-    D --> E[BioBERT Model]
-    D --> C
-    F[Patient Mobile App] --> B
-    F --> C
+#### Health & Status
+
+```http
+GET /health
+# Public endpoint - no auth required
+# Returns: Server health status
 ```
 
-### **Technology Stack**
+#### Document Management
 
-#### **Frontend (React/Vite)**
-- **Framework**: React 18 with TypeScript
-- **Build Tool**: Vite for fast development and optimized builds
-- **Styling**: Tailwind CSS with custom medical theme
-- **State Management**: React Context API with custom hooks
-- **Authentication**: Supabase Auth with JWT tokens
-- **UI Components**: Custom component library with accessibility features
+```http
+POST /upload
+Authorization: Bearer {jwt_token}
+Content-Type: multipart/form-data
+Body: { file: File }
+# Returns: { job_id, status, file_path, poll_url }
 
-#### **Backend (Node.js/Express)**
-- **Runtime**: Node.js with Express framework
-- **Database**: Supabase PostgreSQL with pgvector extension
-- **Authentication**: JWT validation with row-level security
-- **File Processing**: Multer for file uploads, integration with TxAgent
-- **API Design**: RESTful endpoints with comprehensive error handling
-- **Deployment**: Render.com with environment-based configuration
+GET /api/documents/job-status/{job_id}
+Authorization: Bearer {jwt_token}
+# Returns: { job_id, status, progress, created_at, updated_at }
+```
 
-#### **AI Processing (TxAgent Container)**
-- **Model**: BioBERT (dmis-lab/biobert-v1.1) for medical text understanding
-- **Embeddings**: 768-dimensional vectors for semantic search
-- **Hardware**: GPU-accelerated processing on RunPod infrastructure
-- **API**: FastAPI with comprehensive medical document processing
-- **Integration**: Direct communication with backend for real-time processing
+#### Chat Endpoints
 
-#### **Database (Supabase)**
-- **Core**: PostgreSQL with pgvector for vector similarity search
-- **Security**: Row-level security (RLS) for data isolation
-- **Storage**: Supabase Storage for document files
-- **Real-time**: Real-time subscriptions for status updates
-- **Backup**: Automated backups and point-in-time recovery
+```http
+POST /api/chat
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+Body: {
+  "message": "string",
+  "top_k": 5,
+  "temperature": 0.7
+}
+# Routes to TxAgent /chat endpoint
+# Returns: { response, sources, processing_time }
 
----
+POST /api/openai-chat
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+Body: {
+  "message": "string"
+}
+# Fallback OpenAI RAG chat
+# Returns: { response, sources, model, tokens_used }
+```
 
-## 🚀 **Getting Started**
+#### Agent Management
 
-### **Prerequisites**
+```http
+GET /api/agent/status
+Authorization: Bearer {jwt_token}
+# Returns: { agent_active, agent_id, container_status, session_data }
 
-- **Node.js** 18+ and npm
-- **Supabase** account and project
-- **TxAgent Container** deployed on RunPod (optional for development)
-- **OpenAI API Key** (fallback for AI processing)
+POST /api/agent/start
+Authorization: Bearer {jwt_token}
+# Creates new TxAgent session
+# Returns: { agent_id, session_data, runpod_endpoint }
 
-### **Environment Setup**
+POST /api/agent/stop
+Authorization: Bearer {jwt_token}
+# Terminates active TxAgent session
+# Returns: { success, message }
 
-1. **Clone the Repository**
-   ```bash
-   git clone <repository-url>
-   cd symptom-savior-doctors-portal
+POST /api/agent/health-check
+Authorization: Bearer {jwt_token}
+# Comprehensive health check of TxAgent endpoints
+# Returns: { container_reachable, endpoints_working, test_results }
+```
+
+#### Embedding Proxy
+
+```http
+POST /api/embed
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+Body: {
+  "text": "string",
+  "normalize": true
+}
+# Proxies to TxAgent /embed endpoint
+# Returns: { embedding: number[], metadata }
+```
+
+### TxAgent Container Endpoints
+
+#### Direct TxAgent Endpoints (via RUNPOD_EMBEDDING_URL)
+
+```http
+GET /health
+# Container health check
+# Returns: { status, version, uptime }
+
+POST /chat
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+Body: {
+  "query": "string",
+  "top_k": 5,
+  "temperature": 0.7,
+  "history": []
+}
+# Returns: { response, sources, processing_time }
+
+POST /embed
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+Body: {
+  "text": "string",
+  "normalize": true,
+  "metadata": {}
+}
+# Returns: { embedding: number[], metadata }
+
+POST /process-document
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+Body: {
+  "file_path": "userId/filename.pdf",
+  "metadata": {
+    "title": "string",
+    "description": "string",
+    "user_id": "string"
+  }
+}
+# Returns: { job_id, status, message }
+
+GET /embedding-jobs/{job_id}
+Authorization: Bearer {jwt_token}
+# Returns: { job_id, status, progress, created_at, updated_at }
+```
+
+## 🔄 Document Processing Flow
+
+### Complete Upload & Processing Pipeline
+
+1. **File Upload**
+
+   ```
+   Frontend → POST /upload → Backend
+   ├── Validates file (50MB limit, allowed types)
+   ├── Creates object key: userId/timestamp_filename
+   ├── Uploads to Supabase Storage (RLS compliant)
+   └── Returns: { file_path, job_id }
    ```
 
-2. **Install Dependencies**
-   ```bash
-   # Backend dependencies
-   cd backend
-   npm install
-   
-   # Frontend dependencies
-   cd ../frontend
-   npm install
+2. **TxAgent Processing**
+
+   ```
+   Backend → POST /process-document → TxAgent
+   ├── TxAgent validates JWT
+   ├── Creates job record in embedding_jobs table
+   ├── Starts background processing
+   └── Returns: { job_id, status: "queued" }
    ```
 
-3. **Environment Configuration**
+3. **Status Polling**
 
-   **Backend (.env)**
-   ```env
-   # Supabase Configuration
-   SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_KEY=your_service_role_key_here
-   SUPABASE_JWT_SECRET=your_jwt_secret_here
-   
-   # Server Configuration
-   PORT=8000
-   NODE_ENV=development
-   
-   # TxAgent Container (Optional)
-   RUNPOD_EMBEDDING_URL=https://your-runpod-url.proxy.runpod.net
-   RUNPOD_EMBEDDING_KEY=your_runpod_api_key_here
-   
-   # OpenAI Fallback (Optional)
-   OPENAI_API_KEY=your_openai_api_key_here
-   
-   # Debug Logging
-   BACKEND_DEBUG_LOGGING=true
+   ```
+   Frontend → GET /job-status/{job_id} → Backend → TxAgent
+   ├── TxAgent uses authenticated client
+   ├── Queries embedding_jobs with RLS
+   └── Returns: { status: "queued" | "processing" | "completed" | "failed" }
    ```
 
-   **Frontend (.env)**
-   ```env
-   VITE_SUPABASE_URL=https://your-project.supabase.co
-   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key_here
-   VITE_API_URL=http://localhost:8000
+4. **Vector Storage**
+   ```
+   TxAgent Background Process:
+   ├── Downloads file from Supabase Storage
+   ├── Extracts text content
+   ├── Generates embeddings
+   ├── Stores vectors in vector database
+   └── Updates job status to "completed"
    ```
 
-4. **Database Setup**
-   ```bash
-   # Run Supabase migrations
-   cd supabase
-   npx supabase db reset
-   ```
+## 🔧 Key Configuration
 
-5. **Start Development Servers**
-   ```bash
-   # Start backend (Terminal 1)
-   cd backend
-   npm run dev
-   
-   # Start frontend (Terminal 2)
-   cd frontend
-   npm run dev
-   ```
+### Environment Variables
 
-6. **Access the Application**
-   - **Frontend**: http://localhost:5173
-   - **Backend API**: http://localhost:8000
-   - **Health Check**: http://localhost:8000/health
+#### Backend (.env)
 
----
-
-## 📚 **API Documentation**
-
-### **Core Endpoints**
-
-#### **Authentication**
-- **POST** `/auth/login` - User authentication
-- **POST** `/auth/register` - User registration
-- **GET** `/auth/user` - Get current user info
-
-#### **Document Management**
-- **POST** `/upload` - Upload medical documents
-- **GET** `/api/documents` - List user documents
-- **DELETE** `/api/documents/:id` - Delete document
-
-#### **AI Chat Interface**
-- **POST** `/api/chat` - Chat with TxAgent (BioBERT)
-- **POST** `/api/openai-chat` - Chat with OpenAI (fallback)
-- **POST** `/api/embed` - Generate text embeddings
-
-#### **Agent Management**
-- **POST** `/api/agent/start` - Start TxAgent session
-- **POST** `/api/agent/stop` - Stop TxAgent session
-- **GET** `/api/agent/status` - Get agent status
-- **POST** `/api/agent/health-check` - Detailed health check
-
-#### **System Health**
-- **GET** `/health` - System health status
-
-### **Request/Response Examples**
-
-#### **Document Upload**
 ```bash
-curl -X POST "http://localhost:8000/upload" \
-  -H "Authorization: Bearer <jwt_token>" \
-  -F "file=@medical-document.pdf"
-```
-
-#### **Chat with TxAgent**
-```bash
-curl -X POST "http://localhost:8000/api/chat" \
-  -H "Authorization: Bearer <jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "What are the symptoms of diabetes?",
-    "top_k": 5,
-    "temperature": 0.7
-  }'
-```
-
----
-
-## 🗄️ **Database Schema**
-
-### **Core Tables**
-
-#### **documents**
-```sql
-CREATE TABLE public.documents (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  filename TEXT,
-  content TEXT NOT NULL,
-  embedding VECTOR(768),  -- BioBERT embeddings
-  metadata JSONB DEFAULT '{}'::JSONB,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-```
-
-#### **agents**
-```sql
-CREATE TABLE public.agents (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  status TEXT DEFAULT 'initializing',
-  session_data JSONB DEFAULT '{}'::JSONB,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  last_active TIMESTAMPTZ DEFAULT now(),
-  terminated_at TIMESTAMPTZ
-);
-```
-
-#### **embedding_jobs**
-```sql
-CREATE TABLE public.embedding_jobs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  file_path TEXT NOT NULL,
-  status TEXT DEFAULT 'pending',
-  metadata JSONB DEFAULT '{}'::JSONB,
-  chunk_count INTEGER DEFAULT 0,
-  error TEXT,
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-```
-
-### **Security Features**
-- **Row Level Security (RLS)**: All tables enforce user-based data isolation
-- **JWT Authentication**: Secure token-based authentication
-- **Foreign Key Constraints**: Data integrity and cascade deletions
-- **Vector Indexing**: Optimized similarity search with IVFFlat
-
----
-
-## 🔧 **TxAgent Integration**
-
-### **Container Communication**
-
-The Doctor's Portal communicates with the TxAgent container through these endpoints:
-
-#### **Document Processing Flow**
-1. **Upload**: Doctor uploads document via frontend
-2. **Storage**: Backend stores file in Supabase Storage
-3. **Processing**: Backend calls TxAgent `/process-document` endpoint
-4. **Embedding**: TxAgent generates BioBERT embeddings
-5. **Storage**: Embeddings stored in database with RLS
-
-#### **Chat Flow**
-1. **Query**: Doctor submits medical question
-2. **Processing**: Backend calls TxAgent `/chat` endpoint
-3. **Search**: TxAgent performs vector similarity search
-4. **Response**: AI generates contextual medical response
-5. **Display**: Response shown with source citations
-
-### **TxAgent API Endpoints**
-
-- **POST** `/process-document` - Process uploaded medical documents
-- **POST** `/chat` - Generate AI responses with medical context
-- **POST** `/embed` - Generate BioBERT embeddings for text
-- **GET** `/health` - Container health and status
-
----
-
-## 🧪 **Testing**
-
-### **Development Testing**
-```bash
-# Run backend tests
-cd backend
-npm test
-
-# Run frontend tests
-cd frontend
-npm test
-
-# Run integration tests
-npm run test:integration
-```
-
-### **API Testing**
-Use the included Postman collection for comprehensive API testing:
-- Authentication flows
-- Document upload and processing
-- Chat functionality
-- Agent management
-- Error handling scenarios
-
-### **Health Checks**
-```bash
-# Backend health
-curl http://localhost:8000/health
-
-# TxAgent health (if running)
-curl https://your-runpod-url.proxy.runpod.net/health
-```
-
----
-
-## 🚀 **Deployment**
-
-### **Production Deployment**
-
-#### **Backend (Render.com)**
-1. Connect GitHub repository to Render
-2. Configure environment variables
-3. Deploy with automatic builds on push
-
-#### **Frontend (Netlify/Vercel)**
-1. Build production bundle: `npm run build`
-2. Deploy `dist` folder to hosting platform
-3. Configure redirects for SPA routing
-
-#### **Database (Supabase)**
-- Managed PostgreSQL with automatic scaling
-- Built-in backups and monitoring
-- Production-ready security features
-
-### **Environment Variables (Production)**
-```env
-# Backend
+# Supabase Configuration
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your_production_service_role_key
-SUPABASE_JWT_SECRET=your_production_jwt_secret
-RUNPOD_EMBEDDING_URL=https://your-production-runpod-url
-OPENAI_API_KEY=your_production_openai_key
-NODE_ENV=production
+SUPABASE_KEY=your_service_role_key_here  # Service role key
+SUPABASE_JWT_SECRET=your_jwt_secret_here
 
-# Frontend
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your_production_anon_key
-VITE_API_URL=https://your-backend-domain.com
+# TxAgent Configuration
+RUNPOD_EMBEDDING_URL=https://your-runpod-endpoint.runpod.net
+
+# Server Configuration
+PORT=5000
+NODE_ENV=production
 ```
 
----
+#### Frontend (.env.production)
 
-## 📊 **Monitoring & Analytics**
+```bash
+# API Configuration
+VITE_API_URL=
+# Empty = same domain for single-service deployment
 
-### **System Monitoring**
-- **Health Endpoints**: Real-time system status monitoring
-- **Error Tracking**: Comprehensive error logging and alerting
-- **Performance Metrics**: Response times and throughput monitoring
-- **User Analytics**: Usage patterns and feature adoption
+# Supabase Configuration (for auth)
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your_anon_key_here
+```
 
-### **Logging**
-- **Request Logging**: All API requests with user context
-- **Error Logging**: Detailed error information with stack traces
-- **Performance Logging**: Processing times and resource usage
-- **Security Logging**: Authentication events and access patterns
+### Critical Authentication Notes
 
----
+#### RLS Policies
 
-## 🔒 **Security**
+```sql
+-- Storage policy for user-scoped uploads
+CREATE POLICY "User file access" ON storage.objects
+FOR ALL USING (
+  bucket_id = 'documents' AND (
+    auth.role() = 'service_role' OR
+    auth.uid()::text = (storage.foldername(name))[1]
+  )
+);
 
-### **Authentication & Authorization**
-- **JWT Tokens**: Secure token-based authentication
-- **Row Level Security**: Database-level user data isolation
-- **CORS Configuration**: Proper cross-origin request handling
-- **Input Validation**: Comprehensive request validation
+-- embedding_jobs table policy
+CREATE POLICY "User job access" ON embedding_jobs
+FOR ALL USING (
+  auth.role() = 'service_role' OR
+  auth.uid() = user_id
+);
+```
 
-### **Data Protection**
-- **Encryption**: Data encrypted in transit and at rest
-- **Access Controls**: Role-based access control (RBAC)
-- **Audit Logging**: Complete audit trail for all operations
-- **HIPAA Compliance**: Healthcare data protection standards
+#### TxAgent Authentication
 
----
+- **CRITICAL**: TxAgent must use authenticated Supabase client for all database operations
+- **JWT Required**: All TxAgent endpoints require valid JWT token
+- **RLS Compliance**: Job creation and querying must respect user isolation
 
-## 🤝 **Contributing**
+## 🚨 Common Issues & Solutions
 
-### **Development Workflow**
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
+### Upload Issues
 
-### **Code Standards**
-- **TypeScript**: Strict type checking enabled
-- **ESLint**: Code linting with medical-specific rules
-- **Prettier**: Consistent code formatting
-- **Testing**: Comprehensive test coverage required
+- **RLS Violation**: Ensure file path starts with `userId/`
+- **Job Not Found**: TxAgent using anonymous client instead of authenticated
+- **File Size**: 50MB limit enforced by multer
 
-### **Documentation**
-- Update README.md for new features
-- Add JSDoc comments for new functions
-- Update API documentation for endpoint changes
-- Include migration guides for breaking changes
+### Authentication Issues
 
----
+- **Invalid JWT**: Check `SUPABASE_JWT_SECRET` configuration
+- **Anonymous User**: Verify JWT token in Authorization header
+- **CORS**: Ensure frontend domain in CORS whitelist
 
-## 📞 **Support & Contact**
+### Container Issues
 
-### **Development Team**
-- **Organization**: Vita Nova Software
-- **Team**: "the World's Best Hackathon Team"
-- **Platform**: Built with [Bolt](https://bolt.new)
+- **Unreachable**: Check `RUNPOD_EMBEDDING_URL` configuration
+- **Timeout**: TxAgent endpoints have 60s timeout
+- **Health Check**: Use `/api/agent/health-check` for diagnostics
 
-### **Technical Support**
-- **Issues**: GitHub Issues for bug reports and feature requests
-- **Documentation**: Comprehensive docs in `/docs` folder
-- **API Reference**: OpenAPI specification available
-- **Community**: Join our Discord for real-time support
+## 🧪 Testing Endpoints
 
-### **Healthcare Compliance**
-- **HIPAA**: Compliant with healthcare data protection standards
-- **Security**: Regular security audits and penetration testing
-- **Certification**: SOC 2 Type II compliance in progress
+### Quick Health Check
 
----
+```bash
+# Test backend health
+curl https://your-app.onrender.com/health
 
-## 📄 **License**
+# Test TxAgent health (requires JWT)
+curl -H "Authorization: Bearer YOUR_JWT" \
+     https://your-app.onrender.com/api/agent/test-health
+```
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### Upload Test
 
----
+```bash
+# Test file upload
+curl -X POST \
+     -H "Authorization: Bearer YOUR_JWT" \
+     -F "file=@test.pdf" \
+     https://your-app.onrender.com/upload
+```
 
-## 🙏 **Acknowledgments**
+## 🔄 Deployment
 
-- **Bolt Platform**: For providing the development environment
-- **Supabase**: For the robust backend infrastructure
-- **BioBERT Team**: For the medical language model
-- **Open Source Community**: For the amazing tools and libraries
-- **Healthcare Professionals**: For their invaluable feedback and guidance
+### Single Service Deployment (Recommended)
 
----
+```yaml
+# render.yaml
+services:
+  - type: web
+    name: medical-rag-app
+    env: node
+    buildCommand: |
+      cd frontend && npm install && npm run build &&
+      cd ../backend && npm install
+    startCommand: cd backend && npm start
+```
 
-<div align="center">
-  <p><strong>Built with ❤️ by Vita Nova Software & "the World's Best Hackathon Team"</strong></p>
-  <p><em>Powered by Bolt - Revolutionizing Healthcare with AI</em></p>
-</div>
+### SPA Routing
+
+- Backend serves frontend files from `/`
+- SPA fallback serves `index.html` for client-side routes
+- API routes (`/api/*`, `/health`, `/upload`) handled by Express
+
+## 📊 Monitoring
+
+### Agent Status Dashboard
+
+- Real-time agent session monitoring
+- Container health checks
+- Endpoint testing utilities
+- Processing job status tracking
+
+### Logging
+
+- Structured logging with winston
+- Request/response logging
+- Error tracking with stack traces
+- Performance metrics
