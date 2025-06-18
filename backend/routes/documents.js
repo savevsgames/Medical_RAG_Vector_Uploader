@@ -59,7 +59,7 @@ export function createDocumentsRouter(supabaseClient) {
       // ✅ FIX: Create user-authenticated client for storage upload
       const userSupabaseClient = createClient(
         process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY, // Use anon key, not service key
+        process.env.SUPABASE_KEY, // Use anon key, not service key
         {
           global: {
             headers: {
