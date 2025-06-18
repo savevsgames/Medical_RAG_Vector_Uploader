@@ -23,23 +23,28 @@ export function createDocumentsRouter(supabaseClient) {
         userEmail: req.userEmail || req.user?.email, // ✅ Better logging
       });
 
-      // ✅ Use existing service role client with proper file path
-      const timestamp = Date.now();
+      // ✅ FIX: Build object key that starts with user ID (as suggested)
       const sanitizedFilename = req.file.originalname
         .replace(/[^a-zA-Z0-9.-]/g, "_")
         .replace(/_{2,}/g, "_")
         .substring(0, 100);
 
-      const filePath = `${req.userId}/${timestamp}_${sanitizedFilename}`;
+      // ✅ CRITICAL: Path MUST start with userId/ for RLS policy to work
+      const objectKey = `${req.userId}/${sanitizedFilename}`;
 
-      // ✅ Upload using your existing service role client
+      errorLogger.debug("Upload path structure", {
+        userId: req.userId,
+        objectKey: objectKey,
+        expectedFirstFolder: req.userId,
+      });
+
+      // ✅ Upload using your existing service role client with correct path
       const { data: uploadData, error: uploadError } =
         await supabaseClient.storage
           .from("documents")
-          .upload(filePath, req.file.buffer, {
+          .upload(objectKey, req.file.buffer, {
             contentType: req.file.mimetype,
-            upsert: false,
-            // ✅ Add metadata for debugging
+            upsert: false, // Set to true if you want to allow overwrite
             metadata: {
               uploadedBy: req.userId,
               originalName: req.file.originalname,
@@ -51,20 +56,22 @@ export function createDocumentsRouter(supabaseClient) {
         errorLogger.error("Supabase storage upload failed", {
           error_message: uploadError.message,
           error_code: uploadError.status,
-          file_path: filePath,
+          object_key: objectKey,
           user_id: req.userId,
           bucket: "documents",
+          policy_check: `auth.uid()=${req.userId}, folder[1]=${req.userId}`,
         });
         throw new Error(`Storage upload failed: ${uploadError.message}`);
       }
 
-      errorLogger.info("File uploaded to storage", {
+      errorLogger.success("File uploaded to storage", {
         filePath: uploadData.path,
         fullPath: uploadData.fullPath,
         userId: req.userId,
+        policyMatch: "userId matches folder structure",
       });
 
-      // Step 2: Call TxAgent to process the document
+      // ✅ Continue with TxAgent processing...
       const txAgentResponse = await fetch(
         `${process.env.RUNPOD_EMBEDDING_URL}/process-document`,
         {
@@ -74,7 +81,7 @@ export function createDocumentsRouter(supabaseClient) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            file_path: uploadData.path,
+            file_path: uploadData.path, // This will be: userId/filename
             metadata: {
               title: req.file.originalname,
               description: "User uploaded document",
