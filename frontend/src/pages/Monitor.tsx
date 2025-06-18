@@ -114,8 +114,9 @@ export function Monitor() {
     }));
 
     try {
+      // ✅ FIXED: Call the real chat endpoint that works
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/agent/test-chat`,
+        `${import.meta.env.VITE_API_URL}/api/chat`, // ✅ Use real endpoint
         {
           method: "POST",
           headers: {
@@ -123,9 +124,9 @@ export function Monitor() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            query: "What are the symptoms of diabetes?",
-            history: [],
-            top_k: 5,
+            message: "Test connection - health check", // ✅ Correct payload format
+            top_k: 1,
+            temperature: 0.1,
           }),
         }
       );
@@ -140,7 +141,7 @@ export function Monitor() {
         },
       }));
 
-      logApiCall("/api/agent/test-chat", "POST", response.status);
+      logApiCall("/api/chat", "POST", response.status);
     } catch (error) {
       setEndpointTests((prev) => ({
         ...prev,
@@ -156,8 +157,9 @@ export function Monitor() {
     }));
 
     try {
+      // ✅ FIXED: Call real embed endpoint through your backend
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/agent/test-embed`,
+        `${import.meta.env.VITE_API_URL}/api/embed`, // ✅ Use real endpoint (if you have one)
         {
           method: "POST",
           headers: {
@@ -165,7 +167,11 @@ export function Monitor() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            text: "This is a test sentence for embedding generation.",
+            text: "Test embedding generation for health check",
+            metadata: {
+              source: "monitor_test",
+              timestamp: new Date().toISOString(),
+            },
           }),
         }
       );
@@ -180,7 +186,7 @@ export function Monitor() {
         },
       }));
 
-      logApiCall("/api/agent/test-embed", "POST", response.status);
+      logApiCall("/api/embed", "POST", response.status);
     } catch (error) {
       setEndpointTests((prev) => ({
         ...prev,

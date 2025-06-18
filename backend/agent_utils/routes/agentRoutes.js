@@ -1,7 +1,6 @@
 import express from "express";
 import axios from "axios";
 import { AgentService } from "../core/agentService.js";
-import { ContainerService } from "../core/containerService.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { errorLogger } from "../shared/logger.js";
 
@@ -18,13 +17,11 @@ export function createAgentRouter(supabaseClient) {
 
   // Initialize services with injected Supabase client
   const agentService = new AgentService(supabaseClient);
-  const containerService = new ContainerService();
 
   // Agent Status Operations
   class AgentStatusOperations {
-    constructor(agentService, containerService) {
+    constructor(agentService) {
       this.agentService = agentService;
-      this.containerService = containerService;
     }
 
     async getStatus(req, res) {
@@ -189,9 +186,8 @@ export function createAgentRouter(supabaseClient) {
 
   // Agent Lifecycle Operations
   class AgentLifecycleOperations {
-    constructor(agentService, containerService) {
+    constructor(agentService) {
       this.agentService = agentService;
-      this.containerService = containerService;
     }
 
     async startAgent(req, res) {
@@ -353,9 +349,8 @@ export function createAgentRouter(supabaseClient) {
 
   // Agent Health Operations
   class AgentHealthOperations {
-    constructor(agentService, containerService) {
+    constructor(agentService) {
       this.agentService = agentService;
-      this.containerService = containerService;
     }
 
     async performHealthCheck(req, res) {
@@ -408,7 +403,7 @@ export function createAgentRouter(supabaseClient) {
 
         // Test other endpoints if health check passed
         if (healthResults.container_reachable) {
-          // Test chat endpoint (simplified)
+          // ✅ FIXED: Test chat endpoint with correct payload format
           try {
             const chatUrl = `${agent.session_data.runpod_endpoint.replace(
               /\/+$/,
@@ -417,14 +412,16 @@ export function createAgentRouter(supabaseClient) {
             const { status } = await axios.post(
               chatUrl,
               {
-                message: "Test connection",
-                context: [],
+                query: "Test connection", // ✅ FIXED: Use 'query', not 'message'
+                top_k: 1,
+                temperature: 0.1,
               },
               {
                 timeout: 5000,
                 headers: {
                   Accept: "application/json",
                   "Content-Type": "application/json",
+                  Authorization: req.headers.authorization, // ✅ ADDED: Pass JWT
                 },
               }
             );
@@ -435,7 +432,7 @@ export function createAgentRouter(supabaseClient) {
             healthResults.test_results.chat.error = error.message;
           }
 
-          // Test embed endpoint (simplified)
+          // ✅ FIXED: Test embed endpoint with correct payload format
           try {
             const embedUrl = `${agent.session_data.runpod_endpoint.replace(
               /\/+$/,
@@ -444,13 +441,18 @@ export function createAgentRouter(supabaseClient) {
             const { status } = await axios.post(
               embedUrl,
               {
-                text: "Test embedding",
+                text: "Test embedding", // ✅ CORRECT: TxAgent expects 'text'
+                metadata: {
+                  source: "health_check",
+                  timestamp: new Date().toISOString(),
+                },
               },
               {
                 timeout: 5000,
                 headers: {
                   Accept: "application/json",
                   "Content-Type": "application/json",
+                  Authorization: req.headers.authorization, // ✅ ADDED: Pass JWT
                 },
               }
             );
@@ -499,27 +501,15 @@ export function createAgentRouter(supabaseClient) {
 
     async checkContainerHealth(agent) {
       // Reuse the same logic from AgentStatusOperations
-      const statusOps = new AgentStatusOperations(
-        this.agentService,
-        this.containerService
-      );
+      const statusOps = new AgentStatusOperations(this.agentService);
       return statusOps.checkContainerHealth(agent);
     }
   }
 
-  // Initialize operation classes
-  const statusOperations = new AgentStatusOperations(
-    agentService,
-    containerService
-  );
-  const lifecycleOperations = new AgentLifecycleOperations(
-    agentService,
-    containerService
-  );
-  const healthOperations = new AgentHealthOperations(
-    agentService,
-    containerService
-  );
+  // Initialize operation classes (❌ REMOVED: containerService parameters)
+  const statusOperations = new AgentStatusOperations(agentService);
+  const lifecycleOperations = new AgentLifecycleOperations(agentService);
+  const healthOperations = new AgentHealthOperations(agentService);
 
   // ROUTES
 
@@ -540,15 +530,15 @@ export function createAgentRouter(supabaseClient) {
   );
 
   // Routes for custom TEST endpoints
-  router.post('/test-health', verifyToken, async (req, res) => {
+  router.post("/test-health", verifyToken, async (req, res) => {
     // Direct health test to container
   });
 
-  router.post('/test-chat', verifyToken, async (req, res) => {
+  router.post("/test-chat", verifyToken, async (req, res) => {
     // Direct chat test to container
   });
 
-  router.post('/test-embed', verifyToken, async (req, res) => {
+  router.post("/test-embed", verifyToken, async (req, res) => {
     // Direct embed test to container
   });
 
