@@ -86,6 +86,6 @@ export function setupRoutes(app, supabaseClient) {
 
 export default setupRoutes;
 
-export { ChatService } from "./ChatService.js"; // ✅ Keep this
+export { ChatService } from "../lib/services/ChatService.js"; // ✅ Keep this
 // export { DocumentProcessingService } from './DocumentProcessingService.js';  // ❌ Removed
 // export { EmbeddingService } from './EmbeddingService.js';                    // ❌ Removed
