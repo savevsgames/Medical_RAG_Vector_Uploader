@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { FileText, Upload, Plus, TestTube } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
-import { api } from "../lib/api"; // ✅ Add centralized API client
+import { api } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { UploadModal } from "../components/upload";
 import {
@@ -15,6 +15,32 @@ import { AsyncState } from "../components/feedback";
 import { logger, logSupabaseOperation, logUserAction } from "../utils/logger";
 import toast from "react-hot-toast";
 
+// ✅ ADD: Safe date formatting helpers
+const formatSafeDate = (dateValue: string | null | undefined): string => {
+  if (!dateValue) return "Not available";
+  try {
+    const date = new Date(dateValue);
+    if (isNaN(date.getTime())) return "Invalid date";
+    return date.toLocaleString();
+  } catch (error) {
+    console.warn("Date formatting error:", error);
+    return "Date error";
+  }
+};
+
+const formatSafeTime = (dateValue: string | null | undefined): string => {
+  if (!dateValue) return "Not available";
+  try {
+    const date = new Date(dateValue);
+    if (isNaN(date.getTime())) return "Invalid time";
+    return date.toLocaleTimeString();
+  } catch (error) {
+    console.warn("Time formatting error:", error);
+    return "Time error";
+  }
+};
+
+// ✅ UPDATED: Make dates nullable to handle undefined values
 interface Document {
   id: string;
   filename: string;
@@ -28,7 +54,8 @@ interface Document {
     processing_time_ms?: number;
     [key: string]: any;
   };
-  created_at: string;
+  created_at: string | null; // ✅ Make nullable
+  updated_at?: string | null; // ✅ Add optional updated_at
 }
 
 interface UploadStatus {
@@ -37,6 +64,8 @@ interface UploadStatus {
   message?: string;
   file_path?: string;
   poll_url?: string;
+  created_at?: string | null; // ✅ Make nullable
+  updated_at?: string | null; // ✅ Make nullable
 }
 
 export function Documents() {
@@ -49,7 +78,7 @@ export function Documents() {
   const [filterType, setFilterType] = useState("all");
   const [testingEmbed, setTestingEmbed] = useState(false);
 
-  // ✅ NEW: Upload tracking states
+  // Upload tracking states
   const [uploadStatus, setUploadStatus] = useState<UploadStatus | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -80,7 +109,6 @@ export function Documents() {
         const formData = new FormData();
         formData.append("file", file);
 
-        // ✅ Use centralized API client
         const response = await api.post("/debug-upload", formData, {
           headers: {
             "Content-Type": "multipart/form-data",
@@ -104,7 +132,7 @@ export function Documents() {
     fileInput.click();
   };
 
-  // ✅ IMPROVED: Fetch documents with better error handling
+  // ✅ IMPROVED: Fetch documents with safe date handling
   const fetchDocuments = async () => {
     const userEmail = user?.email;
 
@@ -137,7 +165,19 @@ export function Documents() {
         component: "Documents",
       });
 
-      setDocuments(data || []);
+      // ✅ CRITICAL: Ensure all documents have safe date fields
+      const safeDocuments = (data || []).map((doc) => ({
+        ...doc,
+        created_at: doc.created_at || new Date().toISOString(),
+        updated_at: doc.updated_at || null,
+        metadata: {
+          ...doc.metadata,
+          char_count: doc.metadata?.char_count || 0,
+          file_size: doc.metadata?.file_size || 0,
+        },
+      }));
+
+      setDocuments(safeDocuments);
     } catch (error: any) {
       const errorMessage = error?.message || "Failed to load documents";
       setError(errorMessage);
@@ -152,7 +192,6 @@ export function Documents() {
     }
   };
 
-  // ✅ IMPROVED: Handle document deletion with API client
   const handleDeleteDocument = async (documentId: string) => {
     const userEmail = user?.email;
 
@@ -198,15 +237,20 @@ export function Documents() {
     setEditDocument(null);
   };
 
-  // ✅ NEW: Handle upload completion with job tracking
+  // ✅ IMPROVED: Handle upload completion with safe date handling
   const handleUploadComplete = (uploadResult?: UploadStatus) => {
     if (uploadResult) {
-      setUploadStatus(uploadResult);
+      // ✅ Ensure safe upload status handling
+      const safeUploadResult = {
+        ...uploadResult,
+        created_at: uploadResult.created_at || new Date().toISOString(),
+        updated_at: uploadResult.updated_at || null,
+      };
 
-      // If we get a job_id, we can poll for status
+      setUploadStatus(safeUploadResult);
+
       if (uploadResult.job_id) {
         toast.success(`Upload started! Job ID: ${uploadResult.job_id}`);
-        // Optionally start polling for job status
         pollJobStatus(uploadResult.job_id);
       }
     }
@@ -215,7 +259,7 @@ export function Documents() {
     fetchDocuments();
   };
 
-  // ✅ NEW: Poll job status
+  // ✅ IMPROVED: Poll job status with safe date handling
   const pollJobStatus = async (jobId: string) => {
     try {
       const response = await api.get(`/api/documents/job-status/${jobId}`);
@@ -223,32 +267,34 @@ export function Documents() {
 
       console.log(`Job ${jobId} status:`, jobStatus);
 
-      // Update upload status
-      setUploadStatus((prev) => (prev ? { ...prev, ...jobStatus } : jobStatus));
+      // ✅ Ensure safe date handling in job status
+      const safeJobStatus = {
+        ...jobStatus,
+        created_at: jobStatus.created_at || null,
+        updated_at: jobStatus.updated_at || new Date().toISOString(),
+      };
 
-      // Continue polling if not complete
+      setUploadStatus((prev) =>
+        prev ? { ...prev, ...safeJobStatus } : safeJobStatus
+      );
+
       if (jobStatus.status === "queued" || jobStatus.status === "processing") {
-        setTimeout(() => pollJobStatus(jobId), 2000); // Poll every 2 seconds
+        setTimeout(() => pollJobStatus(jobId), 2000);
       } else if (jobStatus.status === "completed") {
         toast.success("Document processing completed!");
-        fetchDocuments(); // Refresh documents
+        fetchDocuments();
       } else if (jobStatus.status === "failed") {
         toast.error("Document processing failed");
       }
     } catch (error: any) {
       console.error("Failed to poll job status:", error);
-      // Don't spam user with polling errors
     }
   };
 
-  // ✅ IMPROVED: Test embed endpoint with API client
   const testEmbedEndpoint = async () => {
     try {
       setTestingEmbed(true);
-
-      // ✅ Use centralized API client
       const response = await api.post("/api/agent/test-health");
-
       console.log("🧪 Upload System Test Results:", response.data);
       toast.success("Upload system test completed! Check console for details.");
     } catch (error: any) {
@@ -261,7 +307,6 @@ export function Documents() {
     }
   };
 
-  // ✅ NEW: Handle upload error display
   const handleUploadError = (error: string) => {
     setUploadError(error);
     toast.error(error);
@@ -281,7 +326,7 @@ export function Documents() {
 
     if (filterType !== "all") {
       filtered = filtered.filter((doc) => {
-        const mimeType = doc.metadata.mime_type || "";
+        const mimeType = doc.metadata?.mime_type || "";
         switch (filterType) {
           case "pdf":
             return mimeType.includes("pdf");
@@ -304,14 +349,15 @@ export function Documents() {
     }
   }, [user]);
 
+  // ✅ IMPROVED: Safe stats calculation
   const getDocumentStats = () => {
     const totalDocs = documents.length;
     const totalSize = documents.reduce(
-      (sum, doc) => sum + (doc.metadata.file_size || 0),
+      (sum, doc) => sum + (doc.metadata?.file_size || 0),
       0
     );
     const totalChars = documents.reduce(
-      (sum, doc) => sum + doc.metadata.char_count,
+      (sum, doc) => sum + (doc.metadata?.char_count || 0),
       0
     );
 
@@ -351,7 +397,6 @@ export function Documents() {
       icon={<FileText className="w-6 h-6 text-healing-teal" />}
       actions={
         <div className="flex space-x-3">
-          {/* Test System Button */}
           <Button
             variant="ghost"
             onClick={testEmbedEndpoint}
@@ -361,7 +406,6 @@ export function Documents() {
             {testingEmbed ? "Testing..." : "Test System"}
           </Button>
 
-          {/* Debug Upload Button */}
           <button
             onClick={debugUpload}
             disabled={debugLoading}
@@ -370,7 +414,6 @@ export function Documents() {
             {debugLoading ? "Testing Upload..." : "Debug Upload"}
           </button>
 
-          {/* Upload Documents Button */}
           <Button
             onClick={() => setShowUploadModal(true)}
             icon={<Plus className="w-5 h-5" />}
@@ -383,30 +426,42 @@ export function Documents() {
       {/* Stats */}
       <StatsLayout stats={getDocumentStats()} columns={3} />
 
-      {/* ✅ NEW: Upload Status Display */}
+      {/* ✅ IMPROVED: Safe upload status display */}
       {uploadStatus && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
           <h4 className="font-semibold text-blue-800 mb-2">Upload Status</h4>
           <div className="text-sm text-blue-700">
             <p>
-              <strong>Job ID:</strong> {uploadStatus.job_id}
+              <strong>Job ID:</strong> {uploadStatus.job_id || "Not available"}
             </p>
             <p>
-              <strong>Status:</strong> {uploadStatus.status}
+              <strong>Status:</strong> {uploadStatus.status || "Unknown"}
             </p>
             <p>
-              <strong>File:</strong> {uploadStatus.file_path}
+              <strong>File:</strong> {uploadStatus.file_path || "Not available"}
             </p>
             {uploadStatus.message && (
               <p>
                 <strong>Message:</strong> {uploadStatus.message}
               </p>
             )}
+            {uploadStatus.created_at && (
+              <p>
+                <strong>Created:</strong>{" "}
+                {formatSafeDate(uploadStatus.created_at)}
+              </p>
+            )}
+            {uploadStatus.updated_at && (
+              <p>
+                <strong>Updated:</strong>{" "}
+                {formatSafeDate(uploadStatus.updated_at)}
+              </p>
+            )}
           </div>
         </div>
       )}
 
-      {/* ✅ NEW: Upload Error Display */}
+      {/* Upload Error Display */}
       {uploadError && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
           <h4 className="font-semibold text-red-800 mb-2">Upload Error</h4>

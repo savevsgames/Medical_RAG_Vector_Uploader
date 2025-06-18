@@ -1,8 +1,8 @@
-import React from 'react';
-import { FileText, Calendar, MoreVertical } from 'lucide-react';
-import { Card, Badge } from '../ui';
-import { DocumentActions } from './DocumentActions';
-import { useDocumentActions } from './hooks/useDocumentActions';
+import React from "react";
+import { FileText, Calendar, MoreVertical } from "lucide-react";
+import { Card, Badge } from "../ui";
+import { DocumentActions } from "./DocumentActions";
+import { useDocumentActions } from "./hooks/useDocumentActions";
 
 interface Document {
   id: string;
@@ -26,31 +26,36 @@ interface DocumentCardProps {
   onView: (document: Document) => void;
 }
 
-export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCardProps) {
+export function DocumentCard({
+  document,
+  onDelete,
+  onEdit,
+  onView,
+}: DocumentCardProps) {
   const { isDeleting, handleDelete } = useDocumentActions();
 
   const formatFileSize = (bytes?: number) => {
-    if (!bytes) return 'Unknown size';
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    if (!bytes) return "Unknown size";
+    const sizes = ["Bytes", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + " " + sizes[i];
   };
 
   const getFileIcon = (mimeType?: string) => {
-    if (mimeType?.includes('pdf')) return '📄';
-    if (mimeType?.includes('word')) return '📝';
-    if (mimeType?.includes('text')) return '📃';
-    return '📄';
+    if (mimeType?.includes("pdf")) return "📄";
+    if (mimeType?.includes("word")) return "📝";
+    if (mimeType?.includes("text")) return "📃";
+    return "📄";
   };
 
   const getEmbeddingBadge = (source?: string) => {
     switch (source) {
-      case 'runpod':
+      case "runpod":
         return <Badge variant="info">BioBERT</Badge>;
-      case 'openai':
-      case 'local':
+      case "openai":
+      case "local":
         return <Badge variant="success">OpenAI</Badge>;
-      case 'local_with_runpod_processing':
+      case "local_with_runpod_processing":
         return <Badge variant="purple">Hybrid</Badge>;
       default:
         return <Badge variant="default">Unknown</Badge>;
@@ -61,20 +66,36 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
     await handleDelete(document.id, document.filename, onDelete);
   };
 
+  const formatSafeDate = (dateValue: string | null | undefined): string => {
+    if (!dateValue) return "Date not available";
+    try {
+      const date = new Date(dateValue);
+      if (isNaN(date.getTime())) return "Invalid date";
+      return date.toLocaleDateString();
+    } catch (error) {
+      return "Date error";
+    }
+  };
+
   return (
     <Card hover className="relative">
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-start space-x-3 flex-1 min-w-0">
-          <div className="text-2xl">{getFileIcon(document.metadata.mime_type)}</div>
+          <div className="text-2xl">
+            {getFileIcon(document.metadata.mime_type)}
+          </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 truncate" title={document.filename}>
+            <h3
+              className="text-lg font-semibold text-gray-900 truncate"
+              title={document.filename}
+            >
               {document.filename}
             </h3>
             <div className="flex items-center space-x-4 mt-1">
               <div className="flex items-center text-sm text-gray-500">
                 <Calendar className="w-4 h-4 mr-1" />
-                {new Date(document.created_at).toLocaleDateString()}
+                {formatSafeDate(document.created_at)}
               </div>
               <div className="flex items-center text-sm text-gray-500">
                 <FileText className="w-4 h-4 mr-1" />
@@ -119,7 +140,7 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
         <div className="bg-gray-50 rounded-lg p-3">
           <p className="text-sm text-gray-700 line-clamp-3">
             {document.content?.substring(0, 200)}
-            {document.content?.length > 200 && '...'}
+            {document.content?.length > 200 && "..."}
           </p>
         </div>
 
@@ -139,7 +160,7 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
               Edit
             </button>
           </div>
-          
+
           <div className="text-xs text-gray-400 font-mono">
             ID: {document.id.substring(0, 8)}...
           </div>
