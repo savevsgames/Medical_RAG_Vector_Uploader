@@ -531,15 +531,96 @@ export function createAgentRouter(supabaseClient) {
 
   // Routes for custom TEST endpoints
   router.post("/test-health", verifyToken, async (req, res) => {
-    // Direct health test to container
+    try {
+      if (!process.env.RUNPOD_EMBEDDING_URL) {
+        return res.status(503).json({ error: "TxAgent URL not configured" });
+      }
+
+      const response = await axios.get(
+        `${process.env.RUNPOD_EMBEDDING_URL}/health`,
+        {
+          timeout: 5000,
+          headers: { Accept: "application/json" },
+        }
+      );
+
+      res.json({
+        status: 200,
+        response: response.data,
+        endpoint: "/health",
+      });
+    } catch (error) {
+      res.status(500).json({
+        status: 0,
+        error: error.message,
+        endpoint: "/health",
+      });
+    }
   });
 
   router.post("/test-chat", verifyToken, async (req, res) => {
-    // Direct chat test to container
+    try {
+      const response = await axios.post(
+        `${process.env.RUNPOD_EMBEDDING_URL}/chat`,
+        {
+          query: "Test connection", // ✅ Correct format from Postman collection
+          history: [],
+          top_k: 1,
+          temperature: 0.1,
+          stream: false,
+        },
+        {
+          headers: {
+            Authorization: req.headers.authorization,
+            "Content-Type": "application/json",
+          },
+          timeout: 10000,
+        }
+      );
+
+      res.json({
+        status: 200,
+        response: response.data,
+        endpoint: "/chat",
+      });
+    } catch (error) {
+      res.status(500).json({
+        status: 0,
+        error: error.message,
+        endpoint: "/chat",
+      });
+    }
   });
 
   router.post("/test-embed", verifyToken, async (req, res) => {
-    // Direct embed test to container
+    try {
+      const response = await axios.post(
+        `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
+        {
+          text: "Test embedding generation for health check",
+          normalize: true, // ✅ Based on Postman collection
+        },
+        {
+          headers: {
+            Authorization: req.headers.authorization,
+            "Content-Type": "application/json",
+          },
+          timeout: 10000,
+        }
+      );
+
+      res.json({
+        status: 200,
+        response: response.data,
+        endpoint: "/embed",
+      });
+    } catch (error) {
+      res.status(500).json({
+        status: 0,
+        error: error.message,
+        endpoint: "/embed",
+      });
+    }
   });
 
   errorLogger.success("Agent routes created successfully", {

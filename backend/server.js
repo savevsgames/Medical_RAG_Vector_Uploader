@@ -6,6 +6,7 @@ import { requestLogger } from "./middleware/logging.js";
 import setupRoutes from "./routes/index.js";
 import { staticFileService } from "./services/StaticFileService.js";
 import { errorLogger } from "./agent_utils/shared/logger.js";
+import embedRouter from "./routes/embed.js";
 
 function startServer() {
   const app = express();
@@ -167,6 +168,9 @@ function startServer() {
     });
     process.exit(1);
   });
+
+  // Use embed router for API routes
+  app.use("/api", embedRouter);
 
   // Start server
   app.listen(config.port, () => {

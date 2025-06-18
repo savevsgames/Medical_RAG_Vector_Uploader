@@ -1,145 +1,86 @@
-import express from 'express';
-import { healthRouter } from './health.js';
-import { createDocumentsRouter } from './documents.js';
-import { createChatRouter } from './chat.js';
-import { mountAgentRoutes } from '../agent_utils/index.js';
-import { EmbeddingService } from '../lib/services/index.js';
-import { verifyToken } from '../middleware/auth.js';
-import { errorLogger } from '../agent_utils/shared/logger.js';
+import express from "express";
+import { healthRouter } from "./health.js";
+import { createDocumentsRouter } from "./documents.js";
+import { createChatRouter } from "./chat.js";
+import { mountAgentRoutes } from "../agent_utils/index.js";
+import { verifyToken } from "../middleware/auth.js";
+import { errorLogger } from "../agent_utils/shared/logger.js";
 
 const router = express.Router();
 
 export function setupRoutes(app, supabaseClient) {
   // Validate Supabase client
-  if (!supabaseClient || typeof supabaseClient.from !== 'function') {
-    throw new Error('Invalid Supabase client provided to setupRoutes');
+  if (!supabaseClient || typeof supabaseClient.from !== "function") {
+    throw new Error("Invalid Supabase client provided to setupRoutes");
   }
 
-  errorLogger.info('Setting up routes with clean API structure');
+  errorLogger.info("Setting up routes with clean API structure");
 
   // Health check (no auth required)
-  app.use('/health', healthRouter);
-  
+  app.use("/health", healthRouter);
+
   // FIXED: Handle vite.svg requests to prevent 401 errors
-  app.get('/vite.svg', (req, res) => {
-    errorLogger.debug('Serving vite.svg placeholder', {
+  app.get("/vite.svg", (req, res) => {
+    errorLogger.debug("Serving vite.svg placeholder", {
       ip: req.ip,
-      userAgent: req.get('User-Agent')?.substring(0, 100),
-      component: 'StaticAssets'
+      userAgent: req.get("User-Agent")?.substring(0, 100),
+      component: "StaticAssets",
     });
     res.sendStatus(200);
   });
-  
+
   // Create routers with Supabase client dependency injection
   const documentsRouter = createDocumentsRouter(supabaseClient);
   const chatRouter = createChatRouter(supabaseClient);
-  
+
   // FIXED: Clean route structure - no legacy routes
   // Mount protected routes - auth is now handled within each router
-  app.use('/api', chatRouter);           // /api/chat, /api/openai-chat
-  app.use('/', documentsRouter);         // /upload (legacy for compatibility)
-  
-  // Add direct embedding endpoint
-  app.post('/api/embed', verifyToken, async (req, res) => {
-    const startTime = Date.now();
-    
-    try {
-      const { documentText, metadata = {} } = req.body;
-      const userId = req.userId;
-      
-      if (!documentText || typeof documentText !== 'string') {
-        errorLogger.warn('Invalid embed request - missing documentText', { 
-          user_id: userId,
-          component: 'EmbedEndpoint'
-        });
-        return res.status(400).json({ error: 'documentText is required and must be a string' });
-      }
+  app.use("/api", chatRouter); // /api/chat, /api/openai-chat
+  app.use("/", documentsRouter); // /upload (legacy for compatibility)
 
-      errorLogger.info('Processing embed request', {
-        user_id: userId,
-        text_length: documentText.length,
-        metadata,
-        component: 'EmbedEndpoint'
-      });
-
-      // Initialize embedding service
-      const embeddingService = new EmbeddingService();
-      
-      // Generate embedding with user JWT for authentication
-      const embedding = await embeddingService.generateEmbedding(documentText, req.headers.authorization);
-
-      if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
-        errorLogger.error('Invalid embedding generated', new Error('Embedding validation failed'), {
-          user_id: userId,
-          embedding_type: typeof embedding,
-          embedding_length: embedding?.length || 0,
-          component: 'EmbedEndpoint'
-        });
-        throw new Error('Failed to generate valid embedding');
-      }
-
-      const processingTime = Date.now() - startTime;
-
-      errorLogger.success('Embedding generated successfully', {
-        user_id: userId,
-        text_length: documentText.length,
-        vector_dimensions: embedding.length,
-        processing_time_ms: processingTime,
-        component: 'EmbedEndpoint'
-      });
-
-      res.json({
-        success: true,
-        vector_dimensions: embedding.length,
-        embedding_preview: embedding.slice(0, 5), // First 5 dimensions for preview
-        processing_time_ms: processingTime,
-        metadata: {
-          ...metadata,
-          text_length: documentText.length,
-          generated_at: new Date().toISOString()
-        },
-        message: 'Embedding generated successfully'
-      });
-
-    } catch (error) {
-      const processingTime = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : 'Unknown embedding error';
-      
-      errorLogger.error('Embed request failed', error, {
-        user_id: req.userId,
-        processing_time_ms: processingTime,
-        error_stack: error.stack,
-        error_type: error.constructor.name,
-        component: 'EmbedEndpoint'
-      });
-      
-      res.status(500).json({ 
-        error: 'Embedding generation failed', 
-        details: errorMessage,
-        processing_time_ms: processingTime
-      });
-    }
-  });
-  
   // FIXED: Mount agent routes ONLY (no legacy routes)
   // This function handles mounting agent routes at /api/agent path
   mountAgentRoutes(app, supabaseClient);
 
-  errorLogger.success('Routes setup completed with clean structure:', {
+  // Simple proxy to TxAgent container
+  app.post("/api/embed", verifyToken, async (req, res) => {
+    try {
+      const response = await fetch(
+        `${process.env.RUNPOD_EMBEDDING_URL}/embed`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: req.headers.authorization,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(req.body),
+        }
+      );
+
+      const result = await response.json();
+      res.json(result);
+    } catch (error) {
+      res
+        .status(500)
+        .json({ error: "TxAgent embed failed", details: error.message });
+    }
+  });
+
+  errorLogger.success("Routes setup completed with clean structure:", {
     routes: [
-      'GET /health',
-      'GET /vite.svg (placeholder)',
-      'POST /upload',
-      'POST /api/chat',
-      'POST /api/openai-chat', 
-      'POST /api/embed',
-      'POST /api/agent/start',
-      'POST /api/agent/stop',
-      'GET /api/agent/status',
-      'POST /api/agent/health-check'
+      "GET /health",
+      "GET /vite.svg (placeholder)",
+      "POST /upload",
+      "POST /api/chat",
+      "POST /api/openai-chat",
+      "POST /api/embed",
+      "POST /api/agent/start",
+      "POST /api/agent/stop",
+      "GET /api/agent/status",
+      "POST /api/agent/health-check",
     ],
-    legacy_routes_removed: true
+    legacy_routes_removed: true,
   });
 }
 
-export default setupRoutes
+export default setupRoutes;
