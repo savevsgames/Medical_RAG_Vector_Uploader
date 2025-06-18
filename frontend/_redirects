@@ -1,2 +1,9 @@
-# Netlify-style redirects for Render static sites
-/*    /index.html   200
+# Handle client-side routing - serve index.html for all routes that aren't API calls
+
+# API routes should return 404 if not found
+/api/*  404
+/health  404  
+/upload  404
+
+# All other routes should serve index.html (SPA routing)
+/*  /index.html  200
