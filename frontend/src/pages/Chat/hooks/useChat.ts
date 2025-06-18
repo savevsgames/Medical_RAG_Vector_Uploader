@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
-import { useApi } from "../../../hooks/useApi";
+import { apiHelpers } from "../../../lib/api"; // ✅ Add new API client
+import { useApi } from "../../../hooks/useApi"; // ✅ Keep as fallback
 import { useAuth } from "../../../contexts/AuthContext";
 import {
   logger,
@@ -51,7 +52,7 @@ const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
 };
 
 export function useChat() {
-  const { apiCall } = useApi();
+  const { apiCall } = useApi(); // ✅ Keep as fallback
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<AgentType>("txagent");
@@ -102,6 +103,7 @@ export function useChat() {
     [selectedAgent, user, addSystemMessage]
   );
 
+  // ✅ UPDATED: Use new API client for sending messages
   const sendMessage = useCallback(
     async (messageContent: string) => {
       if (!messageContent.trim() || isLoading) return;
@@ -136,29 +138,37 @@ export function useChat() {
           component: "useChat",
         });
 
-        // CRITICAL FIX: Ensure proper request structure
-        const requestBody = {
-          message: messageContent,
-          context: messages.slice(-5).map((m) => ({
-            type: m.type,
-            content:
-              typeof m.content === "string" ? m.content : String(m.content),
-            timestamp: m.timestamp.toISOString(),
-          })),
-        };
+        let data;
 
-        logger.debug("Sending chat request", {
-          endpoint,
-          method: "POST",
-          bodySize: JSON.stringify(requestBody).length,
-          selectedAgent,
-          component: "useChat",
-        });
+        // ✅ Use new API client based on selected agent
+        if (selectedAgent === "txagent") {
+          // Use new centralized API client for TxAgent
+          const response = await apiHelpers.chat(messageContent, {
+            context: messages.slice(-5).map((m) => ({
+              type: m.type,
+              content:
+                typeof m.content === "string" ? m.content : String(m.content),
+              timestamp: m.timestamp.toISOString(),
+            })),
+          });
+          data = response.data;
+        } else {
+          // Use fallback for OpenAI (keep existing logic)
+          const requestBody = {
+            message: messageContent,
+            context: messages.slice(-5).map((m) => ({
+              type: m.type,
+              content:
+                typeof m.content === "string" ? m.content : String(m.content),
+              timestamp: m.timestamp.toISOString(),
+            })),
+          };
 
-        const data = await apiCall(endpoint, {
-          method: "POST",
-          body: requestBody,
-        });
+          data = await apiCall(endpoint, {
+            method: "POST",
+            body: requestBody,
+          });
+        }
 
         // Add assistant response
         addMessage({
@@ -186,9 +196,9 @@ export function useChat() {
           });
           toast.success("Response from OpenAI");
         }
-      } catch (error) {
+      } catch (error: any) {
         const errorMessage =
-          error instanceof Error ? error.message : "Unknown chat error";
+          error.response?.data?.error || error.message || "Unknown chat error";
 
         logger.error("Chat request failed", {
           component: "useChat",
@@ -220,13 +230,13 @@ export function useChat() {
       }
     },
     [
-      apiCall,
       user,
       selectedAgent,
       currentAgent,
       messages,
       isLoading,
       addMessage,
+      apiCall, // Keep fallback
     ]
   );
 

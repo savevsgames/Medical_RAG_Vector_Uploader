@@ -13,6 +13,7 @@ import {
   TestTube,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { api } from "../lib/api"; // ✅ Add centralized API client
 import { PageLayout, StatsLayout } from "../components/layouts";
 import { AsyncState } from "../components/feedback";
 import { Button } from "../components/ui";
@@ -25,7 +26,37 @@ import {
   logAgentOperation,
 } from "../utils/logger";
 
+// ✅ Add safe date formatting helper
+const formatSafeDate = (dateValue: string | null | undefined): string => {
+  if (!dateValue) return "Not available";
+  try {
+    const date = new Date(dateValue);
+    if (isNaN(date.getTime())) return "Invalid date";
+    return date.toLocaleString();
+  } catch (error) {
+    return "Date error";
+  }
+};
+
+// ✅ Add safe uptime calculation
+const formatUptime = (startedAt: string | null | undefined): string => {
+  if (!startedAt) return "Not available";
+  try {
+    const start = new Date(startedAt);
+    if (isNaN(start.getTime())) return "Invalid start time";
+
+    const now = new Date();
+    const diff = now.getTime() - start.getTime();
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
+  } catch (error) {
+    return "Uptime error";
+  }
+};
+
 export function Monitor() {
+  const { session } = useAuth();
   const {
     agentStatus,
     detailedStatus,
@@ -70,6 +101,7 @@ export function Monitor() {
     performDetailedStatusCheck,
   ]);
 
+  // ✅ FIXED: Use API client for health endpoint test
   const testHealthEndpoint = async () => {
     setEndpointTests((prev) => ({
       ...prev,
@@ -77,36 +109,36 @@ export function Monitor() {
     }));
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/agent/test-health`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session?.access_token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const response = await api.post("/api/agent/test-health");
 
-      const result = await response.json();
       setEndpointTests((prev) => ({
         ...prev,
         health: {
           loading: false,
-          result,
-          error: response.ok ? null : "Request failed",
+          result: response.data,
+          error: null,
         },
       }));
 
-      logApiCall("/api/agent/test-health", "POST", response.status);
-    } catch (error) {
+      logApiCall("/api/agent/test-health", "POST", 200);
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error || error.message || "Health test failed";
+
       setEndpointTests((prev) => ({
         ...prev,
-        health: { loading: false, result: null, error: error.message },
+        health: { loading: false, result: null, error: errorMessage },
       }));
+
+      logApiCall(
+        "/api/agent/test-health",
+        "POST",
+        error.response?.status || 500
+      );
     }
   };
 
+  // ✅ FIXED: Use API client for chat endpoint test
   const testChatEndpoint = async () => {
     setEndpointTests((prev) => ({
       ...prev,
@@ -114,42 +146,36 @@ export function Monitor() {
     }));
 
     try {
-      // ✅ FIXED: Call the real chat endpoint that works
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/chat`, // ✅ Use real endpoint
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session?.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            message: "Test connection - health check", // ✅ Correct payload format
-            top_k: 1,
-            temperature: 0.1,
-          }),
-        }
-      );
+      const response = await api.post("/api/chat", {
+        message: "Test connection - health check",
+        top_k: 1,
+        temperature: 0.1,
+      });
 
-      const result = await response.json();
       setEndpointTests((prev) => ({
         ...prev,
         chat: {
           loading: false,
-          result,
-          error: response.ok ? null : "Request failed",
+          result: response.data,
+          error: null,
         },
       }));
 
-      logApiCall("/api/chat", "POST", response.status);
-    } catch (error) {
+      logApiCall("/api/chat", "POST", 200);
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error || error.message || "Chat test failed";
+
       setEndpointTests((prev) => ({
         ...prev,
-        chat: { loading: false, result: null, error: error.message },
+        chat: { loading: false, result: null, error: errorMessage },
       }));
+
+      logApiCall("/api/chat", "POST", error.response?.status || 500);
     }
   };
 
+  // ✅ FIXED: Use API client for embed endpoint test
   const testEmbedEndpoint = async () => {
     setEndpointTests((prev) => ({
       ...prev,
@@ -157,41 +183,31 @@ export function Monitor() {
     }));
 
     try {
-      // ✅ FIXED: Call real embed endpoint through your backend
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/embed`, // ✅ Use real endpoint (if you have one)
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session?.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            text: "Test embedding generation for health check",
-            metadata: {
-              source: "monitor_test",
-              timestamp: new Date().toISOString(),
-            },
-          }),
-        }
-      );
+      const response = await api.post("/api/embed", {
+        text: "Test embedding generation for health check",
+        normalize: true,
+      });
 
-      const result = await response.json();
       setEndpointTests((prev) => ({
         ...prev,
         embed: {
           loading: false,
-          result,
-          error: response.ok ? null : "Request failed",
+          result: response.data,
+          error: null,
         },
       }));
 
-      logApiCall("/api/embed", "POST", response.status);
-    } catch (error) {
+      logApiCall("/api/embed", "POST", 200);
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error || error.message || "Embed test failed";
+
       setEndpointTests((prev) => ({
         ...prev,
-        embed: { loading: false, result: null, error: error.message },
+        embed: { loading: false, result: null, error: errorMessage },
       }));
+
+      logApiCall("/api/embed", "POST", error.response?.status || 500);
     }
   };
 
@@ -200,39 +216,20 @@ export function Monitor() {
     toast.success(`${label} copied to clipboard`);
   };
 
-  const formatUptime = (startTime: string) => {
-    const start = new Date(startTime);
-    const now = new Date();
-    const diffMs = now.getTime() - start.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffDays > 0) return `${diffDays}d ${diffHours % 24}h`;
-    if (diffHours > 0) return `${diffHours}h ${diffMins % 60}m`;
-    return `${diffMins}m`;
-  };
-
   const getStatusStats = () => {
     return [
       {
-        label: "Session",
+        label: "Agent Status",
         value: agentStatus?.agent_active ? "Active" : "Inactive",
+        icon: <Activity className="w-5 h-5" />,
         color: agentStatus?.agent_active
           ? ("healing-teal" as const)
-          : ("red" as const),
-      },
-      {
-        label: "Container",
-        value: agentStatus?.container_status || "Unknown",
-        color:
-          agentStatus?.container_status === "running"
-            ? ("healing-teal" as const)
-            : ("guardian-gold" as const),
+          : ("guardian-gold" as const),
       },
       {
         label: "Connection",
         value: detailedStatus?.container_reachable ? "Reachable" : "Unknown",
+        icon: <Server className="w-5 h-5" />,
         color: detailedStatus?.container_reachable
           ? ("healing-teal" as const)
           : ("soft-gray" as const),
@@ -240,6 +237,7 @@ export function Monitor() {
       {
         label: "Endpoints",
         value: detailedStatus?.endpoints_working ? "Working" : "Unknown",
+        icon: <Zap className="w-5 h-5" />,
         color: detailedStatus?.endpoints_working
           ? ("healing-teal" as const)
           : ("soft-gray" as const),
@@ -287,44 +285,34 @@ export function Monitor() {
             />
             <label
               htmlFor="auto-refresh"
-              className="text-sm text-deep-midnight font-body"
+              className="text-sm font-body text-deep-midnight"
             >
-              Auto-refresh (30s)
+              Auto-refresh
             </label>
           </div>
 
-          {/* Enhanced Refresh Button */}
+          {/* Refresh Button */}
           <Button
             variant="ghost"
-            size="sm"
             onClick={handleComprehensiveRefresh}
             loading={loading || statusTesting}
             icon={<RefreshCw className="w-4 h-4" />}
           >
-            {loading || statusTesting ? "Refreshing..." : "Refresh"}
+            Refresh
           </Button>
-
-          {/* Last updated indicator */}
-          <div className="text-right">
-            <p className="text-sm text-soft-gray font-body">Last updated</p>
-            <p className="text-sm font-subheading font-medium text-deep-midnight">
-              {lastRefresh.toLocaleTimeString()}
-            </p>
-          </div>
         </div>
       }
     >
-      {/* Status Overview */}
-      <StatsLayout stats={getStatusStats()} columns={4} />
+      {/* Stats */}
+      <StatsLayout stats={getStatusStats()} columns={3} />
 
-      {/* Main Content */}
       <AsyncState
         loading={loading}
         error={null}
         onRetry={() => fetchAgentStatus()}
         loadingText="Loading agent status..."
       >
-        {/* Agent Controls - With Start/Stop Buttons */}
+        {/* Agent Controls */}
         <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-lg font-heading font-bold text-deep-midnight">
@@ -364,228 +352,28 @@ export function Monitor() {
             <p>Multiple users can have their own independent agent sessions.</p>
           </div>
         </div>
-        // Update the Connection Test Results section with individual test
-        buttons:
-        {/* Connection Test Results - ALWAYS VISIBLE with Individual Tests */}
-        <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
-          <h2 className="text-lg font-heading font-bold text-deep-midnight mb-4">
-            Container Endpoint Testing
-          </h2>
 
-          <div className="text-sm text-soft-gray mb-4 font-body">
-            Test individual container endpoints and view raw JSON responses.
-            These use the same routes as your Postman tests.
-          </div>
+        {/* Session Information & Health */}
+        {agentStatus?.agent_active ? (
+          <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
+            <h2 className="text-lg font-heading font-bold text-deep-midnight mb-6">
+              Active Session Details
+            </h2>
 
-          <div className="grid grid-cols-1 gap-6">
-            {/* Health Endpoint Test */}
-            <div className="bg-sky-blue/20 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-2">
-                  <span className="font-subheading font-medium text-deep-midnight">
-                    Health Endpoint
-                  </span>
-                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
-                    /health
-                  </code>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={testHealthEndpoint}
-                  loading={endpointTests.health.loading}
-                  icon={<TestTube className="w-4 h-4" />}
-                >
-                  {endpointTests.health.loading ? "Testing..." : "Test Health"}
-                </Button>
-              </div>
-
-              {endpointTests.health.result && (
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-deep-midnight">
-                      Response:
-                    </span>
-                    <button
-                      onClick={() =>
-                        copyToClipboard(
-                          JSON.stringify(endpointTests.health.result, null, 2),
-                          "Health response"
-                        )
-                      }
-                      className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
-                    >
-                      <Copy className="w-3 h-3 text-soft-gray" />
-                    </button>
-                  </div>
-                  <pre className="bg-white/70 rounded p-3 text-xs overflow-x-auto font-mono text-deep-midnight">
-                    {JSON.stringify(endpointTests.health.result, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {endpointTests.health.error && (
-                <div className="mt-3 p-3 bg-red-100 rounded text-red-600 text-xs">
-                  Error: {endpointTests.health.error}
-                </div>
-              )}
-            </div>
-
-            {/* Chat Endpoint Test */}
-            <div className="bg-sky-blue/20 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-2">
-                  <span className="font-subheading font-medium text-deep-midnight">
-                    Chat Endpoint
-                  </span>
-                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
-                    /chat
-                  </code>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={testChatEndpoint}
-                  loading={endpointTests.chat.loading}
-                  icon={<TestTube className="w-4 h-4" />}
-                >
-                  {endpointTests.chat.loading ? "Testing..." : "Test Chat"}
-                </Button>
-              </div>
-
-              {endpointTests.chat.result && (
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-deep-midnight">
-                      Response:
-                    </span>
-                    <button
-                      onClick={() =>
-                        copyToClipboard(
-                          JSON.stringify(endpointTests.chat.result, null, 2),
-                          "Chat response"
-                        )
-                      }
-                      className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
-                    >
-                      <Copy className="w-3 h-3 text-soft-gray" />
-                    </button>
-                  </div>
-                  <pre className="bg-white/70 rounded p-3 text-xs overflow-x-auto font-mono text-deep-midnight">
-                    {JSON.stringify(endpointTests.chat.result, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {endpointTests.chat.error && (
-                <div className="mt-3 p-3 bg-red-100 rounded text-red-600 text-xs">
-                  Error: {endpointTests.chat.error}
-                </div>
-              )}
-            </div>
-
-            {/* Embed Endpoint Test */}
-            <div className="bg-sky-blue/20 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-2">
-                  <span className="font-subheading font-medium text-deep-midnight">
-                    Embed Endpoint
-                  </span>
-                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
-                    /embed
-                  </code>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={testEmbedEndpoint}
-                  loading={endpointTests.embed.loading}
-                  icon={<TestTube className="w-4 h-4" />}
-                >
-                  {endpointTests.embed.loading ? "Testing..." : "Test Embed"}
-                </Button>
-              </div>
-
-              {endpointTests.embed.result && (
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-deep-midnight">
-                      Response:
-                    </span>
-                    <div className="flex items-center space-x-2">
-                      {endpointTests.embed.result.embedding && (
-                        <span className="text-xs text-healing-teal font-medium">
-                          {endpointTests.embed.result.embedding.length}D
-                        </span>
-                      )}
-                      <button
-                        onClick={() =>
-                          copyToClipboard(
-                            JSON.stringify(endpointTests.embed.result, null, 2),
-                            "Embed response"
-                          )
-                        }
-                        className="p-1 hover:bg-sky-blue/30 rounded transition-colors"
-                      >
-                        <Copy className="w-3 h-3 text-soft-gray" />
-                      </button>
-                    </div>
-                  </div>
-                  <pre className="bg-white/70 rounded p-3 text-xs overflow-x-auto font-mono text-deep-midnight max-h-40">
-                    {JSON.stringify(endpointTests.embed.result, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {endpointTests.embed.error && (
-                <div className="mt-3 p-3 bg-red-100 rounded text-red-600 text-xs">
-                  Error: {endpointTests.embed.error}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        {/* Container Details Section - ALWAYS VISIBLE */}
-        <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-2">
-              <Server className="w-5 h-5 text-healing-teal" />
-              <h3 className="text-md font-subheading font-semibold text-deep-midnight">
-                Container Details
-              </h3>
-            </div>
-            {agentStatus?.session_data?.runpod_endpoint ? (
-              <a
-                href={agentStatus.session_data.runpod_endpoint}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center space-x-1 text-sm text-healing-teal hover:text-healing-teal/80 transition-colors"
-              >
-                <ExternalLink className="w-4 h-4" />
-                <span>Open Container</span>
-              </a>
-            ) : (
-              <span className="text-sm text-soft-gray font-body">
-                No active container
-              </span>
-            )}
-          </div>
-
-          {agentStatus?.agent_active && agentStatus?.session_data ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Session Information */}
               <div className="bg-sky-blue/20 rounded-xl p-4">
                 <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
-                  <Database className="w-4 h-4 mr-2 text-healing-teal" />
+                  <Database className="w-4 h-4 mr-2 text-soft-gray" />
                   Session Information
                 </h4>
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-soft-gray font-body">Agent ID:</span>
                     {agentStatus.agent_id ? (
-                      <div className="flex items-center space-x-2">
-                        <span className="font-mono text-deep-midnight text-xs">
-                          {agentStatus.agent_id.substring(0, 12)}...
+                      <div className="flex items-center space-x-1">
+                        <span className="text-deep-midnight font-body text-xs">
+                          {agentStatus.agent_id.substring(0, 8)}...
                         </span>
                         <button
                           onClick={() =>
@@ -607,9 +395,9 @@ export function Monitor() {
                     <span className="text-soft-gray font-body">
                       Container ID:
                     </span>
-                    {agentStatus.session_data.container_id ? (
-                      <div className="flex items-center space-x-2">
-                        <span className="font-mono text-deep-midnight text-xs">
+                    {agentStatus.session_data?.container_id ? (
+                      <div className="flex items-center space-x-1">
+                        <span className="text-deep-midnight font-body text-xs">
                           {agentStatus.session_data.container_id.substring(
                             0,
                             12
@@ -637,33 +425,19 @@ export function Monitor() {
 
                   <div className="flex items-center justify-between">
                     <span className="text-soft-gray font-body">Started:</span>
-                    {agentStatus.session_data.started_at ? (
-                      <span className="text-deep-midnight font-body text-xs">
-                        {new Date(
-                          agentStatus.session_data.started_at
-                        ).toLocaleString()}
-                      </span>
-                    ) : (
-                      <span className="text-soft-gray font-body italic">
-                        Not available
-                      </span>
-                    )}
+                    <span className="text-deep-midnight font-body text-xs">
+                      {formatSafeDate(agentStatus.session_data?.started_at)}
+                    </span>
                   </div>
 
                   <div className="flex items-center justify-between">
                     <span className="text-soft-gray font-body">Uptime:</span>
-                    {agentStatus.session_data.started_at ? (
-                      <div className="flex items-center space-x-1">
-                        <Clock className="w-3 h-3 text-healing-teal" />
-                        <span className="text-deep-midnight font-body text-xs">
-                          {formatUptime(agentStatus.session_data.started_at)}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-soft-gray font-body italic">
-                        Not available
+                    <div className="flex items-center space-x-1">
+                      <Clock className="w-3 h-3 text-healing-teal" />
+                      <span className="text-deep-midnight font-body text-xs">
+                        {formatUptime(agentStatus.session_data?.started_at)}
                       </span>
-                    )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -676,30 +450,15 @@ export function Monitor() {
                 </h4>
                 <div className="space-y-2 text-sm">
                   {agentStatus.container_health &&
-                  typeof agentStatus.container_health === "object" ? (
+                  typeof agentStatus.container_health === "object" &&
+                  !agentStatus.container_health.error ? (
                     <>
                       <div className="flex items-center justify-between">
                         <span className="text-soft-gray font-body">
                           Status:
                         </span>
-                        <span className="text-healing-teal font-subheading font-medium">
+                        <span className="text-deep-midnight font-body">
                           {agentStatus.container_health.status || "Unknown"}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <span className="text-soft-gray font-body">Model:</span>
-                        <span className="text-deep-midnight font-body">
-                          {agentStatus.container_health.model || "Unknown"}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <span className="text-soft-gray font-body">
-                          Device:
-                        </span>
-                        <span className="text-deep-midnight font-body">
-                          {agentStatus.container_health.device || "Unknown"}
                         </span>
                       </div>
 
@@ -725,88 +484,90 @@ export function Monitor() {
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-sky-blue/20 rounded-xl p-4">
-                <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
-                  <Database className="w-4 h-4 mr-2 text-soft-gray" />
-                  Session Information
-                </h4>
-                <div className="text-center py-8">
-                  <span className="text-soft-gray font-body italic">
-                    No active agent session
-                  </span>
-                  <p className="text-xs text-soft-gray mt-1">
-                    Click "Activate TxAgent" to start a session
-                  </p>
-                </div>
-              </div>
-
-              <div className="bg-healing-teal/10 rounded-xl p-4">
-                <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
-                  <Zap className="w-4 h-4 mr-2 text-soft-gray" />
-                  TxAgent Health
-                </h4>
-                <div className="text-center py-8">
-                  <span className="text-soft-gray font-body italic">
-                    No health data available
-                  </span>
-                  <p className="text-xs text-soft-gray mt-1">
-                    Activate an agent to see health information
-                  </p>
-                </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-sky-blue/20 rounded-xl p-4">
+              <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
+                <Database className="w-4 h-4 mr-2 text-soft-gray" />
+                Session Information
+              </h4>
+              <div className="text-center py-8">
+                <span className="text-soft-gray font-body italic">
+                  No active agent session
+                </span>
+                <p className="text-xs text-soft-gray mt-1">
+                  Click "Activate TxAgent" to start a session
+                </p>
               </div>
             </div>
-          )}
 
-          {/* RunPod Endpoint - ALWAYS VISIBLE */}
-          <div className="mt-4 bg-guardian-gold/10 rounded-xl p-4">
-            <h4 className="font-subheading font-medium text-deep-midnight mb-2 flex items-center">
-              <ExternalLink className="w-4 h-4 mr-2 text-guardian-gold" />
-              RunPod Endpoint
-            </h4>
-            {agentStatus?.session_data?.runpod_endpoint ? (
-              <div className="flex items-center justify-between bg-cloud-ivory rounded-lg p-3">
-                <span className="font-mono text-xs text-deep-midnight break-all">
-                  {agentStatus.session_data.runpod_endpoint}
+            <div className="bg-healing-teal/10 rounded-xl p-4">
+              <h4 className="font-subheading font-medium text-deep-midnight mb-3 flex items-center">
+                <Zap className="w-4 h-4 mr-2 text-soft-gray" />
+                TxAgent Health
+              </h4>
+              <div className="text-center py-8">
+                <span className="text-soft-gray font-body italic">
+                  No health data available
                 </span>
+                <p className="text-xs text-soft-gray mt-1">
+                  Activate an agent to see health information
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RunPod Endpoint - ALWAYS VISIBLE */}
+        <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
+          <h2 className="text-lg font-heading font-bold text-deep-midnight mb-4">
+            RunPod Container Configuration
+          </h2>
+
+          <div className="bg-deep-midnight/5 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-subheading font-medium text-deep-midnight">
+                  TxAgent Endpoint
+                </p>
+                <p className="text-sm text-soft-gray font-body mt-1">
+                  {process.env.NODE_ENV === "development"
+                    ? "Development container endpoint"
+                    : "Production RunPod container endpoint"}
+                </p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <code className="bg-white/60 px-3 py-1 rounded text-xs font-mono text-deep-midnight">
+                  {import.meta.env.VITE_API_URL || "Same domain"}
+                </code>
                 <button
                   onClick={() =>
                     copyToClipboard(
-                      agentStatus.session_data.runpod_endpoint,
-                      "RunPod Endpoint"
+                      import.meta.env.VITE_API_URL || window.location.origin,
+                      "Endpoint URL"
                     )
                   }
-                  className="ml-2 p-2 hover:bg-sky-blue/20 rounded transition-colors flex-shrink-0"
+                  className="p-2 hover:bg-white/30 rounded transition-colors"
                 >
                   <Copy className="w-4 h-4 text-soft-gray" />
                 </button>
               </div>
-            ) : (
-              <div className="bg-cloud-ivory rounded-lg p-3 text-center">
-                <span className="text-soft-gray font-body italic">
-                  No endpoint available
-                </span>
-                <p className="text-xs text-soft-gray mt-1">
-                  Endpoint will appear when agent is activated
-                </p>
-              </div>
-            )}
+            </div>
           </div>
 
-          {/* Capabilities - ALWAYS VISIBLE */}
+          {/* Capabilities */}
           <div className="mt-4">
             <h4 className="font-subheading font-medium text-deep-midnight mb-2">
-              Capabilities
+              Available Capabilities
             </h4>
-            {agentStatus?.session_data?.capabilities &&
-            Array.isArray(agentStatus.session_data.capabilities) ? (
+            {agentStatus?.session_data?.capabilities ? (
               <div className="flex flex-wrap gap-2">
                 {agentStatus.session_data.capabilities.map(
                   (capability: string, index: number) => (
                     <span
                       key={index}
-                      className="px-3 py-1 bg-healing-teal/10 text-healing-teal rounded-full text-xs font-body"
+                      className="px-3 py-1 bg-healing-teal/20 text-healing-teal rounded-full text-xs font-body"
                     >
                       {capability}
                     </span>
@@ -822,121 +583,143 @@ export function Monitor() {
             )}
           </div>
         </div>
-        {/* Connection Test Results - ALWAYS VISIBLE */}
+
+        {/* Connection Test Results */}
         <div className="bg-cloud-ivory rounded-2xl shadow-soft border border-soft-gray/20 p-6">
           <h2 className="text-lg font-heading font-bold text-deep-midnight mb-4">
-            Connection Test Results
+            Container Endpoint Testing
           </h2>
 
-          {detailedStatus ? (
-            <>
-              <div className="text-xs text-soft-gray mb-4 font-body">
-                Last tested:{" "}
-                {new Date(detailedStatus.last_test_time).toLocaleString()}
+          <div className="text-sm text-soft-gray mb-4 font-body">
+            Test individual container endpoints and view raw JSON responses.
+            These use the same routes as your Postman tests.
+          </div>
+
+          <div className="grid grid-cols-1 gap-6">
+            {/* Health Endpoint Test */}
+            <div className="bg-sky-blue/20 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Health Endpoint
+                  </span>
+                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
+                    /api/agent/test-health
+                  </code>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={testHealthEndpoint}
+                  loading={endpointTests.health.loading}
+                  icon={<TestTube className="w-4 h-4" />}
+                >
+                  {endpointTests.health.loading ? "Testing..." : "Test Health"}
+                </Button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Health Endpoint */}
-                <div className="bg-sky-blue/20 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-subheading font-medium text-deep-midnight">
-                      Health Check
-                    </span>
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-body ${
-                        detailedStatus.test_results?.health?.status === 200
-                          ? "bg-healing-teal/20 text-healing-teal"
-                          : "bg-red-100 text-red-600"
-                      }`}
-                    >
-                      {detailedStatus.test_results?.health?.status || "Failed"}
-                    </span>
-                  </div>
-                  {detailedStatus.test_results?.health?.error && (
-                    <p className="text-red-600 text-xs font-body">
-                      {detailedStatus.test_results.health.error}
-                    </p>
-                  )}
+              {endpointTests.health.result && (
+                <div className="mt-3 bg-white/50 rounded p-3">
+                  <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(endpointTests.health.result, null, 2)}
+                  </pre>
                 </div>
+              )}
 
-                {/* Chat Endpoint */}
-                <div className="bg-sky-blue/20 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-subheading font-medium text-deep-midnight">
-                      Chat Endpoint
-                    </span>
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-body ${
-                        detailedStatus.test_results?.chat?.status === 200
-                          ? "bg-healing-teal/20 text-healing-teal"
-                          : "bg-red-100 text-red-600"
-                      }`}
-                    >
-                      {detailedStatus.test_results?.chat?.status || "Failed"}
-                    </span>
-                  </div>
-                  {detailedStatus.test_results?.chat?.error && (
-                    <p className="text-red-600 text-xs font-body">
-                      {detailedStatus.test_results.chat.error}
-                    </p>
-                  )}
+              {endpointTests.health.error && (
+                <div className="mt-3 bg-red-50 border border-red-200 rounded p-3">
+                  <p className="text-sm text-red-700">
+                    Error: {endpointTests.health.error}
+                  </p>
                 </div>
-
-                {/* Embed Endpoint */}
-                <div className="bg-sky-blue/20 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-subheading font-medium text-deep-midnight">
-                      Embed Endpoint
-                    </span>
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-body ${
-                        detailedStatus.test_results?.embed?.status === 200
-                          ? "bg-healing-teal/20 text-healing-teal"
-                          : "bg-red-100 text-red-600"
-                      }`}
-                    >
-                      {detailedStatus.test_results?.embed?.status || "Failed"}
-                    </span>
-                  </div>
-                  {detailedStatus.test_results?.embed?.error && (
-                    <p className="text-red-600 text-xs font-body">
-                      {detailedStatus.test_results.embed.error}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="text-center py-8">
-              <span className="text-soft-gray font-body italic">
-                No test results available
-              </span>
-              <p className="text-xs text-soft-gray mt-1">
-                Click "Refresh" to run connection tests
-              </p>
-
-              {/* Show placeholder test result boxes */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                {["Health Check", "Chat Endpoint", "Embed Endpoint"].map(
-                  (label) => (
-                    <div key={label} className="bg-sky-blue/20 rounded-xl p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-subheading font-medium text-deep-midnight">
-                          {label}
-                        </span>
-                        <span className="px-2 py-1 rounded-full text-xs font-body bg-soft-gray/20 text-soft-gray">
-                          Not Tested
-                        </span>
-                      </div>
-                      <p className="text-soft-gray text-xs font-body italic">
-                        Run tests to see results
-                      </p>
-                    </div>
-                  )
-                )}
-              </div>
+              )}
             </div>
-          )}
+
+            {/* Chat Endpoint Test */}
+            <div className="bg-healing-teal/20 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Chat Endpoint
+                  </span>
+                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
+                    /api/chat
+                  </code>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={testChatEndpoint}
+                  loading={endpointTests.chat.loading}
+                  icon={<TestTube className="w-4 h-4" />}
+                >
+                  {endpointTests.chat.loading ? "Testing..." : "Test Chat"}
+                </Button>
+              </div>
+
+              {endpointTests.chat.result && (
+                <div className="mt-3 bg-white/50 rounded p-3">
+                  <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(endpointTests.chat.result, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {endpointTests.chat.error && (
+                <div className="mt-3 bg-red-50 border border-red-200 rounded p-3">
+                  <p className="text-sm text-red-700">
+                    Error: {endpointTests.chat.error}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Embed Endpoint Test */}
+            <div className="bg-guardian-gold/20 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <span className="font-subheading font-medium text-deep-midnight">
+                    Embed Endpoint
+                  </span>
+                  <code className="text-xs bg-white/50 px-2 py-1 rounded font-mono">
+                    /api/embed
+                  </code>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={testEmbedEndpoint}
+                  loading={endpointTests.embed.loading}
+                  icon={<TestTube className="w-4 h-4" />}
+                >
+                  {endpointTests.embed.loading ? "Testing..." : "Test Embed"}
+                </Button>
+              </div>
+
+              {endpointTests.embed.result && (
+                <div className="mt-3 bg-white/50 rounded p-3">
+                  <pre className="text-xs overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(endpointTests.embed.result, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {endpointTests.embed.error && (
+                <div className="mt-3 bg-red-50 border border-red-200 rounded p-3">
+                  <p className="text-sm text-red-700">
+                    Error: {endpointTests.embed.error}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Last refresh info */}
+          <div className="mt-6 pt-4 border-t border-soft-gray/20 text-center">
+            <p className="text-xs text-soft-gray font-body">
+              Last updated: {formatSafeDate(lastRefresh.toISOString())}
+            </p>
+          </div>
         </div>
       </AsyncState>
     </PageLayout>

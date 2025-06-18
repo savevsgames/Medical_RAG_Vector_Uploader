@@ -1,17 +1,24 @@
-import React, { useState } from 'react';
-import { X, Upload, Plus, FileText } from 'lucide-react';
-import { useUpload } from '../../hooks/useUpload';
-import { UploadProgress } from './UploadProgress';
-import { FileSelector } from './FileSelector';
+import React, { useState } from "react";
+import { X, Upload, Plus, FileText } from "lucide-react";
+import { useUpload } from "../../hooks/useUpload";
+import { UploadProgress } from "./UploadProgress";
+import { FileSelector } from "./FileSelector";
 
 interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUploadComplete: () => void;
+  onUploadComplete: (result?: any) => void; // ✅ Add optional result parameter
+  onError?: (error: string) => void; // ✅ Add optional error handler
 }
 
-export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalProps) {
-  const { uploads, isUploading, uploadFiles, clearUploads, getUploadStats } = useUpload();
+export function UploadModal({
+  isOpen,
+  onClose,
+  onUploadComplete,
+  onError, // ✅ Add this parameter
+}: UploadModalProps) {
+  const { uploads, isUploading, uploadFiles, clearUploads, getUploadStats } =
+    useUpload();
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   const handleFileSelect = (files: File[]) => {
@@ -22,18 +29,22 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
     if (selectedFiles.length === 0) return;
 
     try {
-      await uploadFiles(selectedFiles);
-      
+      const result = await uploadFiles(selectedFiles);
+
       // Check if all uploads completed successfully
       const stats = getUploadStats();
       if (stats.completed > 0 && stats.failed === 0) {
-        onUploadComplete();
+        onUploadComplete(result); // ✅ Pass result to parent
         setTimeout(() => {
           handleClose();
         }, 2000); // Auto-close after 2 seconds if all successful
       }
-    } catch (error) {
-      console.error('Upload failed:', error);
+    } catch (error: any) {
+      console.error("Upload failed:", error);
+      // ✅ Call error handler if provided
+      if (onError) {
+        onError(error.message || "Upload failed");
+      }
     }
   };
 
@@ -65,8 +76,12 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
               <Upload className="w-6 h-6 text-healing-teal" />
             </div>
             <div>
-              <h2 className="text-xl font-heading font-bold text-deep-midnight">Upload Documents</h2>
-              <p className="text-sm text-soft-gray font-body">Add medical documents for AI analysis</p>
+              <h2 className="text-xl font-heading font-bold text-deep-midnight">
+                Upload Documents
+              </h2>
+              <p className="text-sm text-soft-gray font-body">
+                Add medical documents for AI analysis
+              </p>
             </div>
           </div>
           <button
@@ -84,14 +99,16 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           {hasUploads && (
             <div className="mb-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-heading font-semibold text-deep-midnight">Upload Progress</h3>
+                <h3 className="text-lg font-heading font-semibold text-deep-midnight">
+                  Upload Progress
+                </h3>
                 <div className="text-sm text-soft-gray font-body">
                   {stats.completed} of {stats.total} completed
                 </div>
               </div>
-              
+
               <UploadProgress uploads={uploads} />
-              
+
               {/* Overall Progress Summary */}
               <div className="mt-4 p-4 bg-sky-blue/20 rounded-xl">
                 <div className="flex items-center justify-between text-sm">
@@ -121,9 +138,9 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           {(!hasUploads || allCompleted) && (
             <div>
               <h3 className="text-lg font-heading font-semibold text-deep-midnight mb-4">
-                {hasUploads ? 'Add More Files' : 'Select Files'}
+                {hasUploads ? "Add More Files" : "Select Files"}
               </h3>
-              
+
               <FileSelector
                 onFileSelect={handleFileSelect}
                 selectedFiles={selectedFiles}
@@ -137,18 +154,28 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
                   </h4>
                   <div className="space-y-2">
                     {selectedFiles.map((file, index) => (
-                      <div key={index} className="flex items-center justify-between p-3 bg-sky-blue/10 rounded-xl">
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-3 bg-sky-blue/10 rounded-xl"
+                      >
                         <div className="flex items-center space-x-3">
                           <FileText className="w-4 h-4 text-healing-teal" />
                           <div>
-                            <p className="text-sm font-body font-medium text-deep-midnight">{file.name}</p>
+                            <p className="text-sm font-body font-medium text-deep-midnight">
+                              {file.name}
+                            </p>
                             <p className="text-xs text-soft-gray font-body">
-                              {(file.size / 1024 / 1024).toFixed(2)} MB • {file.type || 'Unknown type'}
+                              {(file.size / 1024 / 1024).toFixed(2)} MB •{" "}
+                              {file.type || "Unknown type"}
                             </p>
                           </div>
                         </div>
                         <button
-                          onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== index))}
+                          onClick={() =>
+                            setSelectedFiles((prev) =>
+                              prev.filter((_, i) => i !== index)
+                            )
+                          }
                           disabled={isUploading}
                           className="p-1 hover:bg-soft-gray/20 rounded-lg transition-colors disabled:opacity-50"
                         >
@@ -167,7 +194,9 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
             <div className="text-center py-4">
               <div className="inline-flex items-center space-x-2 text-healing-teal">
                 <div className="w-4 h-4 border-2 border-healing-teal border-t-transparent rounded-full animate-spin" />
-                <span className="text-sm font-body">Processing your documents...</span>
+                <span className="text-sm font-body">
+                  Processing your documents...
+                </span>
               </div>
               <p className="text-xs text-soft-gray mt-2 font-body">
                 Please wait while we extract text and generate embeddings
@@ -181,15 +210,14 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
           <div className="text-sm text-soft-gray font-body">
             {hasUploads ? (
               <span>
-                {stats.total} file{stats.total !== 1 ? 's' : ''} • 
-                {stats.completed} completed • 
-                {stats.failed} failed
+                {stats.total} file{stats.total !== 1 ? "s" : ""} •
+                {stats.completed} completed •{stats.failed} failed
               </span>
             ) : (
               <span>Supported: PDF, DOCX, TXT, MD</span>
             )}
           </div>
-          
+
           <div className="flex space-x-3">
             {allCompleted && stats.failed === 0 && (
               <button
@@ -200,15 +228,15 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
                 Add More
               </button>
             )}
-            
+
             <button
               onClick={handleClose}
               disabled={isUploading}
               className="px-4 py-2 text-sm font-subheading font-medium text-soft-gray bg-cloud-ivory border border-soft-gray/30 rounded-xl hover:bg-soft-gray/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isUploading ? 'Uploading...' : 'Close'}
+              {isUploading ? "Uploading..." : "Close"}
             </button>
-            
+
             {selectedFiles.length > 0 && !isUploading && (
               <button
                 onClick={handleUpload}
@@ -216,7 +244,8 @@ export function UploadModal({ isOpen, onClose, onUploadComplete }: UploadModalPr
                 className="flex items-center px-4 py-2 text-sm font-subheading font-medium text-cloud-ivory bg-healing-teal rounded-xl hover:bg-healing-teal/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Upload className="w-4 h-4 mr-2" />
-                Upload {selectedFiles.length} File{selectedFiles.length !== 1 ? 's' : ''}
+                Upload {selectedFiles.length} File
+                {selectedFiles.length !== 1 ? "s" : ""}
               </button>
             )}
           </div>

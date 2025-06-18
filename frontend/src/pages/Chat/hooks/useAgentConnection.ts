@@ -1,14 +1,15 @@
-import { useState, useCallback, useRef } from 'react';
-import { useApi } from '../../../hooks/useApi';
-import { useAuth } from '../../../contexts/AuthContext';
-import { logger, logAgentOperation } from '../../../utils/logger';
-import toast from 'react-hot-toast';
+import { useState, useCallback, useRef } from "react";
+import { api, apiHelpers } from "../../../lib/api"; // ✅ Add new API client
+import { useApi } from "../../../hooks/useApi"; // ✅ Keep as fallback
+import { useAuth } from "../../../contexts/AuthContext";
+import { logger, logAgentOperation } from "../../../utils/logger";
+import toast from "react-hot-toast";
 
 interface ConnectionStatus {
   isConnected: boolean;
   canChat: boolean;
   canStart: boolean;
-  status: 'connected' | 'disconnected' | 'error' | 'starting' | 'checking';
+  status: "connected" | "disconnected" | "error" | "starting" | "checking";
   message: string;
   lastError?: string;
 }
@@ -22,219 +23,232 @@ interface AgentStatus {
 }
 
 export function useAgentConnection() {
-  const { apiCall } = useApi();
+  const { apiCall } = useApi(); // ✅ Keep as fallback
   const { user } = useAuth();
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
     isConnected: false,
     canChat: false,
     canStart: true,
-    status: 'checking',
-    message: 'Checking connection...'
+    status: "checking",
+    message: "Checking connection...",
   });
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [lastConnectionCheck, setLastConnectionCheck] = useState<Date>(new Date());
-  
+  const [lastConnectionCheck, setLastConnectionCheck] = useState<Date>(
+    new Date()
+  );
+
   // Prevent multiple simultaneous connection checks
   const checkingRef = useRef(false);
 
-  const updateConnectionStatus = useCallback((
-    status: ConnectionStatus['status'],
-    message: string,
-    canChat: boolean = false,
-    canStart: boolean = true,
-    lastError?: string
-  ) => {
-    setConnectionStatus({
-      isConnected: status === 'connected',
-      canChat,
-      canStart,
-      status,
-      message,
-      lastError
-    });
-  }, []);
+  const updateConnectionStatus = useCallback(
+    (
+      status: ConnectionStatus["status"],
+      message: string,
+      canChat: boolean = false,
+      canStart: boolean = true,
+      lastError?: string
+    ) => {
+      setConnectionStatus({
+        isConnected: status === "connected",
+        canChat,
+        canStart,
+        status,
+        message,
+        lastError,
+      });
+    },
+    []
+  );
 
-  const checkConnection = useCallback(async (silent = false) => {
-    // Prevent multiple simultaneous checks
-    if (checkingRef.current) return;
-    checkingRef.current = true;
+  // ✅ UPDATED: Use new API client
+  const checkConnection = useCallback(
+    async (silent = false) => {
+      // Prevent multiple simultaneous checks
+      if (checkingRef.current) return;
+      checkingRef.current = true;
 
-    try {
-      if (!silent) {
-        updateConnectionStatus('checking', 'Checking agent connection...');
-      }
-
-      // Step 1: Check agent status
-      const statusData = await apiCall('/api/agent/status');
-      setAgentStatus(statusData);
-      setLastConnectionCheck(new Date());
-
-      if (!statusData.agent_active) {
-        updateConnectionStatus(
-          'disconnected',
-          'TxAgent session is not active. Start the agent to begin chatting.',
-          false,
-          true
-        );
-        return;
-      }
-
-      // Step 2: Test actual connectivity with a lightweight test
       try {
-        // CRITICAL FIX: Test the actual chat endpoint with minimal payload
-        await apiCall('/api/chat', {
-          method: 'POST',
-          body: {
-            message: 'connection_test',
-            context: []
-          }
-        });
-
-        updateConnectionStatus(
-          'connected',
-          `TxAgent is ready! Session: ${statusData.agent_id?.substring(0, 8)}...`,
-          true,
-          false
-        );
-
         if (!silent) {
-          logAgentOperation('Connection Verified', user?.email, {
-            agentId: statusData.agent_id,
-            containerStatus: statusData.container_status,
-            component: 'useAgentConnection'
-          });
+          updateConnectionStatus("checking", "Checking agent connection...");
         }
 
-      } catch (chatError) {
-        // Chat endpoint failed - agent is active but not responding
-        const errorMessage = chatError instanceof Error ? chatError.message : 'Unknown error';
-        
+        // Step 1: Check agent status with new API client
+        const response = await apiHelpers.agent.getStatus();
+        const statusData = response.data;
+
+        setAgentStatus(statusData);
+        setLastConnectionCheck(new Date());
+
+        if (!statusData.agent_active) {
+          updateConnectionStatus(
+            "disconnected",
+            "TxAgent session is not active. Start the agent to begin chatting.",
+            false,
+            true
+          );
+          return;
+        }
+
+        // Step 2: Test actual connectivity with new API client
+        try {
+          await apiHelpers.chat("connection_test", { context: [] });
+
+          updateConnectionStatus(
+            "connected",
+            `TxAgent is ready! Session: ${statusData.agent_id?.substring(
+              0,
+              8
+            )}...`,
+            true,
+            false
+          );
+
+          if (!silent) {
+            logAgentOperation("Connection Verified", user?.email, {
+              agentId: statusData.agent_id,
+              containerStatus: statusData.container_status,
+              component: "useAgentConnection",
+            });
+          }
+        } catch (chatError: any) {
+          const errorMessage =
+            chatError.response?.data?.error ||
+            chatError.message ||
+            "Unknown error";
+
+          updateConnectionStatus(
+            "error",
+            "TxAgent session is active but not responding to chat requests.",
+            false,
+            false,
+            errorMessage
+          );
+
+          if (!silent) {
+            logger.error("Chat endpoint test failed", {
+              component: "useAgentConnection",
+              user: user?.email,
+              error: errorMessage,
+              agentId: statusData.agent_id,
+            });
+          }
+        }
+      } catch (statusError: any) {
+        const errorMessage =
+          statusError.response?.data?.error ||
+          statusError.message ||
+          "Unknown error";
+
         updateConnectionStatus(
-          'error',
-          'TxAgent session is active but not responding to chat requests.',
+          "error",
+          "Failed to check agent status. Please check your connection.",
           false,
-          false,
+          true,
           errorMessage
         );
 
         if (!silent) {
-          logger.error('Chat endpoint test failed', {
-            component: 'useAgentConnection',
+          logger.error("Agent status check failed", {
+            component: "useAgentConnection",
             user: user?.email,
             error: errorMessage,
-            agentId: statusData.agent_id
           });
         }
+      } finally {
+        checkingRef.current = false;
       }
+    },
+    [user, updateConnectionStatus]
+  );
 
-    } catch (statusError) {
-      const errorMessage = statusError instanceof Error ? statusError.message : 'Unknown error';
-      
-      updateConnectionStatus(
-        'error',
-        'Failed to check agent status. Please check your connection.',
-        false,
-        true,
-        errorMessage
-      );
-
-      if (!silent) {
-        logger.error('Agent status check failed', {
-          component: 'useAgentConnection',
-          user: user?.email,
-          error: errorMessage
-        });
-      }
-    } finally {
-      checkingRef.current = false;
-    }
-  }, [apiCall, user, updateConnectionStatus]);
-
+  // ✅ UPDATED: Use new API client for starting agent
   const startAgent = useCallback(async () => {
     setIsConnecting(true);
-    updateConnectionStatus('starting', 'Starting TxAgent session...');
+    updateConnectionStatus("starting", "Starting TxAgent session...");
 
     try {
-      const data = await apiCall('/api/agent/start', { method: 'POST' });
-      
+      const response = await apiHelpers.agent.start();
+      const data = response.data;
+
       setAgentStatus({
         agent_active: true,
         agent_id: data.agent_id,
-        container_status: 'running'
+        container_status: "running",
       });
 
-      logAgentOperation('Started Successfully', user?.email, {
+      logAgentOperation("Started Successfully", user?.email, {
         agentId: data.agent_id,
-        component: 'useAgentConnection'
+        component: "useAgentConnection",
       });
 
-      toast.success('TxAgent started successfully!');
-      
+      toast.success("TxAgent started successfully!");
+
       // Wait a moment then check connection
       setTimeout(() => checkConnection(), 2000);
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error || error.message || "Unknown error";
 
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
       updateConnectionStatus(
-        'error',
-        'Failed to start TxAgent session.',
+        "error",
+        "Failed to start TxAgent session.",
         false,
         true,
         errorMessage
       );
 
-      logAgentOperation('Start Failed', user?.email, {
+      logAgentOperation("Start Failed", user?.email, {
         error: errorMessage,
-        component: 'useAgentConnection'
+        component: "useAgentConnection",
       });
 
       toast.error(`Failed to start agent: ${errorMessage}`);
     } finally {
       setIsConnecting(false);
     }
-  }, [apiCall, user, updateConnectionStatus, checkConnection]);
+  }, [user, updateConnectionStatus, checkConnection]);
 
+  // ✅ UPDATED: Use new API client for stopping agent
   const stopAgent = useCallback(async () => {
     setIsConnecting(true);
-    updateConnectionStatus('disconnected', 'Stopping TxAgent session...');
+    updateConnectionStatus("disconnected", "Stopping TxAgent session...");
 
     try {
-      await apiCall('/api/agent/stop', { method: 'POST' });
-      
+      await apiHelpers.agent.stop();
+
       setAgentStatus({
         agent_active: false,
         agent_id: null,
-        container_status: 'stopped'
+        container_status: "stopped",
       });
 
       updateConnectionStatus(
-        'disconnected',
-        'TxAgent session stopped.',
+        "disconnected",
+        "TxAgent session stopped.",
         false,
         true
       );
 
-      logAgentOperation('Stopped Successfully', user?.email, {
-        component: 'useAgentConnection'
+      logAgentOperation("Stopped Successfully", user?.email, {
+        component: "useAgentConnection",
       });
 
-      toast.success('TxAgent stopped successfully!');
+      toast.success("TxAgent stopped successfully!");
+    } catch (error: any) {
+      const errorMessage =
+        error.response?.data?.error || error.message || "Unknown error";
 
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      logAgentOperation('Stop Failed', user?.email, {
+      logAgentOperation("Stop Failed", user?.email, {
         error: errorMessage,
-        component: 'useAgentConnection'
+        component: "useAgentConnection",
       });
 
       toast.error(`Failed to stop agent: ${errorMessage}`);
     } finally {
       setIsConnecting(false);
     }
-  }, [apiCall, user, updateConnectionStatus]);
+  }, [user, updateConnectionStatus]);
 
   return {
     connectionStatus,
@@ -243,6 +257,6 @@ export function useAgentConnection() {
     lastConnectionCheck,
     checkConnection,
     startAgent,
-    stopAgent
+    stopAgent,
   };
 }
