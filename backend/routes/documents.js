@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { upload } from "../middleware/upload.js";
 import { verifyToken } from "../middleware/auth.js";
 import { errorLogger } from "../agent_utils/shared/logger.js";
+import { createClient } from "@supabase/supabase-js";
 
 export function createDocumentsRouter(supabaseClient) {
   const router = express.Router();
@@ -55,9 +56,28 @@ export function createDocumentsRouter(supabaseClient) {
         objectKey.split("/")[0]
       );
 
-      // ✅ Upload with the correctly structured object key
+      // ✅ FIX: Create user-authenticated client for storage upload
+      const userSupabaseClient = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_ANON_KEY, // Use anon key, not service key
+        {
+          global: {
+            headers: {
+              Authorization: req.headers.authorization, // User's JWT
+            },
+          },
+        }
+      );
+
+      errorLogger.debug("Using user-authenticated client for storage", {
+        userId: req.userId,
+        authMethod: "user_jwt",
+        clientType: "user_context",
+      });
+
+      // ✅ Upload with user context (now auth.uid() will work)
       const { data: uploadData, error: uploadError } =
-        await supabaseClient.storage
+        await userSupabaseClient.storage
           .from("documents")
           .upload(objectKey, req.file.buffer, {
             contentType: req.file.mimetype,
@@ -76,6 +96,7 @@ export function createDocumentsRouter(supabaseClient) {
           object_key: objectKey,
           user_id: req.userId,
           bucket: "documents",
+          auth_context: "user_jwt",
           rls_check: {
             auth_uid: req.userId,
             folder_structure: objectKey.split("/"),
@@ -90,10 +111,12 @@ export function createDocumentsRouter(supabaseClient) {
         filePath: uploadData.path,
         objectKey: objectKey,
         userId: req.userId,
-        rlsPolicyMatch: "✅ userId matches first folder",
+        authContext: "user_jwt",
+        rlsPolicyMatch: "✅ auth.uid() matches first folder",
       });
 
-      // ✅ Continue with TxAgent processing...
+      // ✅ Use service role client for database operations (if needed)
+      // Continue with TxAgent processing using original supabaseClient...
       const txAgentResponse = await fetch(
         `${process.env.RUNPOD_EMBEDDING_URL}/process-document`,
         {
