@@ -4,6 +4,8 @@ import { healthRouter } from "./health.js";
 import { createDocumentsRouter } from "./documents.js";
 import { createChatRouter } from "./chat.js";
 import { createMedicalConsultationRouter } from "./medicalConsultation.js";
+import { createMedicalProfileRouter } from "./medicalProfile.js"; // Phase 2
+import { createVoiceGenerationRouter } from "./voiceGeneration.js"; // Phase 2
 import { mountAgentRoutes } from "../agent_utils/index.js";
 import { verifyToken } from "../middleware/auth.js";
 import { errorLogger } from "../agent_utils/shared/logger.js";
@@ -35,11 +37,15 @@ export function setupRoutes(app, supabaseClient) {
   const documentsRouter = createDocumentsRouter(supabaseClient);
   const chatRouter = createChatRouter(supabaseClient);
   const medicalConsultationRouter = createMedicalConsultationRouter(supabaseClient);
+  const medicalProfileRouter = createMedicalProfileRouter(supabaseClient); // Phase 2
+  const voiceGenerationRouter = createVoiceGenerationRouter(supabaseClient); // Phase 2
 
   // FIXED: Clean route structure - no legacy routes
   // Mount protected routes - auth is now handled within each router
   app.use("/api", chatRouter); // /api/chat, /api/openai-chat
   app.use("/api", medicalConsultationRouter); // /api/medical-consultation
+  app.use("/api", medicalProfileRouter); // Phase 2: /api/medical-profile, /api/symptoms, /api/treatments
+  app.use("/api", voiceGenerationRouter); // Phase 2: /api/generate-voice, /api/voices
   app.use("/", documentsRouter); // /upload (legacy for compatibility)
 
   // FIXED: Mount agent routes ONLY (no legacy routes)
@@ -77,7 +83,15 @@ export function setupRoutes(app, supabaseClient) {
       "POST /upload",
       "POST /api/chat",
       "POST /api/openai-chat",
-      "POST /api/medical-consultation", // NEW ROUTE
+      "POST /api/medical-consultation", // Phase 1
+      "GET /api/medical-profile", // Phase 2
+      "POST /api/medical-profile", // Phase 2
+      "GET /api/symptoms", // Phase 2
+      "POST /api/symptoms", // Phase 2
+      "GET /api/treatments", // Phase 2
+      "POST /api/treatments", // Phase 2
+      "POST /api/generate-voice", // Phase 2
+      "GET /api/voices", // Phase 2
       "POST /api/embed",
       "POST /api/agent/start",
       "POST /api/agent/stop",
