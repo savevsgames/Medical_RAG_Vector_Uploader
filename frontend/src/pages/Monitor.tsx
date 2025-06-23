@@ -67,6 +67,10 @@ export function Monitor() {
     startAgent,
     stopAgent,
     performDetailedStatusCheck,
+    // ✅ NEW: Use debouncing state from hook
+    isStarting,
+    isStopping,
+    isTesting,
   } = useAgents();
 
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -325,19 +329,21 @@ export function Monitor() {
                 <Button
                   variant="danger"
                   onClick={stopAgent}
-                  loading={actionLoading}
+                  loading={actionLoading || isStopping} // ✅ Use debouncing state
+                  disabled={isStopping} // ✅ Disable when stopping
                   icon={<Square className="w-4 h-4" />}
                 >
-                  {actionLoading ? "Deactivating..." : "Deactivate Session"}
+                  {actionLoading || isStopping ? "Deactivating..." : "Deactivate Session"}
                 </Button>
               ) : (
                 <Button
                   variant="primary"
                   onClick={startAgent}
-                  loading={actionLoading}
+                  loading={actionLoading || isStarting} // ✅ Use debouncing state
+                  disabled={isStarting} // ✅ Disable when starting
                   icon={<Play className="w-4 h-4" />}
                 >
-                  {actionLoading ? "Activating..." : "Activate TxAgent"}
+                  {actionLoading || isStarting ? "Activating..." : "Activate TxAgent"}
                 </Button>
               )}
             </div>

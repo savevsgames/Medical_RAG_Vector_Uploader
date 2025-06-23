@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api, apiHelpers } from "../lib/api"; // ✅ Add new API client
 import { useApi } from "./useApi"; // ✅ Keep your existing useApi too
 import { logger, logAgentOperation } from "../utils/logger";
@@ -35,6 +35,11 @@ export function useAgents() {
   );
   const [actionLoading, setActionLoading] = useState(false);
   const [statusTesting, setStatusTesting] = useState(false);
+
+  // ✅ NEW: Debouncing refs to prevent multiple simultaneous operations
+  const startingRef = useRef(false);
+  const stoppingRef = useRef(false);
+  const testingRef = useRef(false);
 
   // ✅ UPDATED: Use new API client with fallback to old one
   const fetchAgentStatus = useCallback(
@@ -77,9 +82,20 @@ export function useAgents() {
     [user]
   );
 
-  // ✅ UPDATED: Use new API client
+  // ✅ UPDATED: Use new API client with debouncing
   const startAgent = useCallback(async () => {
+    // ✅ DEBOUNCING: Prevent multiple simultaneous start operations
+    if (startingRef.current) {
+      logger.warn("Start agent already in progress, ignoring duplicate request", {
+        user: user?.email,
+        component: "useAgents",
+      });
+      return;
+    }
+
+    startingRef.current = true;
     setActionLoading(true);
+    
     try {
       logger.info("Starting agent session", {
         user: user?.email,
@@ -123,12 +139,25 @@ export function useAgents() {
       throw error;
     } finally {
       setActionLoading(false);
+      // ✅ DEBOUNCING: Reset the flag after operation completes
+      startingRef.current = false;
     }
   }, [user, fetchAgentStatus]);
 
-  // ✅ UPDATED: Use new API client
+  // ✅ UPDATED: Use new API client with debouncing
   const stopAgent = useCallback(async () => {
+    // ✅ DEBOUNCING: Prevent multiple simultaneous stop operations
+    if (stoppingRef.current) {
+      logger.warn("Stop agent already in progress, ignoring duplicate request", {
+        user: user?.email,
+        component: "useAgents",
+      });
+      return;
+    }
+
+    stoppingRef.current = true;
     setActionLoading(true);
+    
     try {
       logger.info("Stopping agent session", {
         user: user?.email,
@@ -168,10 +197,12 @@ export function useAgents() {
       throw error;
     } finally {
       setActionLoading(false);
+      // ✅ DEBOUNCING: Reset the flag after operation completes
+      stoppingRef.current = false;
     }
   }, [user, fetchAgentStatus]);
 
-  // ✅ UPDATED: Use new API client for detailed testing
+  // ✅ UPDATED: Use new API client for detailed testing with debouncing
   const performDetailedStatusCheck = useCallback(async () => {
     if (!agentStatus?.agent_active) {
       logger.warn("Cannot perform detailed status check - no active agent", {
@@ -181,7 +212,18 @@ export function useAgents() {
       return;
     }
 
+    // ✅ DEBOUNCING: Prevent multiple simultaneous test operations
+    if (testingRef.current) {
+      logger.warn("Detailed status check already in progress, ignoring duplicate request", {
+        user: user?.email,
+        component: "useAgents",
+      });
+      return;
+    }
+
+    testingRef.current = true;
     setStatusTesting(true);
+    
     try {
       logger.info("Performing detailed status check", {
         user: user?.email,
@@ -263,6 +305,8 @@ export function useAgents() {
       throw error;
     } finally {
       setStatusTesting(false);
+      // ✅ DEBOUNCING: Reset the flag after operation completes
+      testingRef.current = false;
     }
   }, [user, agentStatus]);
 
@@ -283,5 +327,9 @@ export function useAgents() {
     startAgent,
     stopAgent,
     performDetailedStatusCheck,
+    // ✅ NEW: Expose debouncing state for UI feedback
+    isStarting: startingRef.current,
+    isStopping: stoppingRef.current,
+    isTesting: testingRef.current,
   };
 }
