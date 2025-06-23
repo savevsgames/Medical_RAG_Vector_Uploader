@@ -17,8 +17,9 @@ router = APIRouter()
 # Request/Response models
 class MedicalConsultationRequest(BaseModel):
     query: str = Field(..., description="Medical question or concern")
-    context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context")
+    context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context including user_profile and conversation_history")
     session_id: Optional[str] = Field(default=None, description="Session identifier")
+    preferred_agent: Optional[str] = Field(default="txagent", description="Preferred AI agent for consultation (txagent or openai)")
     
 class MedicalConsultationResponse(BaseModel):
     response: Dict[str, Any]
@@ -26,6 +27,7 @@ class MedicalConsultationResponse(BaseModel):
     recommendations: Dict[str, Any]
     processing_time_ms: int
     session_id: str
+    agent_id: str
 
 # Emergency keywords for detection
 EMERGENCY_KEYWORDS = [
@@ -54,19 +56,27 @@ async def medical_consultation(
 ):
     """
     Process medical consultation request with emergency detection and AI response
+    Supports both doctor (general medical RAG) and patient (personalized) contexts
     """
     start_time = datetime.now()
     user_id = current_user["user_id"]
     
     logger.info(f"🏥 Medical consultation request from user: {user_id}")
     logger.info(f"🔍 Query preview: {request.query[:100]}...")
+    logger.info(f"🤖 Preferred agent: {request.preferred_agent}")
+    
+    # Determine context type based on presence of user_profile
+    has_user_profile = bool(request.context and request.context.get("user_profile"))
+    context_type = "patient" if has_user_profile else "doctor"
+    
+    logger.info(f"👤 Context type: {context_type} (has_user_profile: {has_user_profile})")
     
     try:
         # Validate input
         if not request.query or not request.query.strip():
             raise ValidationError("Query is required and cannot be empty")
         
-        # Emergency detection
+        # Emergency detection (applies to both doctor and patient contexts)
         emergency_check = detect_emergency(request.query)
         
         if emergency_check["is_emergency"]:
@@ -77,7 +87,8 @@ async def medical_consultation(
             return MedicalConsultationResponse(
                 response={
                     "text": "I've detected that you may be experiencing a medical emergency. Please contact emergency services immediately (call 911) or go to the nearest emergency room. This system cannot provide emergency medical care.",
-                    "confidence_score": 0.95
+                    "confidence_score": 0.95,
+                    "sources": []
                 },
                 safety={
                     "emergency_detected": True,
@@ -89,25 +100,36 @@ async def medical_consultation(
                     "follow_up_questions": []
                 },
                 processing_time_ms=processing_time,
-                session_id=request.session_id or f"emergency-{user_id}"
+                session_id=request.session_id or f"emergency-{user_id}",
+                agent_id="emergency_system"
             )
         
-        # Process normal consultation using chat endpoint
-        logger.info(f"💬 Processing normal consultation for user: {user_id}")
+        # Process consultation based on preferred agent and context
+        logger.info(f"💬 Processing {context_type} consultation for user: {user_id} with {request.preferred_agent}")
         
-        # Use the chat functionality to get AI response
+        # Use the enhanced chat functionality with agent selection
         chat_response = await chat_with_documents(
             query=request.query,
             history=request.context.get("conversation_history", []) if request.context else [],
             top_k=5,
             temperature=0.7,
             stream=False,
-            current_user=current_user
+            current_user=current_user,
+            preferred_agent=request.preferred_agent,
+            context=request.context  # Pass full context including user_profile
         )
         
         processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
         
-        logger.info(f"✅ Medical consultation completed for user: {user_id} in {processing_time}ms")
+        # Determine appropriate disclaimer based on context type
+        if context_type == "patient":
+            disclaimer = "This personalized information is for educational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment. Always consult with your healthcare provider."
+            suggested_action = "Consult with your healthcare provider for personalized medical advice"
+        else:
+            disclaimer = "This information is for educational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment."
+            suggested_action = "Use this information to support clinical decision-making in conjunction with professional medical judgment"
+        
+        logger.info(f"✅ Medical consultation completed for user: {user_id} in {processing_time}ms using {chat_response.get('agent_id', request.preferred_agent)}")
         
         return MedicalConsultationResponse(
             response={
@@ -117,15 +139,16 @@ async def medical_consultation(
             },
             safety={
                 "emergency_detected": False,
-                "disclaimer": "This information is for educational purposes only and is not a substitute for professional medical advice, diagnosis, or treatment.",
+                "disclaimer": disclaimer,
                 "urgent_care_recommended": False
             },
             recommendations={
-                "suggested_action": "Consult with healthcare provider for personalized advice",
+                "suggested_action": suggested_action,
                 "follow_up_questions": []
             },
             processing_time_ms=processing_time,
-            session_id=request.session_id or f"consultation-{user_id}"
+            session_id=request.session_id or f"consultation-{user_id}",
+            agent_id=chat_response.get("agent_id", request.preferred_agent)
         )
         
     except ValidationError as e:
