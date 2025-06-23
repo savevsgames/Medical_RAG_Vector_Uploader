@@ -1,141 +1,115 @@
-import { config } from '../../config/environment.js';
+// Enhanced logging utility with deferred configuration initialization
+// This prevents circular dependency issues with config imports
 
-// ✅ JWT OPTIMIZATION: Reduce logging verbosity for frequent operations
 const LOG_LEVELS = {
-  ERROR: 0,
-  WARN: 1,
-  INFO: 2,
-  SUCCESS: 3,
-  DEBUG: 4
+  DEBUG: 0,
+  INFO: 1,
+  WARN: 2,
+  ERROR: 3,
+  SUCCESS: 4
 };
 
-const currentLogLevel = config.isDevelopment ? LOG_LEVELS.DEBUG : LOG_LEVELS.INFO;
+// Default to INFO level until initialized
+let currentLogLevel = LOG_LEVELS.INFO;
+let isInitialized = false;
 
-// ✅ JWT OPTIMIZATION: Track frequent operations to avoid spam
-const operationCounts = new Map();
-const FREQUENT_OPERATION_THRESHOLD = 10; // Log every 10th occurrence after threshold
+// Initialize logger with config - called from server.js after config is ready
+export function initializeLogger(config) {
+  if (isInitialized) {
+    console.warn('Logger already initialized, skipping...');
+    return;
+  }
 
-function shouldLogFrequentOperation(operation) {
-  const count = operationCounts.get(operation) || 0;
-  operationCounts.set(operation, count + 1);
+  currentLogLevel = config?.isDevelopment ? LOG_LEVELS.DEBUG : LOG_LEVELS.INFO;
+  isInitialized = true;
   
-  // Always log first few occurrences, then every 10th
-  return count < 5 || count % FREQUENT_OPERATION_THRESHOLD === 0;
+  console.log(`✅ Logger initialized with level: ${Object.keys(LOG_LEVELS)[currentLogLevel]} (isDevelopment: ${config?.isDevelopment})`);
 }
 
-function formatLogMessage(level, message, context = {}) {
-  const timestamp = new Date().toISOString();
-  const contextStr = Object.keys(context).length > 0 ? JSON.stringify(context, null, 2) : '';
+// Get current timestamp
+function getTimestamp() {
+  return new Date().toISOString();
+}
+
+// Format log message with metadata
+function formatLogMessage(level, message, metadata = {}) {
+  const timestamp = getTimestamp();
+  const baseMessage = `[${timestamp}] [${level}] ${message}`;
   
-  return `[${timestamp}] ${level}: ${message}${contextStr ? '\n' + contextStr : ''}`;
+  if (Object.keys(metadata).length > 0) {
+    return `${baseMessage} | ${JSON.stringify(metadata)}`;
+  }
+  
+  return baseMessage;
 }
 
-function shouldLog(level) {
-  return LOG_LEVELS[level] <= currentLogLevel;
-}
-
+// Enhanced error logger with comprehensive logging capabilities
 export const errorLogger = {
-  error: (message, error = null, context = {}) => {
-    if (!shouldLog('ERROR')) return;
-    
-    const errorContext = {
-      ...context,
-      error_message: error?.message,
-      error_stack: config.isDevelopment ? error?.stack : undefined,
-      timestamp: new Date().toISOString()
-    };
-    
-    console.error(formatLogMessage('ERROR', message, errorContext));
-  },
-
-  warn: (message, context = {}) => {
-    if (!shouldLog('WARN')) return;
-    
-    console.warn(formatLogMessage('WARN', message, {
-      ...context,
-      timestamp: new Date().toISOString()
-    }));
-  },
-
-  info: (message, context = {}) => {
-    if (!shouldLog('INFO')) return;
-    
-    // ✅ JWT OPTIMIZATION: Reduce logging for frequent operations
-    const operation = context.component + '_' + (context.operation || 'info');
-    if (!shouldLogFrequentOperation(operation)) {
-      return;
+  // Debug level logging (only in development)
+  debug: (message, metadata = {}) => {
+    if (currentLogLevel <= LOG_LEVELS.DEBUG) {
+      console.log(formatLogMessage('DEBUG', message, metadata));
     }
-    
-    console.log(formatLogMessage('INFO', message, {
-      ...context,
-      timestamp: new Date().toISOString()
-    }));
   },
 
-  success: (message, context = {}) => {
-    if (!shouldLog('SUCCESS')) return;
-    
-    console.log(formatLogMessage('SUCCESS', `✅ ${message}`, {
-      ...context,
-      timestamp: new Date().toISOString()
-    }));
-  },
-
-  debug: (message, context = {}) => {
-    if (!shouldLog('DEBUG')) return;
-    
-    // ✅ JWT OPTIMIZATION: Only log debug in development
-    if (!config.isDevelopment) return;
-    
-    console.debug(formatLogMessage('DEBUG', message, {
-      ...context,
-      timestamp: new Date().toISOString()
-    }));
-  },
-
-  // ✅ JWT OPTIMIZATION: Special method for connection checks with reduced verbosity
-  connectionCheck: (service, status, details = null) => {
-    if (!shouldLog('INFO')) return;
-    
-    const operation = `connection_check_${service}`;
-    if (!shouldLogFrequentOperation(operation)) {
-      return;
+  // Info level logging
+  info: (message, metadata = {}) => {
+    if (currentLogLevel <= LOG_LEVELS.INFO) {
+      console.log(formatLogMessage('INFO', message, metadata));
     }
-    
-    const statusIcon = status ? '✅' : '❌';
-    const message = `${statusIcon} ${service} connection: ${status ? 'OK' : 'FAILED'}`;
-    
-    console.log(formatLogMessage('INFO', message, {
-      service,
-      status,
-      details: config.isDevelopment ? details : undefined,
-      timestamp: new Date().toISOString()
-    }));
   },
 
-  // ✅ JWT OPTIMIZATION: Get logging statistics
-  getStats: () => {
-    return {
-      currentLogLevel: Object.keys(LOG_LEVELS).find(key => LOG_LEVELS[key] === currentLogLevel),
-      operationCounts: Object.fromEntries(operationCounts),
-      isDevelopment: config.isDevelopment
-    };
+  // Warning level logging
+  warn: (message, metadata = {}) => {
+    if (currentLogLevel <= LOG_LEVELS.WARN) {
+      console.warn(formatLogMessage('WARN', message, metadata));
+    }
   },
 
-  // ✅ JWT OPTIMIZATION: Reset operation counts (useful for testing)
-  resetStats: () => {
-    operationCounts.clear();
+  // Error level logging
+  error: (message, error = null, metadata = {}) => {
+    if (currentLogLevel <= LOG_LEVELS.ERROR) {
+      const errorMetadata = {
+        ...metadata,
+        ...(error && {
+          error_message: error.message,
+          error_stack: error.stack,
+          error_name: error.name
+        })
+      };
+      console.error(formatLogMessage('ERROR', message, errorMetadata));
+    }
+  },
+
+  // Success level logging
+  success: (message, metadata = {}) => {
+    if (currentLogLevel <= LOG_LEVELS.SUCCESS) {
+      console.log(formatLogMessage('SUCCESS', message, metadata));
+    }
+  },
+
+  // Connection check logging
+  connectionCheck: (service, isConnected, details = {}) => {
+    const status = isConnected ? '✅ CONNECTED' : '❌ DISCONNECTED';
+    const message = `${service}: ${status}`;
+    
+    if (isConnected) {
+      errorLogger.success(message, details);
+    } else {
+      errorLogger.error(message, null, details);
+    }
+  },
+
+  // Get current log level for debugging
+  getCurrentLevel: () => {
+    return Object.keys(LOG_LEVELS)[currentLogLevel];
+  },
+
+  // Check if logger is initialized
+  isInitialized: () => {
+    return isInitialized;
   }
 };
 
-// ✅ JWT OPTIMIZATION: Clean up operation counts periodically
-setInterval(() => {
-  if (operationCounts.size > 100) {
-    // Keep only the most recent 50 operations
-    const entries = Array.from(operationCounts.entries());
-    operationCounts.clear();
-    entries.slice(-50).forEach(([key, value]) => {
-      operationCounts.set(key, value);
-    });
-  }
-}, 5 * 60 * 1000); // Every 5 minutes
+// Default export for backward compatibility
+export default errorLogger;

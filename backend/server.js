@@ -5,7 +5,7 @@ import { corsMiddleware, optionsHandler } from "./middleware/cors.js";
 import { requestLogger } from "./middleware/logging.js";
 import setupRoutes from "./routes/index.js";
 import { staticFileService } from "./services/StaticFileService.js";
-import { errorLogger } from "./agent_utils/shared/logger.js";
+import { initializeLogger, errorLogger } from "./agent_utils/shared/logger.js";
 
 function startServer() {
   const app = express();
@@ -13,8 +13,16 @@ function startServer() {
   console.log(">>> ENV PORT:", process.env.PORT);
   console.log(">>> CONFIG PORT:", config.port);
 
+  // ✅ CRITICAL FIX: Initialize logger FIRST, before any other logging
+  try {
+    initializeLogger(config);
+    errorLogger.info("🚀 Medical RAG Server starting up...");
+  } catch (error) {
+    console.error("Failed to initialize logger:", error);
+    process.exit(1);
+  }
+
   // Enhanced startup logging
-  errorLogger.info("🚀 Medical RAG Server starting up...");
   errorLogger.info("Environment check", {
     node_version: process.version,
     port: config.port,
@@ -176,6 +184,8 @@ function startServer() {
       environment: config.nodeEnv,
       json_limit: "10mb",
       supabase_auth: "service_role",
+      logger_level: errorLogger.getCurrentLevel(),
+      logger_initialized: errorLogger.isInitialized(),
     });
 
     errorLogger.info("🔧 Services configured:");
@@ -202,6 +212,7 @@ function startServer() {
 try {
   startServer();
 } catch (error) {
-  errorLogger.error("Failed to start server", error);
+  // Use console.error here since logger might not be initialized yet
+  console.error("Failed to start server:", error);
   process.exit(1);
 }
