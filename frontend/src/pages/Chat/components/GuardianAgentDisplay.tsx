@@ -25,8 +25,6 @@ export function GuardianAgentDisplay({ txAgentStatus, connectionChecking }: Guar
     } else if (txAgentStatus.container_status === 'running' || txAgentStatus.container_status === 'starting') {
       // Container is responsive but agent not fully active yet
       return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
-    } else if (txAgentStatus.container_status === 'starting') {
-      return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
     } else {
       return <XCircle className="w-4 h-4 text-red-500" />;
     }
@@ -43,8 +41,6 @@ export function GuardianAgentDisplay({ txAgentStatus, connectionChecking }: Guar
     } else if (txAgentStatus.container_status === 'running' || txAgentStatus.container_status === 'starting') {
       // Container is responsive but agent not fully active yet
       return 'Initializing...';
-    } else if (txAgentStatus.container_status === 'starting') {
-      return 'Starting...';
     } else {
       return 'Offline';
     }
@@ -60,8 +56,6 @@ export function GuardianAgentDisplay({ txAgentStatus, connectionChecking }: Guar
       return 'bg-healing-teal/10 text-healing-teal';
     } else if (txAgentStatus.container_status === 'running' || txAgentStatus.container_status === 'starting') {
       // Container is responsive but agent not fully active yet
-      return 'bg-guardian-gold/10 text-guardian-gold';
-    } else if (txAgentStatus.container_status === 'starting') {
       return 'bg-guardian-gold/10 text-guardian-gold';
     } else {
       return 'bg-red-100 text-red-600';

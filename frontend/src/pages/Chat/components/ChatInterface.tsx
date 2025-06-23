@@ -70,8 +70,6 @@ export function ChatInterface({
     } else if (txAgentStatus.container_status === 'running' || txAgentStatus.container_status === 'starting') {
       // Container is responsive but agent not fully active yet
       return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
-    } else if (txAgentStatus.container_status === 'starting') {
-      return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
     } else {
       return <XCircle className="w-4 h-4 text-red-500" />;
     }
