@@ -62,6 +62,7 @@ export function createAgentRouter(supabaseClient) {
           agentStatus: agent.status,
           lastActive: agent.last_active,
           hasSessionData: !!agent.session_data,
+          runpodEndpoint: agent.session_data?.runpod_endpoint,
           component: "AgentStatusOperations",
         });
 
@@ -71,19 +72,33 @@ export function createAgentRouter(supabaseClient) {
 
         if (agent.status === "active" || agent.status === "initializing") {
           try {
-            // ✅ FIXED: Pass JWT token to checkContainerHealth
+            // ✅ ENHANCED: Better container health check with detailed logging
             const healthCheck = await this.checkContainerHealth(agent, req.headers.authorization);
             containerStatus = healthCheck.status;
             containerHealth = healthCheck.data;
+            
+            errorLogger.info("Container health check completed", {
+              userId,
+              agentId: agent.id,
+              containerStatus,
+              healthCheckSuccess: healthCheck.status === "running",
+              component: "AgentStatusOperations",
+            });
           } catch (healthError) {
             errorLogger.warn("Container health check failed", {
               userId,
               agentId: agent.id,
               error: healthError.message,
+              errorCode: healthError.code,
+              runpodEndpoint: agent.session_data?.runpod_endpoint,
               component: "AgentStatusOperations",
             });
             containerStatus = "unreachable";
-            containerHealth = { error: healthError.message };
+            containerHealth = { 
+              error: healthError.message,
+              code: healthError.code,
+              endpoint: agent.session_data?.runpod_endpoint
+            };
           }
         }
 
@@ -128,67 +143,142 @@ export function createAgentRouter(supabaseClient) {
       }
     }
 
-    // ✅ FIXED: Updated signature to accept authToken parameter
+    // ✅ ENHANCED: Better container health check with detailed diagnostics
     async checkContainerHealth(agent, authToken) {
       // Validate session data
       if (!agent.session_data?.runpod_endpoint) {
         throw new Error("No RunPod endpoint configured in session data");
       }
 
-      const healthUrl =
-        `${agent.session_data.runpod_endpoint}`.replace(/\/+$/, "") + "/health";
+      const baseEndpoint = agent.session_data.runpod_endpoint.replace(/\/+$/, "");
+      const healthUrl = `${baseEndpoint}/health`;
 
-      errorLogger.debug("Checking container health with JWT", {
+      errorLogger.debug("Checking container health with enhanced diagnostics", {
         agentId: agent.id,
+        baseEndpoint,
         healthUrl,
         hasAuthToken: !!authToken,
         component: "AgentStatusOperations",
       });
 
       try {
-        // ✅ FIXED: Include Authorization header with JWT token
-        const { status, data } = await axios.get(healthUrl, {
-          timeout: 8000,
+        // ✅ ENHANCED: More robust health check with better error handling
+        const response = await axios.get(healthUrl, {
+          timeout: 10000, // Increased timeout
           headers: { 
             Accept: "application/json",
-            Authorization: authToken // ✅ Pass JWT token to container
+            Authorization: authToken,
+            "User-Agent": "Medical-RAG-Backend/1.0"
           },
+          validateStatus: function (status) {
+            // Accept any status code to get more detailed error info
+            return status < 600;
+          }
         });
 
-        errorLogger.debug("Health-ping response with JWT", {
+        errorLogger.debug("Health check response received", {
           healthUrl,
-          status,
-          data,
+          status: response.status,
+          statusText: response.statusText,
+          contentType: response.headers['content-type'],
+          dataPreview: typeof response.data === 'string' ? 
+            response.data.substring(0, 200) : 
+            JSON.stringify(response.data).substring(0, 200),
           hasAuthToken: !!authToken,
           component: "AgentStatusOperations",
         });
 
-        if (status !== 200) {
-          throw new Error(`Health check HTTP ${status}`);
+        if (response.status === 200) {
+          return {
+            status: "running",
+            data: response.data,
+          };
+        } else if (response.status === 404) {
+          // ✅ SPECIFIC: Handle 404 errors (endpoint not found)
+          throw new Error(`TxAgent container health endpoint not found (404). The container may not be properly implementing the /health endpoint.`);
+        } else if (response.status === 401 || response.status === 403) {
+          // ✅ SPECIFIC: Handle auth errors
+          throw new Error(`TxAgent container authentication failed (${response.status}). Check JWT token configuration.`);
+        } else {
+          // ✅ SPECIFIC: Handle other HTTP errors
+          throw new Error(`TxAgent container returned HTTP ${response.status}: ${response.statusText}`);
         }
 
-        return {
-          status: "running",
-          data: data,
-        };
       } catch (error) {
-        errorLogger.error("Container health check failed", error, {
+        // ✅ ENHANCED: Better error categorization and logging
+        let enhancedError = error;
+        
+        if (error.code === 'ECONNREFUSED') {
+          enhancedError = new Error(`TxAgent container connection refused. Container may be down or not accessible at ${healthUrl}`);
+          enhancedError.code = 'CONTAINER_UNREACHABLE';
+        } else if (error.code === 'ENOTFOUND') {
+          enhancedError = new Error(`TxAgent container hostname not found. Check RunPod endpoint URL: ${healthUrl}`);
+          enhancedError.code = 'HOSTNAME_NOT_FOUND';
+        } else if (error.code === 'ETIMEDOUT') {
+          enhancedError = new Error(`TxAgent container health check timed out. Container may be starting or overloaded.`);
+          enhancedError.code = 'HEALTH_CHECK_TIMEOUT';
+        } else if (error.response?.status === 404) {
+          enhancedError = new Error(`TxAgent container /health endpoint not implemented (404). Container needs to implement the health check endpoint.`);
+          enhancedError.code = 'HEALTH_ENDPOINT_NOT_FOUND';
+        }
+
+        errorLogger.error("Container health check failed with enhanced diagnostics", enhancedError, {
           healthUrl,
-          error_code: error.code,
+          error_code: enhancedError.code || error.code,
           error_status: error.response?.status,
           error_data: error.response?.data,
+          error_message: enhancedError.message,
           hasAuthToken: !!authToken,
+          containerEndpoint: baseEndpoint,
           component: "AgentStatusOperations",
         });
 
         return {
           status: "unreachable",
           data: {
-            error: error.message,
-            code: error.code,
+            error: enhancedError.message,
+            code: enhancedError.code || error.code,
             response_status: error.response?.status,
+            endpoint: healthUrl,
+            suggestions: this.getHealthCheckSuggestions(enhancedError.code || error.code)
           },
         };
+      }
+    }
+
+    // ✅ NEW: Provide helpful suggestions based on error type
+    getHealthCheckSuggestions(errorCode) {
+      switch (errorCode) {
+        case 'CONTAINER_UNREACHABLE':
+          return [
+            'Check if the RunPod container is running',
+            'Verify the container endpoint URL is correct',
+            'Ensure the container is not in a stopped state'
+          ];
+        case 'HOSTNAME_NOT_FOUND':
+          return [
+            'Verify the RunPod endpoint URL is correct',
+            'Check if the RunPod proxy URL has changed',
+            'Ensure the container is deployed and accessible'
+          ];
+        case 'HEALTH_CHECK_TIMEOUT':
+          return [
+            'Container may be starting up - wait a few minutes',
+            'Check container resource usage and scaling',
+            'Verify container is not overloaded with requests'
+          ];
+        case 'HEALTH_ENDPOINT_NOT_FOUND':
+          return [
+            'Container needs to implement GET /health endpoint',
+            'Verify container is running the correct TxAgent image',
+            'Check container logs for startup errors'
+          ];
+        default:
+          return [
+            'Check container logs for errors',
+            'Verify container configuration',
+            'Try restarting the container'
+          ];
       }
     }
   }
@@ -219,11 +309,50 @@ export function createAgentRouter(supabaseClient) {
           );
         }
 
+        // ✅ ENHANCED: Validate RunPod endpoint before creating session
+        const runpodEndpoint = process.env.RUNPOD_EMBEDDING_URL.replace(/\/+$/, "");
+        
+        errorLogger.info("Validating RunPod endpoint before agent creation", {
+          userId,
+          runpodEndpoint,
+          component: "AgentLifecycleOperations",
+        });
+
+        // Quick connectivity test (optional - can be disabled if causing issues)
+        try {
+          const testResponse = await axios.get(`${runpodEndpoint}/health`, {
+            timeout: 5000,
+            headers: {
+              Authorization: req.headers.authorization,
+              "User-Agent": "Medical-RAG-Backend/1.0"
+            },
+            validateStatus: () => true // Accept any status for testing
+          });
+          
+          errorLogger.info("RunPod endpoint connectivity test", {
+            userId,
+            runpodEndpoint,
+            testStatus: testResponse.status,
+            testStatusText: testResponse.statusText,
+            component: "AgentLifecycleOperations",
+          });
+        } catch (testError) {
+          errorLogger.warn("RunPod endpoint connectivity test failed", {
+            userId,
+            runpodEndpoint,
+            testError: testError.message,
+            component: "AgentLifecycleOperations",
+          });
+          // Continue anyway - the test might fail but the container could still work
+        }
+
         // Prepare session data with RunPod endpoint
         const sessionData = {
-          runpod_endpoint: process.env.RUNPOD_EMBEDDING_URL,
+          runpod_endpoint: runpodEndpoint,
           started_at: new Date().toISOString(),
           capabilities: ["chat", "embed", "health"],
+          container_type: "txagent",
+          backend_version: "1.0.0"
         };
 
         errorLogger.info("Starting agent (alias for createAgentSession)", {

@@ -6,6 +6,7 @@ import { createChatRouter } from "./chat.js";
 import { createMedicalConsultationRouter } from "./medicalConsultation.js";
 import { createMedicalProfileRouter } from "./medicalProfile.js"; // Phase 2
 import { createVoiceGenerationRouter } from "./voiceGeneration.js"; // Phase 2
+import { createVoiceServicesRouter } from "./voiceServices.js"; // ✅ NEW: Voice services for mobile app
 import { mountAgentRoutes } from "../agent_utils/index.js";
 import { verifyToken } from "../middleware/auth.js";
 import { errorLogger } from "../agent_utils/shared/logger.js";
@@ -39,6 +40,7 @@ export function setupRoutes(app, supabaseClient) {
   const medicalConsultationRouter = createMedicalConsultationRouter(supabaseClient);
   const medicalProfileRouter = createMedicalProfileRouter(supabaseClient); // Phase 2
   const voiceGenerationRouter = createVoiceGenerationRouter(supabaseClient); // Phase 2
+  const voiceServicesRouter = createVoiceServicesRouter(supabaseClient); // ✅ NEW: Voice services
 
   // FIXED: Clean route structure - no legacy routes
   // Mount protected routes - auth is now handled within each router
@@ -46,6 +48,7 @@ export function setupRoutes(app, supabaseClient) {
   app.use("/api", medicalConsultationRouter); // /api/medical-consultation
   app.use("/api", medicalProfileRouter); // Phase 2: /api/medical-profile, /api/symptoms, /api/treatments
   app.use("/api", voiceGenerationRouter); // Phase 2: /api/generate-voice, /api/voices
+  app.use("/api/voice", voiceServicesRouter); // ✅ NEW: /api/voice/tts, /api/voice/transcribe, /api/voice/voices
   app.use("/", documentsRouter); // /upload (legacy for compatibility)
 
   // FIXED: Mount agent routes ONLY (no legacy routes)
@@ -92,6 +95,9 @@ export function setupRoutes(app, supabaseClient) {
       "POST /api/treatments", // Phase 2
       "POST /api/generate-voice", // Phase 2
       "GET /api/voices", // Phase 2
+      "POST /api/voice/tts", // ✅ NEW: Mobile app TTS
+      "POST /api/voice/transcribe", // ✅ NEW: Mobile app STT
+      "GET /api/voice/voices", // ✅ NEW: Mobile app voice list
       "POST /api/embed",
       "POST /api/agent/start",
       "POST /api/agent/stop",

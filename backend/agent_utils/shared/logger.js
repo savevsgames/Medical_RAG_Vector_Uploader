@@ -1,115 +1,234 @@
-// Enhanced logging utility with deferred configuration initialization
-// This prevents circular dependency issues with config imports
+// Enhanced logging utility with proper initialization
+import util from 'util';
 
-const LOG_LEVELS = {
-  DEBUG: 0,
-  INFO: 1,
-  WARN: 2,
-  ERROR: 3,
-  SUCCESS: 4
-};
-
-// Default to INFO level until initialized
-let currentLogLevel = LOG_LEVELS.INFO;
-let isInitialized = false;
-
-// Initialize logger with config - called from server.js after config is ready
-export function initializeLogger(config) {
-  if (isInitialized) {
-    console.warn('Logger already initialized, skipping...');
-    return;
+class Logger {
+  constructor() {
+    this.initialized = false;
+    this.level = 'info';
+    this.levels = {
+      error: 0,
+      warn: 1,
+      info: 2,
+      success: 2, // Same as info
+      debug: 3
+    };
   }
 
-  currentLogLevel = config?.isDevelopment ? LOG_LEVELS.DEBUG : LOG_LEVELS.INFO;
-  isInitialized = true;
-  
-  console.log(`✅ Logger initialized with level: ${Object.keys(LOG_LEVELS)[currentLogLevel]} (isDevelopment: ${config?.isDevelopment})`);
-}
-
-// Get current timestamp
-function getTimestamp() {
-  return new Date().toISOString();
-}
-
-// Format log message with metadata
-function formatLogMessage(level, message, metadata = {}) {
-  const timestamp = getTimestamp();
-  const baseMessage = `[${timestamp}] [${level}] ${message}`;
-  
-  if (Object.keys(metadata).length > 0) {
-    return `${baseMessage} | ${JSON.stringify(metadata)}`;
-  }
-  
-  return baseMessage;
-}
-
-// Enhanced error logger with comprehensive logging capabilities
-export const errorLogger = {
-  // Debug level logging (only in development)
-  debug: (message, metadata = {}) => {
-    if (currentLogLevel <= LOG_LEVELS.DEBUG) {
-      console.log(formatLogMessage('DEBUG', message, metadata));
-    }
-  },
-
-  // Info level logging
-  info: (message, metadata = {}) => {
-    if (currentLogLevel <= LOG_LEVELS.INFO) {
-      console.log(formatLogMessage('INFO', message, metadata));
-    }
-  },
-
-  // Warning level logging
-  warn: (message, metadata = {}) => {
-    if (currentLogLevel <= LOG_LEVELS.WARN) {
-      console.warn(formatLogMessage('WARN', message, metadata));
-    }
-  },
-
-  // Error level logging
-  error: (message, error = null, metadata = {}) => {
-    if (currentLogLevel <= LOG_LEVELS.ERROR) {
-      const errorMetadata = {
-        ...metadata,
-        ...(error && {
-          error_message: error.message,
-          error_stack: error.stack,
-          error_name: error.name
-        })
-      };
-      console.error(formatLogMessage('ERROR', message, errorMetadata));
-    }
-  },
-
-  // Success level logging
-  success: (message, metadata = {}) => {
-    if (currentLogLevel <= LOG_LEVELS.SUCCESS) {
-      console.log(formatLogMessage('SUCCESS', message, metadata));
-    }
-  },
-
-  // Connection check logging
-  connectionCheck: (service, isConnected, details = {}) => {
-    const status = isConnected ? '✅ CONNECTED' : '❌ DISCONNECTED';
-    const message = `${service}: ${status}`;
+  // ✅ NEW: Initialize logger with config
+  initialize(config = {}) {
+    this.level = config.logLevel || process.env.LOG_LEVEL || 'info';
+    this.initialized = true;
     
-    if (isConnected) {
-      errorLogger.success(message, details);
-    } else {
-      errorLogger.error(message, null, details);
-    }
-  },
-
-  // Get current log level for debugging
-  getCurrentLevel: () => {
-    return Object.keys(LOG_LEVELS)[currentLogLevel];
-  },
-
-  // Check if logger is initialized
-  isInitialized: () => {
-    return isInitialized;
+    // Log initialization success
+    this.info('Logger initialized successfully', {
+      level: this.level,
+      timestamp: new Date().toISOString(),
+      component: 'Logger'
+    });
   }
-};
 
-// Default export for backward compatibility
-export default errorLogger;
+  // ✅ NEW: Check if logger is initialized
+  isInitialized() {
+    return this.initialized;
+  }
+
+  // ✅ NEW: Get current log level
+  getCurrentLevel() {
+    return this.level;
+  }
+
+  shouldLog(level) {
+    if (!this.initialized) {
+      // Allow error and warn logs even if not initialized
+      return level === 'error' || level === 'warn';
+    }
+    return this.levels[level] <= this.levels[this.level];
+  }
+
+  formatMessage(level, message, context = {}) {
+    const timestamp = new Date().toISOString();
+    const levelUpper = level.toUpperCase();
+    
+    // Base log entry
+    const logEntry = {
+      timestamp,
+      level: levelUpper,
+      message,
+      ...context
+    };
+
+    // Format for console output
+    let consoleMessage = `[${timestamp}] [${levelUpper}] ${message}`;
+    
+    if (Object.keys(context).length > 0) {
+      consoleMessage += ` | ${JSON.stringify(context)}`;
+    }
+
+    return { logEntry, consoleMessage };
+  }
+
+  error(message, error = null, context = {}) {
+    if (!this.shouldLog('error')) return;
+
+    const errorContext = {
+      ...context,
+      component: context.component || 'Unknown'
+    };
+
+    if (error) {
+      errorContext.error_message = error.message;
+      errorContext.error_stack = error.stack;
+      errorContext.error_name = error.name;
+    }
+
+    const { consoleMessage } = this.formatMessage('error', message, errorContext);
+    console.error(consoleMessage);
+  }
+
+  warn(message, context = {}) {
+    if (!this.shouldLog('warn')) return;
+
+    const { consoleMessage } = this.formatMessage('warn', message, {
+      ...context,
+      component: context.component || 'Unknown'
+    });
+    console.warn(consoleMessage);
+  }
+
+  info(message, context = {}) {
+    if (!this.shouldLog('info')) return;
+
+    const { consoleMessage } = this.formatMessage('info', message, {
+      ...context,
+      component: context.component || 'Unknown'
+    });
+    console.log(consoleMessage);
+  }
+
+  success(message, context = {}) {
+    if (!this.shouldLog('success')) return;
+
+    const { consoleMessage } = this.formatMessage('success', message, {
+      ...context,
+      component: context.component || 'Unknown'
+    });
+    console.log(`✅ ${consoleMessage}`);
+  }
+
+  debug(message, context = {}) {
+    if (!this.shouldLog('debug')) return;
+
+    const { consoleMessage } = this.formatMessage('debug', message, {
+      ...context,
+      component: context.component || 'Unknown'
+    });
+    console.log(`🔍 ${consoleMessage}`);
+  }
+
+  // Specialized logging methods
+  connectionCheck(service, success, details = {}) {
+    const status = success ? '✅' : '❌';
+    const level = success ? 'success' : 'warn';
+    
+    this[level](`${status} ${service} Connection Check`, {
+      service,
+      success,
+      ...details,
+      component: 'ConnectionCheck'
+    });
+  }
+
+  apiCall(endpoint, method, status, details = {}) {
+    const level = status >= 200 && status < 300 ? 'info' : 'warn';
+    
+    this[level](`API Call: ${method} ${endpoint}`, {
+      endpoint,
+      method,
+      status,
+      ...details,
+      component: 'APICall'
+    });
+  }
+
+  agentOperation(operation, success, details = {}) {
+    const level = success ? 'success' : 'error';
+    const status = success ? '✅' : '❌';
+    
+    this[level](`${status} Agent Operation: ${operation}`, {
+      operation,
+      success,
+      ...details,
+      component: 'AgentOperation'
+    });
+  }
+
+  supabaseOperation(operation, success, details = {}) {
+    const level = success ? 'info' : 'error';
+    const status = success ? '✅' : '❌';
+    
+    this[level](`${status} Supabase Operation: ${operation}`, {
+      operation,
+      success,
+      ...details,
+      component: 'SupabaseOperation'
+    });
+  }
+
+  fileOperation(operation, filename, success, details = {}) {
+    const level = success ? 'info' : 'error';
+    const status = success ? '✅' : '❌';
+    
+    this[level](`${status} File Operation: ${operation} - ${filename}`, {
+      operation,
+      filename,
+      success,
+      ...details,
+      component: 'FileOperation'
+    });
+  }
+
+  userAction(action, userEmail, details = {}) {
+    this.info(`User Action: ${action}`, {
+      action,
+      user: userEmail,
+      ...details,
+      component: 'UserAction'
+    });
+  }
+}
+
+// Create singleton instance
+const logger = new Logger();
+
+// ✅ NEW: Export initialization function
+export function initializeLogger(config = {}) {
+  logger.initialize(config);
+  return logger;
+}
+
+// Export the logger instance
+export const errorLogger = logger;
+
+// Legacy exports for backward compatibility
+export function logUserAction(action, userEmail, details = {}) {
+  logger.userAction(action, userEmail, details);
+}
+
+export function logApiCall(endpoint, method, userEmail, status, details = {}) {
+  logger.apiCall(endpoint, method, status, { user: userEmail, ...details });
+}
+
+export function logAgentOperation(operation, userEmail, details = {}) {
+  logger.agentOperation(operation, true, { user: userEmail, ...details });
+}
+
+export function logSupabaseOperation(operation, userEmail, status, details = {}) {
+  logger.supabaseOperation(operation, status === 'success', { user: userEmail, ...details });
+}
+
+export function logFileOperation(operation, filename, userEmail, details = {}) {
+  logger.fileOperation(operation, filename, true, { user: userEmail, ...details });
+}
+
+// Default export
+export default logger;
