@@ -21,6 +21,7 @@ from routes.embed import router as embed_router
 from routes.chat import router as chat_router
 from routes.process_document import router as process_document_router
 from routes.medical_consultation import router as medical_consultation_router
+from routes.voice_generation import router as voice_generation_router
 
 # Setup logging
 logger = setup_logging()
@@ -142,6 +143,7 @@ app.include_router(embed_router, prefix="/api", tags=["Embedding"])
 app.include_router(chat_router, prefix="/api", tags=["Chat"])
 app.include_router(process_document_router, prefix="/api", tags=["Document Processing"])
 app.include_router(medical_consultation_router, prefix="/api", tags=["Medical Consultation"])
+app.include_router(voice_generation_router, prefix="/api", tags=["Voice Generation"])
 
 # Root endpoint
 @app.get("/")
@@ -156,7 +158,9 @@ async def root():
             "embed": "/api/embed",
             "chat": "/api/chat", 
             "process_document": "/api/process-document",
-            "medical_consultation": "/api/medical-consultation"
+            "medical_consultation": "/api/medical-consultation",
+            "generate_voice": "/api/generate-voice",
+            "voices": "/api/voices"
         },
         "timestamp": datetime.now().isoformat()
     }
