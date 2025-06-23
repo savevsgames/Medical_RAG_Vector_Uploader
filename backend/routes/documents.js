@@ -360,28 +360,85 @@ export function createDocumentsRouter(supabaseClient) {
     }
   });
 
+  // ✅ FIXED: Job status endpoint - query Supabase directly instead of TxAgent
   router.get("/job-status/:jobId", verifyToken, async (req, res) => {
     try {
       const { jobId } = req.params;
+      const userId = req.userId;
 
-      const response = await fetch(
-        `${process.env.RUNPOD_EMBEDDING_URL}/embedding-jobs/${jobId}`,
-        {
-          headers: {
-            Authorization: req.headers.authorization,
-          },
+      errorLogger.info("Fetching job status from database", {
+        jobId,
+        userId,
+        component: "Documents"
+      });
+
+      // Query the embedding_jobs table directly from Supabase
+      const { data, error } = await supabaseClient
+        .from("embedding_jobs")
+        .select("id, status, chunk_count, error, created_at, updated_at, metadata")
+        .eq("id", jobId)
+        .eq("user_id", userId) // Ensure user can only access their own jobs
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // No rows returned - job not found or user doesn't have access
+          errorLogger.warn("Job not found or access denied", {
+            jobId,
+            userId,
+            error: error.message,
+            component: "Documents"
+          });
+          return res.status(404).json({ 
+            error: "Job not found or access denied",
+            job_id: jobId
+          });
         }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to get job status: ${response.status}`);
+        
+        errorLogger.error("Database error fetching job status", {
+          jobId,
+          userId,
+          error: error.message,
+          code: error.code,
+          component: "Documents"
+        });
+        throw error;
       }
 
-      const jobStatus = await response.json();
-      res.json(jobStatus);
+      errorLogger.success("Job status retrieved successfully", {
+        jobId,
+        userId,
+        status: data.status,
+        chunkCount: data.chunk_count,
+        component: "Documents"
+      });
+
+      // Return the job status
+      res.json({
+        job_id: data.id,
+        status: data.status,
+        chunk_count: data.chunk_count || 0,
+        error: data.error,
+        created_at: data.created_at,
+        updated_at: data.updated_at,
+        metadata: data.metadata || {}
+      });
+
     } catch (error) {
-      errorLogger.error("Job status check failed", { error: error.message });
-      res.status(500).json({ error: error.message });
+      const errorMessage = error?.message || "Failed to get job status";
+      
+      errorLogger.error("Job status check failed", {
+        jobId: req.params.jobId,
+        userId: req.userId,
+        error: errorMessage,
+        component: "Documents"
+      });
+      
+      res.status(500).json({ 
+        error: "Failed to get job status",
+        details: errorMessage,
+        job_id: req.params.jobId
+      });
     }
   });
 
