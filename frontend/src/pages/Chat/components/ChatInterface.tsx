@@ -64,8 +64,12 @@ export function ChatInterface({
     
     if (!txAgentStatus) return <XCircle className="w-4 h-4 text-red-500" />;
     
+    // ✅ UPDATED: Better status detection logic
     if (txAgentStatus.agent_active && txAgentStatus.container_status === 'running') {
       return <CheckCircle className="w-4 h-4 text-healing-teal" />;
+    } else if (txAgentStatus.container_status === 'running' || txAgentStatus.container_status === 'starting') {
+      // Container is responsive but agent not fully active yet
+      return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
     } else if (txAgentStatus.container_status === 'starting') {
       return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
     } else {

@@ -19,12 +19,52 @@ export function GuardianAgentDisplay({ txAgentStatus, connectionChecking }: Guar
     
     if (!txAgentStatus) return <XCircle className="w-4 h-4 text-red-500" />;
     
+    // ✅ UPDATED: Better status detection logic
     if (txAgentStatus.agent_active && txAgentStatus.container_status === 'running') {
       return <CheckCircle className="w-4 h-4 text-healing-teal" />;
+    } else if (txAgentStatus.container_status === 'running' || txAgentStatus.container_status === 'starting') {
+      // Container is responsive but agent not fully active yet
+      return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
     } else if (txAgentStatus.container_status === 'starting') {
       return <AlertCircle className="w-4 h-4 text-guardian-gold" />;
     } else {
       return <XCircle className="w-4 h-4 text-red-500" />;
+    }
+  };
+
+  const getStatusText = () => {
+    if (connectionChecking) return 'Checking...';
+    
+    if (!txAgentStatus) return 'Offline';
+    
+    // ✅ UPDATED: Better status text logic
+    if (txAgentStatus.agent_active && txAgentStatus.container_status === 'running') {
+      return 'Ready to Help';
+    } else if (txAgentStatus.container_status === 'running' || txAgentStatus.container_status === 'starting') {
+      // Container is responsive but agent not fully active yet
+      return 'Initializing...';
+    } else if (txAgentStatus.container_status === 'starting') {
+      return 'Starting...';
+    } else {
+      return 'Offline';
+    }
+  };
+
+  const getStatusColor = () => {
+    if (connectionChecking) return 'bg-soft-gray/10 text-soft-gray';
+    
+    if (!txAgentStatus) return 'bg-red-100 text-red-600';
+    
+    // ✅ UPDATED: Better status color logic
+    if (txAgentStatus.agent_active && txAgentStatus.container_status === 'running') {
+      return 'bg-healing-teal/10 text-healing-teal';
+    } else if (txAgentStatus.container_status === 'running' || txAgentStatus.container_status === 'starting') {
+      // Container is responsive but agent not fully active yet
+      return 'bg-guardian-gold/10 text-guardian-gold';
+    } else if (txAgentStatus.container_status === 'starting') {
+      return 'bg-guardian-gold/10 text-guardian-gold';
+    } else {
+      return 'bg-red-100 text-red-600';
     }
   };
 
@@ -43,13 +83,13 @@ export function GuardianAgentDisplay({ txAgentStatus, connectionChecking }: Guar
           <div className={`w-6 h-6 rounded-full border-2 border-cloud-ivory shadow-lg flex items-center justify-center ${
             txAgentStatus?.agent_active && txAgentStatus.container_status === 'running'
               ? 'bg-healing-teal animate-pulse-glow'
-              : txAgentStatus?.container_status === 'starting'
+              : (txAgentStatus?.container_status === 'running' || txAgentStatus?.container_status === 'starting')
               ? 'bg-guardian-gold animate-pulse'
               : 'bg-red-500'
           }`}>
             {txAgentStatus?.agent_active && txAgentStatus.container_status === 'running' ? (
               <CheckCircle className="w-3 h-3 text-cloud-ivory" />
-            ) : txAgentStatus?.container_status === 'starting' ? (
+            ) : (txAgentStatus?.container_status === 'running' || txAgentStatus?.container_status === 'starting') ? (
               <Loader2 className="w-3 h-3 text-cloud-ivory animate-spin" />
             ) : (
               <XCircle className="w-3 h-3 text-cloud-ivory" />
@@ -69,21 +109,10 @@ export function GuardianAgentDisplay({ txAgentStatus, connectionChecking }: Guar
         
         {/* Status Badge */}
         <div className="mt-4">
-          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-subheading font-medium ${
-            txAgentStatus?.agent_active && txAgentStatus.container_status === 'running'
-              ? 'bg-healing-teal/10 text-healing-teal'
-              : txAgentStatus?.container_status === 'starting'
-              ? 'bg-guardian-gold/10 text-guardian-gold'
-              : 'bg-red-100 text-red-600'
-          }`}>
+          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-subheading font-medium ${getStatusColor()}`}>
             {getConnectionStatusIcon()}
             <span className="ml-2">
-              {txAgentStatus?.agent_active && txAgentStatus.container_status === 'running'
-                ? 'Ready to Help'
-                : txAgentStatus?.container_status === 'starting'
-                ? 'Initializing...'
-                : 'Offline'
-              }
+              {getStatusText()}
             </span>
           </span>
         </div>
