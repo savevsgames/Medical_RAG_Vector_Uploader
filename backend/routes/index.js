@@ -3,6 +3,7 @@ import fetch from "node-fetch"; // ✅ Add this if using Node < 18
 import { healthRouter } from "./health.js";
 import { createDocumentsRouter } from "./documents.js";
 import { createChatRouter } from "./chat.js";
+import { createMedicalConsultationRouter } from "./medicalConsultation.js";
 import { mountAgentRoutes } from "../agent_utils/index.js";
 import { verifyToken } from "../middleware/auth.js";
 import { errorLogger } from "../agent_utils/shared/logger.js";
@@ -33,10 +34,12 @@ export function setupRoutes(app, supabaseClient) {
   // Create routers with Supabase client dependency injection
   const documentsRouter = createDocumentsRouter(supabaseClient);
   const chatRouter = createChatRouter(supabaseClient);
+  const medicalConsultationRouter = createMedicalConsultationRouter(supabaseClient);
 
   // FIXED: Clean route structure - no legacy routes
   // Mount protected routes - auth is now handled within each router
   app.use("/api", chatRouter); // /api/chat, /api/openai-chat
+  app.use("/api", medicalConsultationRouter); // /api/medical-consultation
   app.use("/", documentsRouter); // /upload (legacy for compatibility)
 
   // FIXED: Mount agent routes ONLY (no legacy routes)
@@ -74,6 +77,7 @@ export function setupRoutes(app, supabaseClient) {
       "POST /upload",
       "POST /api/chat",
       "POST /api/openai-chat",
+      "POST /api/medical-consultation", // NEW ROUTE
       "POST /api/embed",
       "POST /api/agent/start",
       "POST /api/agent/stop",

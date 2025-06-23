@@ -13,7 +13,8 @@ router.get('/', async (req, res) => {
     database: false,
     supabase_configured: !!config.supabase.url && !!config.supabase.serviceKey,
     openai_configured: !!config.openai.apiKey,
-    runpod_configured: !!config.runpod.url
+    runpod_configured: !!config.runpod.url,
+    txagent_configured: !!process.env.TXAGENT_CONTAINER_URL
   };
 
   // Test database connection
@@ -46,6 +47,21 @@ router.get('/', async (req, res) => {
     } catch (error) {
       services.runpod_health = 'unavailable';
       errorLogger.connectionCheck('RunPod Health', false, { error: error.message });
+    }
+  }
+
+  // Test TxAgent connection if configured (Phase 1 addition)
+  if (process.env.TXAGENT_CONTAINER_URL) {
+    try {
+      const txAgentHealthUrl = `${process.env.TXAGENT_CONTAINER_URL.replace(/\/+$/, '')}/health`;
+      const txAgentResponse = await axios.get(txAgentHealthUrl, { timeout: 5000 });
+      services.txagent = txAgentResponse.data?.status || 'connected';
+      services.txagent_details = txAgentResponse.data;
+      errorLogger.connectionCheck('TxAgent Health', true, txAgentResponse.data);
+    } catch (error) {
+      services.txagent = 'unavailable';
+      services.txagent_error = error.message;
+      errorLogger.connectionCheck('TxAgent Health', false, { error: error.message });
     }
   }
 
