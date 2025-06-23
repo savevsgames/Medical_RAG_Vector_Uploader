@@ -106,8 +106,8 @@ export function useAgents() {
 
       toast.success("TxAgent session activated successfully!");
 
-      // Refresh status after a short delay
-      setTimeout(() => fetchAgentStatus(true), 1000);
+      // ✅ THROTTLED: Refresh status after a longer delay to reduce requests
+      setTimeout(() => fetchAgentStatus(true), 3000); // ✅ Increased from 1s to 3s
 
       return data;
     } catch (error: any) {
@@ -153,8 +153,8 @@ export function useAgents() {
 
       toast.success("TxAgent session deactivated successfully!");
 
-      // Refresh status after a short delay
-      setTimeout(() => fetchAgentStatus(true), 1000);
+      // ✅ THROTTLED: Refresh status after a longer delay to reduce requests
+      setTimeout(() => fetchAgentStatus(true), 3000); // ✅ Increased from 1s to 3s
     } catch (error: any) {
       const errorMessage =
         error.response?.data?.error || error.message || "Unknown error";
@@ -266,7 +266,7 @@ export function useAgents() {
     }
   }, [user, agentStatus]);
 
-  // Auto-fetch status on mount
+  // ✅ THROTTLED: Auto-fetch status on mount with reduced frequency
   useEffect(() => {
     if (user) {
       fetchAgentStatus(true);

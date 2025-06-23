@@ -1,57 +1,68 @@
-import jwt from "jsonwebtoken";
-import { errorLogger } from "../agent_utils/shared/logger.js";
+import jwt from 'jsonwebtoken';
+import { config } from '../config/environment.js';
+import { errorLogger } from '../agent_utils/shared/logger.js';
 
-export const verifyToken = async (req, res, next) => {
+export const verifyToken = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      errorLogger.warn("Missing or invalid authorization header", {
-        authHeader: authHeader ? "present" : "missing",
-        component: "verifyToken",
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      errorLogger.warn('Missing or invalid Authorization header', {
+        hasAuthHeader: !!authHeader,
+        authHeaderFormat: authHeader ? authHeader.substring(0, 10) + '...' : 'none',
+        component: 'AuthMiddleware'
       });
-      return res.status(401).json({ error: "Authorization token required" });
+      return res.status(401).json({ error: 'Authorization header required' });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+    const token = authHeader.split(' ')[1];
+    
+    // ✅ SECURITY FIX: Reduce JWT logging - only log presence and basic info
+    errorLogger.debug('Token validation attempt', {
+      hasToken: !!token,
+      tokenLength: token ? token.length : 0,
+      tokenPrefix: token ? token.substring(0, 10) + '...' : 'none', // ✅ Only log first 10 chars
+      component: 'AuthMiddleware'
+    });
 
-    // Verify the JWT token
-    const decoded = jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
+    const decoded = jwt.verify(token, config.supabase.jwtSecret);
+    
+    // ✅ SECURITY FIX: Reduce sensitive data logging
+    errorLogger.debug('Token validation successful', {
+      userId: decoded.sub,
+      userRole: decoded.role,
+      hasEmail: !!decoded.email,
+      tokenExp: decoded.exp,
+      component: 'AuthMiddleware'
+      // ✅ REMOVED: Full decoded payload logging
+    });
 
-    // Temporary verifyToken middleware check:
-    console.log("JWT Payload:", decoded);
-    console.log("Available fields:", Object.keys(decoded));
-
-    // ✅ FIX: Extract user info properly from Supabase JWT
-    req.userId = decoded.sub; // Supabase uses 'sub' for user ID
-    req.userEmail = decoded.email; // Extract email
+    req.userId = decoded.sub;
+    req.userEmail = decoded.email;
+    req.userRole = decoded.role;
     req.user = {
       id: decoded.sub,
       email: decoded.email,
-      role: decoded.role || "authenticated",
+      role: decoded.role
     };
-
-    // ✅ FIX: Update logging middleware to use req.user.email
-    errorLogger.debug("Token verified successfully", {
-      userId: req.userId,
-      userEmail: req.userEmail,
-      role: decoded.role,
-      component: "verifyToken",
-    });
 
     next();
   } catch (error) {
-    errorLogger.error("Token verification failed", error, {
-      error_message: error.message,
-      component: "verifyToken",
+    // ✅ SECURITY FIX: Reduce error logging verbosity
+    errorLogger.error('Token validation failed', {
+      errorType: error.name,
+      errorMessage: error.message,
+      hasAuthHeader: !!req.headers.authorization,
+      component: 'AuthMiddleware'
+      // ✅ REMOVED: Full error stack and token details
     });
 
-    if (error.name === "TokenExpiredError") {
-      return res.status(401).json({ error: "Token expired" });
-    } else if (error.name === "JsonWebTokenError") {
-      return res.status(401).json({ error: "Invalid token" });
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired' });
+    } else if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ error: 'Invalid token' });
+    } else {
+      return res.status(401).json({ error: 'Token verification failed' });
     }
-
-    return res.status(401).json({ error: "Authentication failed" });
   }
 };

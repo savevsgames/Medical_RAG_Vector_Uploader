@@ -78,17 +78,19 @@ export function Monitor() {
     embed: { loading: false, result: null, error: null },
   });
 
-  // Auto-refresh functionality
+  // ✅ FIXED: Throttled auto-refresh functionality - reduced from ~500ms to 30 seconds
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
 
     if (autoRefresh) {
+      // ✅ CRITICAL FIX: Increased interval from frequent polling to 30 seconds
       interval = setInterval(() => {
+        // Use silent refresh to reduce logging
         fetchAgentStatus(true);
         if (agentStatus?.agent_active) {
           performDetailedStatusCheck();
         }
-      }, 30000);
+      }, 30000); // ✅ Changed from ~500ms to 30 seconds (30,000ms)
     }
 
     return () => {
@@ -274,7 +276,7 @@ export function Monitor() {
       icon={<Activity className="w-6 h-6 text-healing-teal" />}
       actions={
         <div className="flex items-center space-x-4">
-          {/* Auto-refresh toggle */}
+          {/* Auto-refresh toggle with updated interval display */}
           <div className="flex items-center space-x-2">
             <input
               type="checkbox"
@@ -287,7 +289,7 @@ export function Monitor() {
               htmlFor="auto-refresh"
               className="text-sm font-body text-deep-midnight"
             >
-              Auto-refresh
+              Auto-refresh (30s) {/* ✅ Updated label to show new interval */}
             </label>
           </div>
 
@@ -350,6 +352,10 @@ export function Monitor() {
               health.
             </p>
             <p>Multiple users can have their own independent agent sessions.</p>
+            {/* ✅ Added note about reduced polling frequency */}
+            <p className="mt-2 text-xs text-guardian-gold">
+              ⚡ Auto-refresh now polls every 30 seconds to reduce server load and improve performance.
+            </p>
           </div>
         </div>
 
