@@ -71,7 +71,8 @@ export function createAgentRouter(supabaseClient) {
 
         if (agent.status === "active" || agent.status === "initializing") {
           try {
-            const healthCheck = await this.checkContainerHealth(agent);
+            // ✅ FIXED: Pass JWT token to checkContainerHealth
+            const healthCheck = await this.checkContainerHealth(agent, req.headers.authorization);
             containerStatus = healthCheck.status;
             containerHealth = healthCheck.data;
           } catch (healthError) {
@@ -127,7 +128,8 @@ export function createAgentRouter(supabaseClient) {
       }
     }
 
-    async checkContainerHealth(agent) {
+    // ✅ FIXED: Updated signature to accept authToken parameter
+    async checkContainerHealth(agent, authToken) {
       // Validate session data
       if (!agent.session_data?.runpod_endpoint) {
         throw new Error("No RunPod endpoint configured in session data");
@@ -136,22 +138,28 @@ export function createAgentRouter(supabaseClient) {
       const healthUrl =
         `${agent.session_data.runpod_endpoint}`.replace(/\/+$/, "") + "/health";
 
-      errorLogger.debug("Checking container health", {
+      errorLogger.debug("Checking container health with JWT", {
         agentId: agent.id,
         healthUrl,
+        hasAuthToken: !!authToken,
         component: "AgentStatusOperations",
       });
 
       try {
+        // ✅ FIXED: Include Authorization header with JWT token
         const { status, data } = await axios.get(healthUrl, {
           timeout: 8000,
-          headers: { Accept: "application/json" },
+          headers: { 
+            Accept: "application/json",
+            Authorization: authToken // ✅ Pass JWT token to container
+          },
         });
 
-        errorLogger.debug("Health-ping response", {
+        errorLogger.debug("Health-ping response with JWT", {
           healthUrl,
           status,
           data,
+          hasAuthToken: !!authToken,
           component: "AgentStatusOperations",
         });
 
@@ -169,6 +177,7 @@ export function createAgentRouter(supabaseClient) {
           error_code: error.code,
           error_status: error.response?.status,
           error_data: error.response?.data,
+          hasAuthToken: !!authToken,
           component: "AgentStatusOperations",
         });
 
@@ -392,7 +401,8 @@ export function createAgentRouter(supabaseClient) {
 
         // Test health endpoint
         try {
-          const healthCheck = await this.checkContainerHealth(agent);
+          // ✅ FIXED: Pass JWT token to checkContainerHealth
+          const healthCheck = await this.checkContainerHealth(agent, req.headers.authorization);
           healthResults.container_reachable = healthCheck.status === "running";
           healthResults.test_results.health.status =
             healthCheck.status === "running" ? 200 : 500;
@@ -499,10 +509,10 @@ export function createAgentRouter(supabaseClient) {
       }
     }
 
-    async checkContainerHealth(agent) {
+    async checkContainerHealth(agent, authToken) {
       // Reuse the same logic from AgentStatusOperations
       const statusOps = new AgentStatusOperations(this.agentService);
-      return statusOps.checkContainerHealth(agent);
+      return statusOps.checkContainerHealth(agent, authToken);
     }
   }
 
@@ -536,11 +546,15 @@ export function createAgentRouter(supabaseClient) {
         return res.status(503).json({ error: "TxAgent URL not configured" });
       }
 
+      // ✅ FIXED: Include Authorization header with JWT token
       const response = await axios.get(
         `${process.env.RUNPOD_EMBEDDING_URL}/health`,
         {
           timeout: 5000,
-          headers: { Accept: "application/json" },
+          headers: { 
+            Accept: "application/json",
+            Authorization: req.headers.authorization // ✅ Pass JWT token to container
+          },
         }
       );
 
