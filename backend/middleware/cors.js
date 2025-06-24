@@ -4,7 +4,10 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'https://medical-rag-vector-uploader.onrender.com',
-  'https://medical-rag-vector-uploader.netlify.app'
+  'https://medical-rag-vector-uploader.netlify.app',
+  'https://symptomsavior.com',
+  'https://www.symptomsavior.com',
+  'https://symptomsavior.netlify.app'
 ];
 
 export const corsMiddleware = (req, res, next) => {
