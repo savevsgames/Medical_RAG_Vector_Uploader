@@ -312,15 +312,16 @@ export function Documents() {
     toast.error(error);
   };
 
-  // Filter and search documents
+  // ✅ CRITICAL FIX: Filter documents with safe string handling
   useEffect(() => {
     let filtered = documents;
 
     if (searchTerm) {
       filtered = filtered.filter(
         (doc) =>
-          doc.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          doc.content.toLowerCase().includes(searchTerm.toLowerCase())
+          // ✅ FIXED: Add null safety checks before calling toLowerCase()
+          (doc.filename ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (doc.content ?? '').toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
