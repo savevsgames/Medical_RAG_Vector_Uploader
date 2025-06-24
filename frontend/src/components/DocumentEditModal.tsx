@@ -15,6 +15,9 @@ interface Document {
     mime_type?: string;
     embedding_source?: string;
     processing_time_ms?: number;
+    title?: string;
+    chunk_index?: number;
+    total_chunks?: number;
     [key: string]: any;
   };
   created_at: string;
@@ -27,6 +30,23 @@ interface DocumentEditModalProps {
   onSave: (updatedDocument: Document) => void;
 }
 
+// Helper function to create a user-friendly display name
+const getDocumentDisplayName = (document: Document): string => {
+  const { metadata, filename } = document;
+  
+  // Extract title from metadata, fallback to filename
+  const baseTitle = metadata.title || filename || 'Untitled Document';
+  
+  // If we have chunk information, add it to the display name
+  if (metadata.chunk_index !== undefined && metadata.total_chunks !== undefined) {
+    // Convert 0-based index to 1-based for user display
+    const chunkNumber = metadata.chunk_index + 1;
+    return `${baseTitle} (Chunk ${chunkNumber}/${metadata.total_chunks})`;
+  }
+  
+  return baseTitle;
+};
+
 export function DocumentEditModal({ document, isOpen, onClose, onSave }: DocumentEditModalProps) {
   const [filename, setFilename] = useState('');
   const [metadata, setMetadata] = useState<Record<string, any>>({});
@@ -38,7 +58,7 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
       setFilename(document.filename);
       
       // Separate system metadata from custom metadata
-      const systemKeys = ['char_count', 'page_count', 'file_size', 'mime_type', 'embedding_source', 'processing_time_ms'];
+      const systemKeys = ['char_count', 'page_count', 'file_size', 'mime_type', 'embedding_source', 'processing_time_ms', 'title', 'chunk_index', 'total_chunks'];
       const customMeta = Object.entries(document.metadata)
         .filter(([key]) => !systemKeys.includes(key))
         .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
@@ -66,7 +86,7 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
       }
 
       // Merge system metadata with custom metadata
-      const systemKeys = ['char_count', 'page_count', 'file_size', 'mime_type', 'embedding_source', 'processing_time_ms'];
+      const systemKeys = ['char_count', 'page_count', 'file_size', 'mime_type', 'embedding_source', 'processing_time_ms', 'title', 'chunk_index', 'total_chunks'];
       const systemMetadata = Object.entries(metadata)
         .filter(([key]) => systemKeys.includes(key))
         .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
@@ -101,6 +121,7 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
         documentId: document.id,
         oldFilename: document.filename,
         newFilename: filename,
+        displayName: getDocumentDisplayName(updatedDocument),
         component: 'DocumentEditModal'
       });
 
@@ -122,6 +143,9 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
 
   if (!isOpen || !document) return null;
 
+  // Get the display name for this document
+  const displayName = getDocumentDisplayName(document);
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
@@ -134,6 +158,7 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
             <div>
               <h2 className="text-xl font-semibold text-gray-900">Edit Document</h2>
               <p className="text-sm text-gray-500">Update document information and metadata</p>
+              <p className="text-xs text-blue-600 mt-1">Current: {displayName}</p>
             </div>
           </div>
           <button
@@ -170,7 +195,7 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <span className="text-gray-500">Characters:</span>
-                  <span className="ml-2 font-medium">{metadata.char_count?.toLocaleString()}</span>
+                  <span className="ml-2 font-medium">{(metadata.char_count || 0).toLocaleString()}</span>
                 </div>
                 {metadata.page_count && (
                   <div>
@@ -205,6 +230,26 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
                   </div>
                 )}
               </div>
+              
+              {/* Chunk Information */}
+              {metadata.chunk_index !== undefined && metadata.total_chunks !== undefined && (
+                <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-blue-800 font-medium">Document Chunk</span>
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">
+                        {metadata.chunk_index + 1}/{metadata.total_chunks}
+                      </span>
+                    </div>
+                    {metadata.title && (
+                      <div className="mt-1">
+                        <span className="text-blue-600">Original File:</span>
+                        <span className="ml-2 font-medium text-blue-800">{metadata.title}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -232,7 +277,8 @@ export function DocumentEditModal({ document, isOpen, onClose, onSave }: Documen
             <div className="text-sm text-blue-800 space-y-1">
               <div>ID: <span className="font-mono">{document.id}</span></div>
               <div>Created: {new Date(document.created_at).toLocaleString()}</div>
-              <div>Content Length: {document.content.length.toLocaleString()} characters</div>
+              <div>Content Length: {(document.content || '').length.toLocaleString()} characters</div>
+              <div>Display Name: <span className="font-medium">{displayName}</span></div>
             </div>
           </div>
         </div>

@@ -13,6 +13,10 @@ interface Document {
     mime_type?: string;
     embedding_source?: string;
     processing_time_ms?: number;
+    title?: string;
+    chunk_index?: number;
+    total_chunks?: number;
+    [key: string]: any;
   };
   created_at: string;
 }
@@ -22,6 +26,23 @@ interface DocumentViewModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+// Helper function to create a user-friendly display name
+const getDocumentDisplayName = (document: Document): string => {
+  const { metadata, filename } = document;
+  
+  // Extract title from metadata, fallback to filename
+  const baseTitle = metadata.title || filename || 'Untitled Document';
+  
+  // If we have chunk information, add it to the display name
+  if (metadata.chunk_index !== undefined && metadata.total_chunks !== undefined) {
+    // Convert 0-based index to 1-based for user display
+    const chunkNumber = metadata.chunk_index + 1;
+    return `${baseTitle} (Chunk ${chunkNumber}/${metadata.total_chunks})`;
+  }
+  
+  return baseTitle;
+};
 
 export function DocumentViewModal({ document, isOpen, onClose }: DocumentViewModalProps) {
   if (!isOpen || !document) return null;
@@ -37,7 +58,7 @@ export function DocumentViewModal({ document, isOpen, onClose }: DocumentViewMod
   };
 
   const formatFileSize = (bytes?: number) => {
-    if (!bytes) return 'Unknown size';
+    if (!bytes || bytes === 0) return 'Unknown size';
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
@@ -57,6 +78,9 @@ export function DocumentViewModal({ document, isOpen, onClose }: DocumentViewMod
     }
   };
 
+  // Get the display name for this document
+  const displayName = getDocumentDisplayName(document);
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
@@ -67,8 +91,8 @@ export function DocumentViewModal({ document, isOpen, onClose }: DocumentViewMod
               <FileText className="w-6 h-6 text-blue-600" />
             </div>
             <div className="flex-1 min-w-0">
-              <h2 className="text-xl font-semibold text-gray-900 truncate" title={document.filename}>
-                {document.filename}
+              <h2 className="text-xl font-semibold text-gray-900 truncate" title={displayName}>
+                {displayName}
               </h2>
               <div className="flex items-center space-x-4 mt-1">
                 <div className="flex items-center text-sm text-gray-500">
@@ -77,7 +101,7 @@ export function DocumentViewModal({ document, isOpen, onClose }: DocumentViewMod
                 </div>
                 <div className="flex items-center text-sm text-gray-500">
                   <FileText className="w-4 h-4 mr-1" />
-                  {document.metadata.char_count.toLocaleString()} characters
+                  {(document.metadata.char_count || 0).toLocaleString()} characters
                 </div>
                 {getEmbeddingBadge(document.metadata.embedding_source)}
               </div>
@@ -118,6 +142,23 @@ export function DocumentViewModal({ document, isOpen, onClose }: DocumentViewMod
               )}
             </div>
             
+            {/* Chunk Information */}
+            {document.metadata.chunk_index !== undefined && document.metadata.total_chunks !== undefined && (
+              <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-blue-800 font-medium">Document Chunk Information</span>
+                    <p className="text-blue-600 text-sm">
+                      This is chunk {document.metadata.chunk_index + 1} of {document.metadata.total_chunks} from the original document
+                    </p>
+                  </div>
+                  <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                    {document.metadata.chunk_index + 1}/{document.metadata.total_chunks}
+                  </span>
+                </div>
+              </div>
+            )}
+            
             <div className="mt-3 flex items-center justify-between">
               <div className="text-xs text-gray-500 font-mono">
                 Document ID: {document.id}
@@ -156,8 +197,8 @@ export function DocumentViewModal({ document, isOpen, onClose }: DocumentViewMod
         {/* Footer */}
         <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
           <div className="text-sm text-gray-500">
-            {document.metadata.char_count.toLocaleString()} characters • {' '}
-            {Math.ceil(document.content.split(' ').length)} words
+            {(document.metadata.char_count || 0).toLocaleString()} characters • {' '}
+            {Math.ceil((document.content || '').split(' ').length)} words
           </div>
           <button
             onClick={onClose}

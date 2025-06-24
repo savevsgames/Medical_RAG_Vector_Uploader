@@ -14,6 +14,10 @@ interface Document {
     mime_type?: string;
     embedding_source?: string;
     processing_time_ms?: number;
+    title?: string;
+    chunk_index?: number;
+    total_chunks?: number;
+    [key: string]: any;
   };
   created_at: string;
 }
@@ -25,12 +29,30 @@ interface DocumentCardProps {
   onView: (document: Document) => void;
 }
 
+// Helper function to create a user-friendly display name
+const getDocumentDisplayName = (document: Document): string => {
+  const { metadata, filename } = document;
+  
+  // Extract title from metadata, fallback to filename
+  const baseTitle = metadata.title || filename || 'Untitled Document';
+  
+  // If we have chunk information, add it to the display name
+  if (metadata.chunk_index !== undefined && metadata.total_chunks !== undefined) {
+    // Convert 0-based index to 1-based for user display
+    const chunkNumber = metadata.chunk_index + 1;
+    return `${baseTitle} (Chunk ${chunkNumber}/${metadata.total_chunks})`;
+  }
+  
+  return baseTitle;
+};
+
 export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete "${document.filename}"? This action cannot be undone.`)) {
+    const displayName = getDocumentDisplayName(document);
+    if (!confirm(`Are you sure you want to delete "${displayName}"? This action cannot be undone.`)) {
       return;
     }
 
@@ -40,6 +62,7 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
       logUserAction('Document Deleted', null, {
         documentId: document.id,
         filename: document.filename,
+        displayName: displayName,
         component: 'DocumentCard'
       });
       toast.success('Document deleted successfully');
@@ -63,7 +86,7 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
   };
 
   const formatFileSize = (bytes?: number) => {
-    if (!bytes) return 'Unknown size';
+    if (!bytes || bytes === 0) return 'Unknown size';
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(1024));
     return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
@@ -90,6 +113,9 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
     }
   };
 
+  // Get the display name for this document
+  const displayName = getDocumentDisplayName(document);
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors p-6 relative">
       {/* Header */}
@@ -97,8 +123,8 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
         <div className="flex items-start space-x-3 flex-1 min-w-0">
           <div className="text-2xl">{getFileIcon(document.metadata.mime_type)}</div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-semibold text-gray-900 truncate" title={document.filename}>
-              {document.filename}
+            <h3 className="text-lg font-semibold text-gray-900 truncate" title={displayName}>
+              {displayName}
             </h3>
             <div className="flex items-center space-x-4 mt-1">
               <div className="flex items-center text-sm text-gray-500">
@@ -107,7 +133,7 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
               </div>
               <div className="flex items-center text-sm text-gray-500">
                 <FileText className="w-4 h-4 mr-1" />
-                {document.metadata.char_count.toLocaleString()} chars
+                {(document.metadata.char_count || 0).toLocaleString()} chars
               </div>
             </div>
           </div>
@@ -180,6 +206,12 @@ export function DocumentCard({ document, onDelete, onEdit, onView }: DocumentCar
             <span className="text-gray-600">
               {formatFileSize(document.metadata.file_size)}
             </span>
+            {/* Show chunk information if available */}
+            {document.metadata.chunk_index !== undefined && document.metadata.total_chunks !== undefined && (
+              <span className="text-blue-600 text-xs bg-blue-50 px-2 py-1 rounded">
+                Chunk {document.metadata.chunk_index + 1}/{document.metadata.total_chunks}
+              </span>
+            )}
           </div>
           {getEmbeddingBadge(document.metadata.embedding_source)}
         </div>
