@@ -141,7 +141,9 @@ Guidelines:
         query, 
         context, 
         session_id, 
-        preferred_agent = 'txagent' // ✅ NEW: Default to TxAgent
+        preferred_agent = 'txagent', // ✅ NEW: Default to TxAgent
+        include_voice = false,       // ✅ NEW: Voice generation flag
+        include_video = false        // ✅ NEW: Video generation flag (future)
       } = req.body;
 
       if (!query || typeof query !== 'string') {
@@ -158,6 +160,8 @@ Guidelines:
         hasContext: !!context,
         sessionId: session_id,
         preferredAgent: preferred_agent, // ✅ NEW: Log preferred agent
+        includeVoice: include_voice,
+        includeVideo: include_video,
         component: 'MedicalConsultation'
       });
 
@@ -275,7 +279,7 @@ Guidelines:
           component: 'MedicalConsultation'
         });
 
-        // Get active agent for TxAgent communication
+        // Get active agent from database
         const agent = await agentService.getActiveAgent(userId);
         
         if (!agent || !agent.session_data?.runpod_endpoint) {
@@ -295,10 +299,49 @@ Guidelines:
           });
         }
 
-        // Call TxAgent chat endpoint
-        const txAgentUrl = `${agent.session_data.runpod_endpoint}/chat`;
+        // ✅ ENHANCED: Detailed logging for TxAgent URL
+        const txAgentUrl = `${agent.session_data.runpod_endpoint.replace(/\/+$/, '')}/chat`;
+        
+        errorLogger.info('Preparing TxAgent chat request', {
+          userId,
+          agentId: agent.id,
+          agentStatus: agent.status,
+          txAgentUrl,
+          queryLength: query.length,
+          hasContext: !!context,
+          hasUserProfile: !!(context?.user_profile),
+          hasHistory: !!(context?.conversation_history),
+          historyLength: context?.conversation_history?.length || 0,
+          component: 'MedicalConsultation'
+        });
         
         try {
+          // ✅ ENHANCED: Detailed logging before fetch
+          errorLogger.debug('Sending request to TxAgent container', {
+            userId,
+            agentId: agent.id,
+            txAgentUrl,
+            requestPayload: {
+              query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
+              hasHistory: !!(context?.conversation_history),
+              historyLength: context?.conversation_history?.length || 0,
+              hasUserProfile: !!(context?.user_profile),
+              top_k: 5,
+              temperature: 0.7,
+              stream: false
+            },
+            component: 'MedicalConsultation'
+          });
+
+          // ✅ ENHANCED: Increased timeout from process.env.TXAGENT_TIMEOUT
+          const timeoutMs = parseInt(process.env.TXAGENT_TIMEOUT) || 120000; // Default 2 minutes
+          
+          errorLogger.debug('Using TxAgent timeout setting', {
+            timeoutMs,
+            envTimeout: process.env.TXAGENT_TIMEOUT,
+            component: 'MedicalConsultation'
+          });
+
           const txAgentResponse = await fetch(txAgentUrl, {
             method: 'POST',
             headers: {
@@ -310,17 +353,64 @@ Guidelines:
               history: context?.conversation_history || [],
               top_k: 5,
               temperature: 0.7,
-              stream: false
+              stream: false,
+              context: context // ✅ NEW: Pass full context including user_profile
             }),
-            signal: AbortSignal.timeout(parseInt(process.env.TXAGENT_TIMEOUT) || 30000)
+            signal: AbortSignal.timeout(timeoutMs)
+          });
+
+          // ✅ ENHANCED: Detailed logging after fetch
+          errorLogger.debug('Received response from TxAgent container', {
+            userId,
+            agentId: agent.id,
+            txAgentUrl,
+            status: txAgentResponse.status,
+            statusText: txAgentResponse.statusText,
+            headers: Object.fromEntries(txAgentResponse.headers.entries()),
+            ok: txAgentResponse.ok,
+            component: 'MedicalConsultation'
           });
 
           if (!txAgentResponse.ok) {
             const errorText = await txAgentResponse.text();
-            throw new Error(`TxAgent responded with status ${txAgentResponse.status}: ${errorText}`);
+            
+            // ✅ ENHANCED: Detailed error logging
+            errorLogger.error('TxAgent responded with error status', {
+              userId,
+              agentId: agent.id,
+              txAgentUrl,
+              status: txAgentResponse.status,
+              statusText: txAgentResponse.statusText,
+              errorText: errorText.substring(0, 500) + (errorText.length > 500 ? '...' : ''),
+              errorTextLength: errorText.length,
+              component: 'MedicalConsultation'
+            });
+            
+            throw new Error(`TxAgent responded with status ${txAgentResponse.status}: ${errorText.substring(0, 200)}`);
           }
 
+          // ✅ ENHANCED: Detailed logging for response parsing
+          errorLogger.debug('Parsing TxAgent JSON response', {
+            userId,
+            agentId: agent.id,
+            txAgentUrl,
+            contentType: txAgentResponse.headers.get('content-type'),
+            component: 'MedicalConsultation'
+          });
+
           const txAgentData = await txAgentResponse.json();
+
+          // ✅ ENHANCED: Detailed logging for parsed response
+          errorLogger.debug('Successfully parsed TxAgent response', {
+            userId,
+            agentId: agent.id,
+            responseKeys: Object.keys(txAgentData),
+            hasResponse: !!txAgentData.response,
+            responseLength: txAgentData.response?.length || 0,
+            sourcesCount: txAgentData.sources?.length || 0,
+            processingTime: txAgentData.processing_time,
+            component: 'MedicalConsultation'
+          });
 
           consultationResponse = {
             text: txAgentData.response,
@@ -346,16 +436,33 @@ Guidelines:
           });
 
         } catch (error) {
-          errorLogger.error('TxAgent consultation failed', error, {
+          // ✅ ENHANCED: Detailed error categorization
+          let enhancedError = error;
+          let errorCode = 'TXAGENT_CONSULTATION_FAILED';
+          
+          if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+            enhancedError = new Error(`TxAgent request timed out after ${timeoutMs}ms. The container may be overloaded or unresponsive.`);
+            errorCode = 'TXAGENT_TIMEOUT';
+          } else if (error.message.includes('fetch failed')) {
+            enhancedError = new Error(`Network error connecting to TxAgent container at ${txAgentUrl}. The container may be unreachable.`);
+            errorCode = 'TXAGENT_NETWORK_ERROR';
+          }
+          
+          errorLogger.error('TxAgent consultation failed', enhancedError, {
             userId,
             query: query.substring(0, 100),
             agentId: agent.id,
+            txAgentUrl,
+            errorName: error.name,
+            errorMessage: error.message,
+            errorStack: error.stack,
+            timeoutMs,
             component: 'MedicalConsultation'
           });
 
           return res.status(502).json({
-            error: 'TxAgent consultation failed. Please try again or switch to OpenAI.',
-            code: 'TXAGENT_CONSULTATION_FAILED',
+            error: enhancedError.message,
+            code: errorCode,
             details: error.message,
             processing_time_ms: Date.now() - startTime,
             suggestions: [
