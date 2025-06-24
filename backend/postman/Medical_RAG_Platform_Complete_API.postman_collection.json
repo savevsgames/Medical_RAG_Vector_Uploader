@@ -1,0 +1,1847 @@
+{
+  "info": {
+    "name": "Medical RAG Platform - Complete API Collection",
+    "description": "Comprehensive test collection for the Medical RAG Platform supporting both Doctor's Portal and User's Portal with TxAgent integration, voice services, and medical tracking capabilities",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "3.0.0"
+  },
+  "variable": [
+    {
+      "key": "backend_url",
+      "value": "https://medical-rag-vector-uploader.onrender.com",
+      "type": "string",
+      "description": "Backend API URL (production)"
+    },
+    {
+      "key": "local_backend_url",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "Local backend URL for development"
+    },
+    {
+      "key": "txagent_url",
+      "value": "https://your-txagent-container-url.proxy.runpod.net",
+      "type": "string",
+      "description": "TxAgent container URL on RunPod"
+    },
+    {
+      "key": "jwt_token",
+      "value": "your_supabase_jwt_token_here",
+      "type": "string",
+      "description": "Valid Supabase JWT token with sub, aud, and role claims"
+    },
+    {
+      "key": "agent_id",
+      "value": "",
+      "type": "string",
+      "description": "Agent session ID from start agent endpoint"
+    },
+    {
+      "key": "document_id",
+      "value": "",
+      "type": "string",
+      "description": "Document ID from upload endpoint"
+    },
+    {
+      "key": "consultation_id",
+      "value": "",
+      "type": "string",
+      "description": "Medical consultation ID"
+    },
+    {
+      "key": "profile_id",
+      "value": "",
+      "type": "string",
+      "description": "Medical profile ID"
+    },
+    {
+      "key": "symptom_id",
+      "value": "",
+      "type": "string",
+      "description": "Symptom ID"
+    },
+    {
+      "key": "treatment_id",
+      "value": "",
+      "type": "string",
+      "description": "Treatment ID"
+    }
+  ],
+  "item": [
+    {
+      "name": "🏥 System Health & Status",
+      "item": [
+        {
+          "name": "Backend Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has status field\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('timestamp');",
+                  "    pm.expect(jsonData).to.have.property('services');",
+                  "    console.log('Backend Status:', jsonData.status);",
+                  "    console.log('Database:', jsonData.services.database ? '✅' : '❌');",
+                  "    console.log('Supabase:', jsonData.services.supabase_configured ? '✅' : '❌');",
+                  "    console.log('RunPod:', jsonData.services.runpod_configured ? '✅' : '❌');",
+                  "});",
+                  "",
+                  "console.log('✅ Backend health check successful');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backend_url}}/health",
+              "host": ["{{backend_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check backend health and service status"
+          }
+        },
+        {
+          "name": "TxAgent Container Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has status field\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData.status).to.eql('healthy');",
+                  "});",
+                  "",
+                  "pm.test(\"Response has detailed health info\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('model');",
+                  "    pm.expect(jsonData).to.have.property('device');",
+                  "    pm.expect(jsonData).to.have.property('version');",
+                  "    console.log(`Model: ${jsonData.model}, Device: ${jsonData.device}`);",
+                  "});",
+                  "",
+                  "console.log(\"✅ TxAgent container health check successful\");"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{txagent_url}}/health",
+              "host": ["{{txagent_url}}"],
+              "path": ["health"]
+            },
+            "description": "Direct health check of TxAgent container"
+          }
+        }
+      ],
+      "description": "System health and status checks"
+    },
+    {
+      "name": "🤖 Agent Management (Doctor's Portal)",
+      "item": [
+        {
+          "name": "Get Agent Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has agent status fields\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('agent_active');",
+                  "    pm.expect(jsonData).to.have.property('agent_id');",
+                  "    pm.expect(jsonData).to.have.property('container_status');",
+                  "    ",
+                  "    console.log('Agent Active:', jsonData.agent_active ? '✅' : '❌');",
+                  "    console.log('Agent ID:', jsonData.agent_id || 'None');",
+                  "    console.log('Container Status:', jsonData.container_status || 'Unknown');",
+                  "    ",
+                  "    if (jsonData.agent_id) {",
+                  "        pm.collectionVariables.set('agent_id', jsonData.agent_id);",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Agent status check completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{backend_url}}/api/agent/status",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "status"]
+            },
+            "description": "Check current agent session status"
+          }
+        },
+        {
+          "name": "Start TxAgent Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Agent session started successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('agent_id');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Agent Started Successfully');",
+                  "    console.log('Agent ID:', jsonData.agent_id);",
+                  "    console.log('Status:', jsonData.status);",
+                  "    ",
+                  "    pm.collectionVariables.set('agent_id', jsonData.agent_id);",
+                  "});",
+                  "",
+                  "console.log('✅ TxAgent session activation successful');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/start",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "start"]
+            },
+            "description": "Start a new TxAgent session"
+          }
+        },
+        {
+          "name": "Stop TxAgent Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Agent session stopped successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Agent Stopped Successfully');",
+                  "    console.log('Message:', jsonData.message);",
+                  "});",
+                  "",
+                  "console.log('✅ TxAgent session deactivation successful');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/stop",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "stop"]
+            },
+            "description": "Stop the current TxAgent session"
+          }
+        },
+        {
+          "name": "Agent Health Check (Detailed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Health check has test results\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('container_reachable');",
+                  "    pm.expect(jsonData).to.have.property('test_results');",
+                  "    ",
+                  "    console.log('Container Reachable:', jsonData.container_reachable ? '✅' : '❌');",
+                  "    console.log('JWT Valid:', jsonData.jwt_valid ? '✅' : '❌');",
+                  "    console.log('Endpoints Working:', jsonData.endpoints_working ? '✅' : '❌');",
+                  "});",
+                  "",
+                  "console.log('✅ Detailed health check completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/health-check",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "health-check"]
+            },
+            "description": "Perform detailed health check of TxAgent container"
+          }
+        }
+      ],
+      "description": "Agent lifecycle management for doctors"
+    },
+    {
+      "name": "📄 Document Management (Doctor's Portal)",
+      "item": [
+        {
+          "name": "Upload Document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Document upload successful\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Document Upload Successful');",
+                  "    if (jsonData.job_id) {",
+                  "        console.log('Job ID:', jsonData.job_id);",
+                  "        pm.collectionVariables.set('job_id', jsonData.job_id);",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Document upload test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Upload a medical document (PDF, DOCX, TXT, or MD)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{backend_url}}/upload",
+              "host": ["{{backend_url}}"],
+              "path": ["upload"]
+            },
+            "description": "Upload a document for processing (requires file attachment)"
+          }
+        },
+        {
+          "name": "Test Upload System",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Upload system test results\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('txagent_health');",
+                  "    pm.expect(jsonData).to.have.property('embedding_test');",
+                  "    pm.expect(jsonData).to.have.property('supabase_test');",
+                  "    ",
+                  "    console.log('TxAgent Health:', jsonData.txagent_health ? '✅' : '❌');",
+                  "    console.log('Embedding Test:', jsonData.embedding_test.error ? '❌ ' + jsonData.embedding_test.error : '✅');",
+                  "    console.log('Supabase Test:', jsonData.supabase_test.error ? '❌ ' + jsonData.supabase_test.error : '✅');",
+                  "});",
+                  "",
+                  "console.log('✅ Upload system test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/test-upload",
+              "host": ["{{backend_url}}"],
+              "path": ["test-upload"]
+            },
+            "description": "Test the upload system connectivity"
+          }
+        }
+      ],
+      "description": "Document upload and management for doctors"
+    },
+    {
+      "name": "💬 Chat & Consultation",
+      "item": [
+        {
+          "name": "Medical Consultation (TxAgent)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Medical consultation successful\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "    pm.expect(jsonData.response).to.have.property('text');",
+                  "    pm.expect(jsonData).to.have.property('agent_id');",
+                  "    ",
+                  "    console.log('✅ Medical Consultation Successful');",
+                  "    console.log('Agent Used:', jsonData.agent_id);",
+                  "    console.log('Response Length:', jsonData.response.text.length);",
+                  "    console.log('Sources Count:', jsonData.response.sources ? jsonData.response.sources.length : 0);",
+                  "    ",
+                  "    if (jsonData.session_id) {",
+                  "        pm.collectionVariables.set('consultation_id', jsonData.session_id);",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ TxAgent medical consultation completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What are the main symptoms of diabetes and how is it diagnosed?\",\n  \"context\": {\n    \"conversation_history\": [],\n    \"user_profile\": {\n      \"age\": 35,\n      \"gender\": \"male\",\n      \"conditions\": [\"Hypertension\"],\n      \"medications\": [\"Lisinopril\"],\n      \"allergies\": [\"Penicillin\"]\n    }\n  },\n  \"session_id\": \"medical-consultation-session-123\",\n  \"preferred_agent\": \"txagent\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/medical-consultation",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "medical-consultation"]
+            },
+            "description": "Medical consultation using TxAgent with user profile context"
+          }
+        },
+        {
+          "name": "Medical Consultation (OpenAI)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"OpenAI consultation successful\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "    pm.expect(jsonData.response).to.have.property('text');",
+                  "    pm.expect(jsonData).to.have.property('agent_id');",
+                  "    pm.expect(jsonData.agent_id).to.eql('openai');",
+                  "    ",
+                  "    console.log('✅ OpenAI Medical Consultation Successful');",
+                  "    console.log('Response Length:', jsonData.response.text.length);",
+                  "    console.log('Sources Count:', jsonData.response.sources ? jsonData.response.sources.length : 0);",
+                  "});",
+                  "",
+                  "console.log('✅ OpenAI medical consultation completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What are the main symptoms of diabetes and how is it diagnosed?\",\n  \"context\": {\n    \"conversation_history\": [],\n    \"user_profile\": {\n      \"age\": 35,\n      \"gender\": \"male\",\n      \"conditions\": [\"Hypertension\"],\n      \"medications\": [\"Lisinopril\"],\n      \"allergies\": [\"Penicillin\"]\n    }\n  },\n  \"session_id\": \"openai-consultation-session-123\",\n  \"preferred_agent\": \"openai\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/medical-consultation",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "medical-consultation"]
+            },
+            "description": "Medical consultation using OpenAI with user profile context"
+          }
+        },
+        {
+          "name": "Legacy Chat (TxAgent)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 503\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 503]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Chat response successful\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('response');",
+                  "        pm.expect(jsonData).to.have.property('agent_id');",
+                  "        ",
+                  "        console.log('✅ Chat Response Received');",
+                  "        console.log('Agent ID:', jsonData.agent_id);",
+                  "        console.log('Response Length:', jsonData.response.length);",
+                  "    });",
+                  "} else {",
+                  "    console.log('⚠️ TxAgent not running - expected if not started');",
+                  "}",
+                  "",
+                  "console.log('✅ Legacy chat test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What are the symptoms of diabetes?\",\n  \"top_k\": 5,\n  \"temperature\": 0.7\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/chat",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "chat"]
+            },
+            "description": "Legacy chat endpoint for backward compatibility"
+          }
+        },
+        {
+          "name": "OpenAI Chat Fallback",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 503\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 503]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"OpenAI chat response successful\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('response');",
+                  "        pm.expect(jsonData).to.have.property('agent_id');",
+                  "        pm.expect(jsonData.agent_id).to.eql('openai');",
+                  "        ",
+                  "        console.log('✅ OpenAI Chat Response Received');",
+                  "        console.log('Response Length:', jsonData.response.length);",
+                  "    });",
+                  "} else {",
+                  "    console.log('⚠️ OpenAI not configured');",
+                  "}",
+                  "",
+                  "console.log('✅ OpenAI fallback test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What are the symptoms of diabetes?\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/openai-chat",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "openai-chat"]
+            },
+            "description": "Test OpenAI chat fallback endpoint"
+          }
+        }
+      ],
+      "description": "Chat and medical consultation endpoints"
+    },
+    {
+      "name": "🎤 Voice Services (User Portal)",
+      "item": [
+        {
+          "name": "Text-to-Speech (TTS)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"TTS generation successful\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('audio_url');",
+                  "    pm.expect(jsonData).to.have.property('processing_time_ms');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ TTS Generated Successfully');",
+                  "    console.log('Audio URL:', jsonData.audio_url);",
+                  "    console.log('Processing Time:', jsonData.processing_time_ms + 'ms');",
+                  "    console.log('Voice ID:', jsonData.voice_id);",
+                  "});",
+                  "",
+                  "console.log('✅ Text-to-speech test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Based on your symptoms, I recommend consulting with a healthcare provider for a proper evaluation. This is important for your health and wellbeing.\",\n  \"voice_id\": \"default\",\n  \"consultation_id\": \"{{consultation_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/voice/tts",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "voice", "tts"]
+            },
+            "description": "Generate voice audio from text using ElevenLabs"
+          }
+        },
+        {
+          "name": "Speech-to-Text (STT)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"STT transcription successful\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('text');",
+                  "    pm.expect(jsonData).to.have.property('processing_time_ms');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ STT Transcription Successful');",
+                  "    console.log('Transcribed Text:', jsonData.text);",
+                  "    console.log('Processing Time:', jsonData.processing_time_ms + 'ms');",
+                  "    console.log('Language:', jsonData.language);",
+                  "});",
+                  "",
+                  "console.log('✅ Speech-to-text test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audio_url\": \"https://example.com/sample-audio.mp3\",\n  \"language\": \"en\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/voice/transcribe",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "voice", "transcribe"]
+            },
+            "description": "Transcribe audio to text using OpenAI Whisper"
+          }
+        },
+        {
+          "name": "Get Available Voices",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Voices fetched successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('voices');",
+                  "    pm.expect(jsonData).to.have.property('total');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Voices Fetched Successfully');",
+                  "    console.log('Available Voices:', jsonData.total);",
+                  "    if (jsonData.voices.length > 0) {",
+                  "        console.log('First Voice:', jsonData.voices[0].name);",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Voice list test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{backend_url}}/api/voice/voices",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "voice", "voices"]
+            },
+            "description": "Get list of available voices from ElevenLabs"
+          }
+        }
+      ],
+      "description": "Voice services for mobile app integration"
+    },
+    {
+      "name": "👤 Medical Profile Management (User Portal)",
+      "item": [
+        {
+          "name": "Get Medical Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Profile response structure\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('profile');",
+                  "    pm.expect(jsonData).to.have.property('has_profile');",
+                  "    ",
+                  "    console.log('Has Profile:', jsonData.has_profile ? '✅' : '❌');",
+                  "    if (jsonData.profile) {",
+                  "        console.log('Profile ID:', jsonData.profile.id);",
+                  "        console.log('Age:', jsonData.profile.age || 'Not set');",
+                  "        console.log('Conditions:', jsonData.profile.conditions ? jsonData.profile.conditions.length : 0);",
+                  "        pm.collectionVariables.set('profile_id', jsonData.profile.id);",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Medical profile fetch completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{backend_url}}/api/medical-profile",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "medical-profile"]
+            },
+            "description": "Get user's complete medical profile"
+          }
+        },
+        {
+          "name": "Create/Update Medical Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Profile update successful\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('profile_id');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Medical Profile Updated Successfully');",
+                  "    console.log('Profile ID:', jsonData.profile_id);",
+                  "    pm.collectionVariables.set('profile_id', jsonData.profile_id);",
+                  "});",
+                  "",
+                  "console.log('✅ Medical profile update completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"age\": 35,\n  \"gender\": \"male\",\n  \"height_cm\": 175.5,\n  \"weight_kg\": 70.2,\n  \"blood_type\": \"O+\",\n  \"conditions_summary\": \"Hypertension, well controlled\",\n  \"medications_summary\": \"Lisinopril 10mg daily\",\n  \"allergies_summary\": \"Penicillin - rash reaction\",\n  \"family_history\": \"Father had diabetes, mother had heart disease\",\n  \"conditions\": [\n    {\n      \"name\": \"Hypertension\",\n      \"diagnosed_at\": \"2023-01-15\",\n      \"severity\": 6,\n      \"ongoing\": true,\n      \"notes\": \"Well controlled with medication\"\n    }\n  ],\n  \"medications\": [\n    {\n      \"name\": \"Lisinopril\",\n      \"dosage\": \"10mg\",\n      \"frequency\": \"Once daily\",\n      \"start_date\": \"2023-01-15\",\n      \"prescribed_by\": \"Dr. Smith\",\n      \"is_current\": true,\n      \"notes\": \"For blood pressure control\"\n    }\n  ],\n  \"allergies\": [\n    {\n      \"allergen\": \"Penicillin\",\n      \"reaction\": \"Skin rash\",\n      \"severity\": 8,\n      \"notes\": \"Developed rash within hours of taking\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/medical-profile",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "medical-profile"]
+            },
+            "description": "Create or update user's medical profile with detailed tracking"
+          }
+        }
+      ],
+      "description": "Medical profile management for users"
+    },
+    {
+      "name": "🩺 Symptom Tracking (User Portal)",
+      "item": [
+        {
+          "name": "Get Symptom History",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Symptoms response structure\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('symptoms');",
+                  "    pm.expect(jsonData).to.have.property('total');",
+                  "    ",
+                  "    console.log('✅ Symptoms Fetched Successfully');",
+                  "    console.log('Total Symptoms:', jsonData.total);",
+                  "    if (jsonData.symptoms.length > 0) {",
+                  "        console.log('Latest Symptom:', jsonData.symptoms[0].symptom_name);",
+                  "        pm.collectionVariables.set('symptom_id', jsonData.symptoms[0].id);",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Symptom history fetch completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{backend_url}}/api/symptoms?limit=50&offset=0",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "symptoms"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Get user's symptom history"
+          }
+        },
+        {
+          "name": "Log New Symptom",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Symptom logged successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('symptom');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Symptom Logged Successfully');",
+                  "    console.log('Symptom ID:', jsonData.symptom.id);",
+                  "    console.log('Symptom Name:', jsonData.symptom.symptom_name);",
+                  "    console.log('Severity:', jsonData.symptom.severity);",
+                  "    pm.collectionVariables.set('symptom_id', jsonData.symptom.id);",
+                  "});",
+                  "",
+                  "console.log('✅ Symptom logging completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"symptom_name\": \"Headache\",\n  \"severity\": 7,\n  \"description\": \"Severe throbbing headache on the left side of my head, started this morning\",\n  \"duration_hours\": 4,\n  \"triggers\": \"Stress from work, lack of sleep last night\",\n  \"location\": \"Left temple and behind left eye\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/symptoms",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "symptoms"]
+            },
+            "description": "Log a new symptom with detailed information"
+          }
+        }
+      ],
+      "description": "Symptom tracking and history for users"
+    },
+    {
+      "name": "💊 Treatment Tracking (User Portal)",
+      "item": [
+        {
+          "name": "Get Treatment History",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Treatments response structure\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('treatments');",
+                  "    pm.expect(jsonData).to.have.property('total');",
+                  "    ",
+                  "    console.log('✅ Treatments Fetched Successfully');",
+                  "    console.log('Total Treatments:', jsonData.total);",
+                  "    if (jsonData.treatments.length > 0) {",
+                  "        console.log('Latest Treatment:', jsonData.treatments[0].name);",
+                  "        pm.collectionVariables.set('treatment_id', jsonData.treatments[0].id);",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Treatment history fetch completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              }
+            ],
+            "url": {
+              "raw": "{{backend_url}}/api/treatments?limit=50&offset=0",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "treatments"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Get user's treatment history"
+          }
+        },
+        {
+          "name": "Add New Treatment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Treatment added successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('treatment');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Treatment Added Successfully');",
+                  "    console.log('Treatment ID:', jsonData.treatment.id);",
+                  "    console.log('Treatment Name:', jsonData.treatment.name);",
+                  "    console.log('Treatment Type:', jsonData.treatment.treatment_type);",
+                  "    pm.collectionVariables.set('treatment_id', jsonData.treatment.id);",
+                  "});",
+                  "",
+                  "console.log('✅ Treatment addition completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"treatment_type\": \"medication\",\n  \"name\": \"Ibuprofen\",\n  \"dosage\": \"400mg\",\n  \"duration\": \"As needed for headache\",\n  \"description\": \"Over-the-counter pain reliever for headache management\",\n  \"doctor_recommended\": false,\n  \"completed\": false\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/treatments",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "treatments"]
+            },
+            "description": "Add a new treatment to user's treatment plan"
+          }
+        }
+      ],
+      "description": "Treatment tracking and management for users"
+    },
+    {
+      "name": "🔬 TxAgent Container Direct Tests",
+      "item": [
+        {
+          "name": "TxAgent Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has status field\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData.status).to.eql('healthy');",
+                  "});",
+                  "",
+                  "pm.test(\"Response has detailed health info\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('model');",
+                  "    pm.expect(jsonData).to.have.property('device');",
+                  "    pm.expect(jsonData).to.have.property('version');",
+                  "    console.log(`Model: ${jsonData.model}, Device: ${jsonData.device}`);",
+                  "    console.log(`Version: ${jsonData.version}, Uptime: ${jsonData.uptime}s`);",
+                  "});",
+                  "",
+                  "console.log(\"✅ TxAgent health check successful\");"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{txagent_url}}/health",
+              "host": ["{{txagent_url}}"],
+              "path": ["health"]
+            },
+            "description": "Direct health check of TxAgent container"
+          }
+        },
+        {
+          "name": "TxAgent Embedding Generation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Embedding has exactly 768 dimensions\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('embedding');",
+                  "    pm.expect(jsonData).to.have.property('dimensions');",
+                  "    pm.expect(jsonData.dimensions).to.eql(768);",
+                  "    pm.expect(jsonData.embedding).to.be.an('array');",
+                  "    pm.expect(jsonData.embedding.length).to.eql(768);",
+                  "    console.log('✅ BioBERT embedding has exactly 768 dimensions');",
+                  "});",
+                  "",
+                  "pm.test(\"Response has model and timing info\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('model');",
+                  "    pm.expect(jsonData).to.have.property('processing_time');",
+                  "    pm.expect(jsonData.model).to.eql('BioBERT');",
+                  "    console.log('Processing time:', jsonData.processing_time + 'ms');",
+                  "});",
+                  "",
+                  "console.log('✅ TxAgent embedding generation successful');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Patient presents with chest pain and shortness of breath. Medical history includes hypertension.\",\n  \"normalize\": true\n}"
+            },
+            "url": {
+              "raw": "{{txagent_url}}/embed",
+              "host": ["{{txagent_url}}"],
+              "path": ["embed"]
+            },
+            "description": "Generate BioBERT embedding directly from TxAgent container"
+          }
+        },
+        {
+          "name": "TxAgent Chat with User Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Chat response successful\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('response');",
+                  "    pm.expect(jsonData).to.have.property('sources');",
+                  "    pm.expect(jsonData).to.have.property('processing_time');",
+                  "    pm.expect(jsonData).to.have.property('model');",
+                  "    ",
+                  "    console.log('✅ TxAgent Chat Response Received');",
+                  "    console.log('Response Length:', jsonData.response.length);",
+                  "    console.log('Sources Count:', jsonData.sources ? jsonData.sources.length : 0);",
+                  "    console.log('Processing Time:', jsonData.processing_time + 'ms');",
+                  "    console.log('Model:', jsonData.model);",
+                  "});",
+                  "",
+                  "console.log('✅ TxAgent chat with user profile successful');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"What are the main symptoms of diabetes and how should I monitor my condition?\",\n  \"top_k\": 5,\n  \"temperature\": 0.7,\n  \"history\": [],\n  \"stream\": false,\n  \"context\": {\n    \"user_profile\": {\n      \"age\": 35,\n      \"gender\": \"male\",\n      \"conditions\": [\"Hypertension\"],\n      \"medications\": [\"Lisinopril\"],\n      \"allergies\": [\"Penicillin\"]\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{txagent_url}}/chat",
+              "host": ["{{txagent_url}}"],
+              "path": ["chat"]
+            },
+            "description": "Direct chat with TxAgent container including user profile context"
+          }
+        }
+      ],
+      "description": "Direct tests of TxAgent container endpoints"
+    },
+    {
+      "name": "🔧 Backend Proxy Tests",
+      "item": [
+        {
+          "name": "Backend Test Health Endpoint",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 500\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 500]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Health test successful\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('status');",
+                  "        console.log('✅ Backend health proxy working');",
+                  "        console.log('Status:', jsonData.status);",
+                  "    });",
+                  "} else {",
+                  "    console.log('⚠️ TxAgent container not reachable through backend');",
+                  "}",
+                  "",
+                  "console.log('✅ Backend health proxy test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/test-health",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "test-health"]
+            },
+            "description": "Test backend proxy to TxAgent health endpoint"
+          }
+        },
+        {
+          "name": "Backend Test Chat Endpoint",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 500\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 500]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Chat test successful\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('status');",
+                  "        console.log('✅ Backend chat proxy working');",
+                  "        console.log('Response:', jsonData.response || 'No response');",
+                  "    });",
+                  "} else {",
+                  "    console.log('⚠️ TxAgent container chat not reachable through backend');",
+                  "}",
+                  "",
+                  "console.log('✅ Backend chat proxy test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/test-chat",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "test-chat"]
+            },
+            "description": "Test backend proxy to TxAgent chat endpoint"
+          }
+        },
+        {
+          "name": "Backend Test Embed Endpoint",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 or 500\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 500]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.test(\"Embed test successful\", function () {",
+                  "        var jsonData = pm.response.json();",
+                  "        pm.expect(jsonData).to.have.property('status');",
+                  "        console.log('✅ Backend embed proxy working');",
+                  "        console.log('Dimensions:', jsonData.response ? jsonData.response.dimensions : 'Unknown');",
+                  "    });",
+                  "} else {",
+                  "    console.log('⚠️ TxAgent container embed not reachable through backend');",
+                  "}",
+                  "",
+                  "console.log('✅ Backend embed proxy test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/agent/test-embed",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "test-embed"]
+            },
+            "description": "Test backend proxy to TxAgent embed endpoint"
+          }
+        },
+        {
+          "name": "Direct Embedding Generation",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Embedding generated successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('success');",
+                  "    pm.expect(jsonData).to.have.property('vector_dimensions');",
+                  "    pm.expect(jsonData.success).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Embedding Generated Successfully');",
+                  "    console.log('Vector Dimensions:', jsonData.vector_dimensions);",
+                  "    console.log('Processing Time:', jsonData.processing_time_ms + 'ms');",
+                  "    ",
+                  "    if (jsonData.vector_dimensions === 768) {",
+                  "        console.log('🧠 Using BioBERT embeddings (TxAgent)');",
+                  "    } else if (jsonData.vector_dimensions === 1536) {",
+                  "        console.log('🤖 Using OpenAI embeddings (fallback)');",
+                  "    }",
+                  "});",
+                  "",
+                  "console.log('✅ Direct embedding test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentText\": \"Patient presents with chest pain and shortness of breath. Medical history includes hypertension and diabetes.\",\n  \"metadata\": {\n    \"test\": true,\n    \"source\": \"postman_test\",\n    \"medical_context\": \"cardiology\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/embed",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "embed"]
+            },
+            "description": "Generate embedding directly through backend proxy"
+          }
+        }
+      ],
+      "description": "Backend proxy tests for TxAgent endpoints"
+    },
+    {
+      "name": "🚨 Error Handling & Edge Cases",
+      "item": [
+        {
+          "name": "Test Invalid JWT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test(\"Authentication error response\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('error');",
+                  "    console.log('✅ Authentication properly rejected invalid token');",
+                  "    console.log('Error:', jsonData.error);",
+                  "});",
+                  "",
+                  "console.log('✅ Invalid JWT test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer invalid_token_for_testing",
+                "description": "Invalid JWT token"
+              }
+            ],
+            "url": {
+              "raw": "{{backend_url}}/api/agent/status",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "agent", "status"]
+            },
+            "description": "Test authentication with invalid JWT token"
+          }
+        },
+        {
+          "name": "Test Missing Authorization",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test(\"Missing auth error response\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('error');",
+                  "    console.log('✅ Authentication properly rejected missing token');",
+                  "    console.log('Error:', jsonData.error);",
+                  "});",
+                  "",
+                  "console.log('✅ Missing authorization test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"This should fail without auth\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/medical-consultation",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "medical-consultation"]
+            },
+            "description": "Test endpoint without authorization header"
+          }
+        },
+        {
+          "name": "Test Emergency Detection",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Emergency detected properly\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('safety');",
+                  "    pm.expect(jsonData.safety).to.have.property('emergency_detected');",
+                  "    pm.expect(jsonData.safety.emergency_detected).to.eql(true);",
+                  "    ",
+                  "    console.log('✅ Emergency Detection Working');",
+                  "    console.log('Emergency Detected:', jsonData.safety.emergency_detected);",
+                  "    console.log('Urgent Care Recommended:', jsonData.safety.urgent_care_recommended);",
+                  "});",
+                  "",
+                  "console.log('✅ Emergency detection test completed');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token for authentication"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"I am having severe chest pain and difficulty breathing. I think I might be having a heart attack.\",\n  \"context\": {\n    \"user_profile\": {\n      \"age\": 55,\n      \"gender\": \"male\",\n      \"conditions\": [\"Hypertension\", \"High Cholesterol\"]\n    }\n  },\n  \"session_id\": \"emergency-test-session\",\n  \"preferred_agent\": \"txagent\"\n}"
+            },
+            "url": {
+              "raw": "{{backend_url}}/api/medical-consultation",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "medical-consultation"]
+            },
+            "description": "Test emergency detection with critical symptoms"
+          }
+        },
+        {
+          "name": "Test Invalid Route",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "console.log('✅ Invalid route properly returns 404');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{backend_url}}/api/nonexistent/route",
+              "host": ["{{backend_url}}"],
+              "path": ["api", "nonexistent", "route"]
+            },
+            "description": "Test non-existent route handling"
+          }
+        }
+      ],
+      "description": "Error handling and edge case testing"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Pre-request script for the entire collection",
+          "console.log('🚀 Starting Medical RAG Platform Complete API Tests');",
+          "console.log('📋 Testing Features:');",
+          "console.log('   - System health and status monitoring');",
+          "console.log('   - Agent lifecycle management (Doctor Portal)');",
+          "console.log('   - Document upload and management (Doctor Portal)');",
+          "console.log('   - Medical consultations with dual-agent support');",
+          "console.log('   - Voice services (TTS/STT) for mobile apps');",
+          "console.log('   - Medical profile management (User Portal)');",
+          "console.log('   - Symptom tracking and history (User Portal)');",
+          "console.log('   - Treatment tracking and management (User Portal)');",
+          "console.log('   - Direct TxAgent container testing');",
+          "console.log('   - Backend proxy functionality');",
+          "console.log('   - Error handling and edge cases');",
+          "",
+          "// Validate that required variables are set",
+          "if (!pm.collectionVariables.get('backend_url') || pm.collectionVariables.get('backend_url') === 'https://medical-rag-vector-uploader.onrender.com') {",
+          "    console.warn('⚠️ Using default backend URL. Update if different.');",
+          "}",
+          "",
+          "if (!pm.collectionVariables.get('txagent_url') || pm.collectionVariables.get('txagent_url') === 'https://your-txagent-container-url.proxy.runpod.net') {",
+          "    console.warn('⚠️ Please update the txagent_url collection variable with your actual TxAgent container URL');",
+          "}",
+          "",
+          "if (!pm.collectionVariables.get('jwt_token') || pm.collectionVariables.get('jwt_token') === 'your_supabase_jwt_token_here') {",
+          "    console.warn('⚠️ Please update the jwt_token collection variable with a valid Supabase JWT token');",
+          "    console.warn('   Token must have: sub (user_id), aud: \"authenticated\", role: \"authenticated\"');",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Post-response script for the entire collection",
+          "// Log response time for performance monitoring",
+          "if (pm.response.responseTime) {",
+          "    console.log('⏱️ Response time: ' + pm.response.responseTime + 'ms');",
+          "}",
+          "",
+          "// Log any collection variables that were set",
+          "const variablesToCheck = ['agent_id', 'consultation_id', 'profile_id', 'symptom_id', 'treatment_id'];",
+          "variablesToCheck.forEach(varName => {",
+          "    const value = pm.collectionVariables.get(varName);",
+          "    if (value && value !== '') {",
+          "        console.log(`📝 Set ${varName}: ${value.substring(0, 8)}...`);",
+          "    }",
+          "});"
+        ]
+      }
+    }
+  ]
+}
