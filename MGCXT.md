@@ -1,34 +1,39 @@
 # Migration Context File (MGCXT.md)
-## Complete Database Schema with TxAgent Chat Integration
+## Complete Database Schema with Enhanced Medical Consultation Platform
 
 ### 🎯 **Purpose**
-This file documents the complete database schema for the Medical RAG Vector Uploader system with full TxAgent chat integration support. Use this to understand the current database state and the exact API contracts expected by the system.
+This file documents the complete database schema for the Medical RAG Vector Uploader system, now expanded to serve as a comprehensive medical consultation platform supporting both doctor and patient portals with full TxAgent chat integration, voice services, and advanced medical tracking capabilities.
 
 ---
 
-## 📋 **Current System Status (v1.2.0)**
+## 📋 **Current System Status (v2.0.0)**
 
 ### **✅ Fully Implemented Components**
-- **Database Schema**: Complete with RLS policies and security fixes
-- **Agent Management**: Full lifecycle with session tracking
+- **Database Schema**: Complete with enhanced medical tracking and RLS policies
+- **Agent Management**: Full lifecycle with session tracking for multiple user types
 - **Document Processing**: Multi-format upload with 768-dim embeddings
-- **OpenAI Chat**: Complete RAG functionality
+- **Medical Consultations**: Dual-agent support (TxAgent + OpenAI) with context awareness
+- **Voice Services**: Text-to-speech and speech-to-text integration
+- **Medical Profiles**: Comprehensive user health tracking
+- **Symptom & Treatment Tracking**: Detailed medical history management
+- **Doctor Visit Management**: Appointment and consultation tracking
 - **Health Monitoring**: Real-time container status tracking
-- **Authentication**: JWT-based security with proper RLS
+- **Authentication**: JWT-based security with proper RLS for multi-tenant usage
 
 ### **🔧 TxAgent Integration Status**
-- **Backend Routes**: Implemented and ready (`POST /api/chat`)
-- **Container API**: Awaiting implementation (see specifications below)
+- **Backend Routes**: Fully implemented with dual-agent support
+- **Container API**: Enhanced error handling and diagnostics
 - **Embedding Flow**: Backend proxy ready for 768-dim BioBERT vectors
-- **Chat Flow**: Complete request/response handling implemented
+- **Chat Flow**: Complete request/response handling with context awareness
+- **Voice Integration**: TTS/STT endpoints for mobile app support
 
 ---
 
-## 🗄️ **Database Schema (Current v1.2.0)**
+## 🗄️ **Database Schema (Current v2.0.0)**
 
 ### **Core Tables**
 
-#### **Documents Table**
+#### **Documents Table** - Vector Document Storage
 ```sql
 CREATE TABLE public.documents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -48,13 +53,13 @@ CREATE INDEX documents_created_at_idx ON public.documents USING btree (created_a
 CREATE INDEX documents_filename_idx ON public.documents USING btree (filename);
 ```
 
-#### **Agents Table**
+#### **Agents Table** - TxAgent Session Management
 ```sql
 CREATE TABLE public.agents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    status text DEFAULT 'initializing'::text,
-    session_data jsonb DEFAULT '{}'::jsonb,  -- Contains container details
+    status text DEFAULT 'initializing'::text,  -- 'active', 'terminated', 'initializing'
+    session_data jsonb DEFAULT '{}'::jsonb,    -- Container details, endpoints, capabilities
     created_at timestamptz DEFAULT now(),
     last_active timestamptz DEFAULT now(),
     terminated_at timestamptz
@@ -66,23 +71,237 @@ CREATE INDEX agents_status_idx ON public.agents USING btree (status);
 CREATE INDEX agents_last_active_idx ON public.agents USING btree (last_active);
 ```
 
-#### **Embedding Jobs Table**
+#### **Medical Consultations Table** - Enhanced Consultation Tracking
 ```sql
-CREATE TABLE public.embedding_jobs (
+CREATE TABLE public.medical_consultations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    file_path text NOT NULL,
-    status text DEFAULT 'pending'::text,
-    metadata jsonb DEFAULT '{}'::jsonb,
-    chunk_count integer DEFAULT 0,
-    error text,
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    created_at timestamptz DEFAULT now(),
-    updated_at timestamptz DEFAULT now()
+    session_id text NOT NULL,
+    query text NOT NULL,
+    response text NOT NULL,
+    sources jsonb,                              -- Document sources used in response
+    voice_audio_url text,                       -- Generated TTS audio URL
+    video_url text,                            -- Generated video URL (future)
+    consultation_type text NOT NULL,            -- 'txagent_consultation', 'openai_consultation', 'emergency_detection'
+    processing_time integer,                    -- Response time in milliseconds
+    emergency_detected boolean,                 -- Emergency keyword detection
+    context_used jsonb,                        -- User profile, conversation history, agent details
+    confidence_score numeric,                  -- AI confidence in response
+    recommendations jsonb,                     -- Structured recommendations
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- Performance indexes
-CREATE INDEX embedding_jobs_user_id_idx ON public.embedding_jobs USING btree (user_id);
-CREATE INDEX embedding_jobs_status_idx ON public.embedding_jobs USING btree (status);
+CREATE INDEX medical_consultations_user_id_idx ON public.medical_consultations USING btree (user_id);
+CREATE INDEX medical_consultations_session_id_idx ON public.medical_consultations USING btree (session_id);
+CREATE INDEX medical_consultations_created_at_idx ON public.medical_consultations USING btree (created_at DESC);
+```
+
+### **Enhanced Medical Tracking Tables**
+
+#### **User Medical Profiles** - Comprehensive Health Information
+```sql
+CREATE TABLE public.user_medical_profiles (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    age integer CHECK (age >= 0 AND age <= 120),
+    gender gender_type,                        -- Custom enum: 'male', 'female', 'non_binary', 'other', 'prefer_not_to_say'
+    height_cm numeric,
+    weight_kg numeric,
+    blood_type blood_type,                     -- Custom enum: 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown'
+    conditions_summary text,                   -- High-level conditions summary
+    medications_summary text,                  -- High-level medications summary
+    allergies_summary text,                    -- High-level allergies summary
+    family_history text,                       -- Family medical history
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Performance indexes
+CREATE INDEX user_med_profiles_user_idx ON public.user_medical_profiles USING btree (user_id);
+```
+
+#### **Profile Conditions** - Detailed Condition Tracking
+```sql
+CREATE TABLE public.profile_conditions (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    profile_id uuid NOT NULL REFERENCES public.user_medical_profiles(id) ON DELETE CASCADE,
+    condition_name text NOT NULL,
+    diagnosed_at date,
+    severity integer CHECK (severity >= 1 AND severity <= 10),
+    ongoing boolean DEFAULT true,
+    notes text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX profile_cond_profile_idx ON public.profile_conditions USING btree (profile_id);
+```
+
+#### **Profile Medications** - Detailed Medication Tracking
+```sql
+CREATE TABLE public.profile_medications (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    profile_id uuid NOT NULL REFERENCES public.user_medical_profiles(id) ON DELETE CASCADE,
+    medication_name text NOT NULL,
+    dosage text,
+    frequency text,
+    start_date date,
+    end_date date,
+    prescribed_by text,
+    is_current boolean DEFAULT true,
+    notes text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX profile_med_profile_idx ON public.profile_medications USING btree (profile_id);
+```
+
+#### **Profile Allergies** - Detailed Allergy Tracking
+```sql
+CREATE TABLE public.profile_allergies (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    profile_id uuid NOT NULL REFERENCES public.user_medical_profiles(id) ON DELETE CASCADE,
+    allergen text NOT NULL,
+    reaction text,
+    severity integer CHECK (severity >= 1 AND severity <= 10),
+    notes text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX profile_allergy_profile_idx ON public.profile_allergies USING btree (profile_id);
+```
+
+#### **User Symptoms** - Symptom Tracking and History
+```sql
+CREATE TABLE public.user_symptoms (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    symptom_name text NOT NULL,
+    severity integer CHECK (severity >= 1 AND severity <= 10),
+    description text,
+    triggers text,
+    duration_hours integer,
+    location text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX user_symptoms_user_id_created_at_idx ON public.user_symptoms USING btree (user_id, created_at);
+```
+
+#### **Treatments** - Treatment Recommendations and Tracking
+```sql
+CREATE TABLE public.treatments (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    treatment_type treatment_type NOT NULL,    -- Custom enum: 'exercise', 'medication', 'other', 'supplement', 'therapy'
+    name text NOT NULL,
+    dosage text,
+    duration text,
+    description text,
+    doctor_recommended boolean DEFAULT false,
+    completed boolean DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX treatments_user_id_created_at_idx ON public.treatments USING btree (user_id, created_at);
+```
+
+#### **Doctor Visits** - Appointment and Visit Management
+```sql
+CREATE TABLE public.doctor_visits (
+    id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    visit_ts timestamptz NOT NULL,
+    doctor_name text,
+    location text,
+    contact_phone text,
+    contact_email text,
+    visit_prep text,                           -- Pre-visit preparation notes
+    visit_summary text,                        -- Post-visit summary
+    follow_up_required boolean DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX doctor_visits_user_id_visit_ts_idx ON public.doctor_visits USING btree (user_id, visit_ts);
+```
+
+### **Junction Tables for Relationships**
+
+#### **Symptom-Treatment Relationships**
+```sql
+CREATE TABLE public.symptom_treatments (
+    symptom_id uuid NOT NULL REFERENCES public.user_symptoms(id) ON DELETE CASCADE,
+    treatment_id uuid NOT NULL REFERENCES public.treatments(id) ON DELETE CASCADE,
+    PRIMARY KEY (symptom_id, treatment_id)
+);
+```
+
+#### **Visit-Symptom Relationships**
+```sql
+CREATE TABLE public.visit_symptoms (
+    visit_id uuid NOT NULL REFERENCES public.doctor_visits(id) ON DELETE CASCADE,
+    symptom_id uuid NOT NULL REFERENCES public.user_symptoms(id) ON DELETE CASCADE,
+    PRIMARY KEY (visit_id, symptom_id)
+);
+```
+
+#### **Visit-Treatment Relationships**
+```sql
+CREATE TABLE public.visit_treatments (
+    visit_id uuid NOT NULL REFERENCES public.doctor_visits(id) ON DELETE CASCADE,
+    treatment_id uuid NOT NULL REFERENCES public.treatments(id) ON DELETE CASCADE,
+    PRIMARY KEY (visit_id, treatment_id)
+);
+```
+
+### **Custom Enum Types**
+
+```sql
+-- Gender options
+CREATE TYPE gender_type AS ENUM ('male', 'female', 'non_binary', 'other', 'prefer_not_to_say');
+
+-- Blood type options
+CREATE TYPE blood_type AS ENUM ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown');
+
+-- Treatment type options
+CREATE TYPE treatment_type AS ENUM ('exercise', 'medication', 'other', 'supplement', 'therapy');
+```
+
+### **Testing and Admin Tables**
+
+#### **Testing Admin Users** - Admin Access Control
+```sql
+CREATE TABLE public.testing_admin_users (
+    user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email text NOT NULL UNIQUE,
+    added_at timestamptz DEFAULT now()
+);
+```
+
+#### **Test Runs** - System Testing Tracking
+```sql
+CREATE TABLE public.test_runs (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    trigger_type varchar(50) NOT NULL,
+    environment varchar(50) NOT NULL,
+    target_url text NOT NULL,
+    commit_sha varchar(40),
+    started_at timestamptz DEFAULT now(),
+    completed_at timestamptz,
+    status varchar(20) DEFAULT 'running',
+    total_tests integer DEFAULT 0,
+    passed_tests integer DEFAULT 0,
+    failed_tests integer DEFAULT 0,
+    skipped_tests integer DEFAULT 0
+);
 ```
 
 ### **Row Level Security (RLS) Policies**
@@ -91,7 +310,7 @@ CREATE INDEX embedding_jobs_status_idx ON public.embedding_jobs USING btree (sta
 ```sql
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
 
--- CRITICAL: All authenticated users can read ALL documents (shared medical knowledge)
+-- All authenticated users can read ALL documents (shared medical knowledge)
 CREATE POLICY "All authenticated users can read all documents"
     ON public.documents FOR SELECT TO authenticated
     USING (true);
@@ -112,132 +331,100 @@ CREATE POLICY "Users can only delete their own documents"
     USING (auth.uid() = user_id);
 ```
 
-#### **Agents - User Isolation**
+#### **Medical Data - User Isolation**
 ```sql
-ALTER TABLE public.agents ENABLE ROW LEVEL SECURITY;
+-- Medical profiles: Users can only access their own profiles
+ALTER TABLE public.user_medical_profiles ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "profiles_owner"
+    ON public.user_medical_profiles FOR ALL TO public
+    USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
--- Users can only manage their own agents
-CREATE POLICY "Users can manage own agents"
-    ON public.agents FOR ALL TO authenticated
-    USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+-- Symptoms: Users can only access their own symptoms
+ALTER TABLE public.user_symptoms ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "symptoms_owner"
+    ON public.user_symptoms FOR ALL TO public
+    USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Treatments: Users can only access their own treatments
+ALTER TABLE public.treatments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "treatments_owner"
+    ON public.treatments FOR ALL TO public
+    USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Doctor visits: Users can only access their own visits
+ALTER TABLE public.doctor_visits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "visits_owner"
+    ON public.doctor_visits FOR ALL TO public
+    USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Medical consultations: Users can only access their own consultations
+ALTER TABLE public.medical_consultations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view their own consultations"
+    ON public.medical_consultations FOR SELECT TO authenticated
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own consultations"
+    ON public.medical_consultations FOR INSERT TO authenticated
+    WITH CHECK (auth.uid() = user_id);
 ```
 
-### **Database Functions (Security Hardened)**
-
-#### **Vector Similarity Search**
+#### **Profile Detail Tables - Cascading Security**
 ```sql
-CREATE OR REPLACE FUNCTION public.match_documents(
-    query_embedding vector(768),
-    match_threshold float DEFAULT 0.78,
-    match_count int DEFAULT 10
-)
-RETURNS TABLE (
-    id uuid,
-    filename text,
-    content text,
-    metadata jsonb,
-    user_id uuid,
-    created_at timestamptz,
-    similarity float
-)
-LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        documents.id,
-        documents.filename,
-        documents.content,
-        documents.metadata,
-        documents.user_id,
-        documents.created_at,
-        1 - (documents.embedding <=> query_embedding) AS similarity
-    FROM public.documents
-    WHERE documents.embedding IS NOT NULL
-        AND 1 - (documents.embedding <=> query_embedding) > match_threshold
-    ORDER BY documents.embedding <=> query_embedding
-    LIMIT match_count;
-END;
-$$;
+-- Profile conditions: Access through profile ownership
+ALTER TABLE public.profile_conditions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "conditions_owner"
+    ON public.profile_conditions FOR ALL TO public
+    USING (auth.uid() = (SELECT user_id FROM user_medical_profiles WHERE id = profile_conditions.profile_id))
+    WITH CHECK (auth.uid() = (SELECT user_id FROM user_medical_profiles WHERE id = profile_conditions.profile_id));
+
+-- Profile medications: Access through profile ownership
+ALTER TABLE public.profile_medications ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "medications_owner"
+    ON public.profile_medications FOR ALL TO public
+    USING (auth.uid() = (SELECT user_id FROM user_medical_profiles WHERE id = profile_medications.profile_id))
+    WITH CHECK (auth.uid() = (SELECT user_id FROM user_medical_profiles WHERE id = profile_medications.profile_id));
+
+-- Profile allergies: Access through profile ownership
+ALTER TABLE public.profile_allergies ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "allergies_owner"
+    ON public.profile_allergies FOR ALL TO public
+    USING (auth.uid() = (SELECT user_id FROM user_medical_profiles WHERE id = profile_allergies.profile_id))
+    WITH CHECK (auth.uid() = (SELECT user_id FROM user_medical_profiles WHERE id = profile_allergies.profile_id));
 ```
 
-#### **Agent Management Functions**
+#### **Junction Tables - Relationship Security**
 ```sql
--- Get active agent for user
-CREATE OR REPLACE FUNCTION public.get_active_agent(user_uuid uuid)
-RETURNS TABLE (
-    id uuid,
-    status text,
-    session_data jsonb,
-    created_at timestamptz,
-    last_active timestamptz
-)
-LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        agents.id,
-        agents.status,
-        agents.session_data,
-        agents.created_at,
-        agents.last_active
-    FROM public.agents
-    WHERE agents.user_id = user_uuid
-        AND agents.status IN ('active')
-    ORDER BY agents.last_active DESC
-    LIMIT 1;
-END;
-$$;
+-- Symptom-treatment links: Both entities must be owned by user
+ALTER TABLE public.symptom_treatments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "link_sympt_treat"
+    ON public.symptom_treatments FOR ALL TO public
+    USING (
+        auth.uid() = (SELECT user_id FROM user_symptoms WHERE id = symptom_treatments.symptom_id) AND
+        auth.uid() = (SELECT user_id FROM treatments WHERE id = symptom_treatments.treatment_id)
+    );
 
--- Create agent session
-CREATE OR REPLACE FUNCTION public.create_agent_session(
-    user_uuid uuid,
-    initial_status text DEFAULT 'initializing',
-    initial_session_data jsonb DEFAULT '{}'
-)
-RETURNS TABLE (
-    id uuid,
-    status text,
-    session_data jsonb,
-    created_at timestamptz
-)
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $$
-DECLARE
-    new_agent_id uuid;
-BEGIN
-    -- Terminate any existing active sessions
-    UPDATE public.agents 
-    SET status = 'terminated', terminated_at = now()
-    WHERE user_id = user_uuid 
-        AND public.agents.status IN ('active', 'initializing')
-        AND terminated_at IS NULL;
-    
-    -- Create new agent session
-    INSERT INTO public.agents (user_id, status, session_data, created_at, last_active)
-    VALUES (user_uuid, initial_status, initial_session_data, now(), now())
-    RETURNING agents.id INTO new_agent_id;
-    
-    -- Return the created agent details
-    RETURN QUERY
-    SELECT 
-        agents.id,
-        agents.status,
-        agents.session_data,
-        agents.created_at
-    FROM public.agents
-    WHERE agents.id = new_agent_id;
-END;
-$$;
+-- Visit-symptom links: Both entities must be owned by user
+ALTER TABLE public.visit_symptoms ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "link_visit_sympt"
+    ON public.visit_symptoms FOR ALL TO public
+    USING (
+        auth.uid() = (SELECT user_id FROM doctor_visits WHERE id = visit_symptoms.visit_id) AND
+        auth.uid() = (SELECT user_id FROM user_symptoms WHERE id = visit_symptoms.symptom_id)
+    );
+
+-- Visit-treatment links: Both entities must be owned by user
+ALTER TABLE public.visit_treatments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "link_visit_treat"
+    ON public.visit_treatments FOR ALL TO public
+    USING (
+        auth.uid() = (SELECT user_id FROM doctor_visits WHERE id = visit_treatments.visit_id) AND
+        auth.uid() = (SELECT user_id FROM treatments WHERE id = visit_treatments.treatment_id)
+    );
 ```
 
 ---
 
-## 🤖 **TxAgent Container API Specification**
+## 🤖 **Enhanced TxAgent Container API Specification**
 
 ### **Required Endpoints for Integration**
 
@@ -260,7 +447,7 @@ GET /health
 }
 ```
 
-#### **2. Chat Endpoint**
+#### **2. Enhanced Chat Endpoint**
 ```http
 POST /chat
 Authorization: Bearer <user_jwt_token>
@@ -273,8 +460,23 @@ Content-Type: application/json
   "query": "What are the symptoms of myocardial infarction?",
   "top_k": 5,
   "temperature": 0.7,
-  "history": [],
-  "stream": false
+  "history": [
+    {
+      "type": "user",
+      "content": "Previous question",
+      "timestamp": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "stream": false,
+  "context": {
+    "user_profile": {
+      "age": 30,
+      "gender": "male",
+      "conditions": ["Hypertension"],
+      "medications": ["Lisinopril"],
+      "allergies": ["Penicillin"]
+    }
+  }
 }
 ```
 
@@ -287,12 +489,17 @@ Content-Type: application/json
       "filename": "cardiology-guidelines.pdf",
       "similarity": 0.89,
       "chunk_id": "chunk_123",
-      "page": 15
+      "content": "Relevant excerpt...",
+      "metadata": {
+        "page": 15,
+        "section": "Symptoms"
+      }
     }
   ],
   "processing_time": 1250,
   "model": "BioBERT",
-  "tokens_used": 150
+  "tokens_used": 150,
+  "confidence_score": 0.85
 }
 ```
 
@@ -326,282 +533,476 @@ Content-Type: application/json
 - **MUST** use BioBERT or compatible medical model
 - **MUST** handle JWT authentication
 - **MUST** return consistent embeddings for same input
+- **MUST** support user profile context in chat requests
 
 ---
 
-## 🔄 **Complete Chat Flow Implementation**
+## 🔄 **Enhanced API Endpoints**
 
-### **Backend Chat Proxy (Implemented)**
+### **Medical Consultation Endpoint (Enhanced)**
 
-**File:** `backend/routes/chat.js`
+**File:** `backend/routes/medicalConsultation.js`
 
 ```javascript
-// TxAgent chat endpoint - proxy to user's container
-router.post('/chat', verifyToken, async (req, res) => {
+// Enhanced medical consultation with dual-agent support
+router.post('/medical-consultation', async (req, res) => {
   try {
-    const { message, top_k = 5, temperature = 0.7 } = req.body || {};
-    const userId = req.userId;
-    
-    if (!message || typeof message !== 'string') {
-      return res.status(400).json({ error: 'Message is required' });
+    const { 
+      query, 
+      context, 
+      session_id, 
+      preferred_agent = 'txagent'  // NEW: Agent selection
+    } = req.body;
+
+    // Emergency detection (applies to both agents)
+    const emergencyCheck = detectEmergency(query);
+    if (emergencyCheck.isEmergency) {
+      // Handle emergency response...
     }
 
-    // 1. Find active agent session to get runpod_endpoint
-    const agent = await agentService.getActiveAgent(userId);
-    if (!agent?.session_data?.runpod_endpoint) {
-      return res.status(503).json({ 
-        error: 'TxAgent not running. Please start the agent first.' 
-      });
+    // Route based on preferred_agent
+    if (preferred_agent === 'openai') {
+      // OpenAI route with user profile context
+      const openAIResponse = await callOpenAI(query, context, context?.user_profile);
+      // Return formatted response...
+    } else {
+      // TxAgent route (default)
+      const agent = await agentService.getActiveAgent(userId);
+      // Call TxAgent with enhanced context...
     }
-    
-    const baseUrl = agent.session_data.runpod_endpoint.replace(/\/+$/, '');
-    
-    // 2. Get BioBERT embedding for the query (ensures 768-dim consistency)
-    const { data: embedResp } = await axios.post(
-      `${baseUrl}/embed`,
-      { text: message },
-      { 
-        headers: { Authorization: req.headers.authorization },
-        timeout: 30000
-      }
-    );
-    
-    const queryEmbedding = embedResp.embedding; // 768-dim array
 
-    // 3. Similarity search in Supabase (top_k docs)
-    const similarDocs = await searchService.searchRelevantDocuments(
-      userId,
-      queryEmbedding,
-      top_k
-    );
-
-    // 4. Call container's /chat endpoint with correct format
-    const chatUrl = `${baseUrl}/chat`;
-    const { data: chatResp } = await axios.post(
-      chatUrl,
-      {
-        query: message,        // CRITICAL: 'query' not 'message'
-        history: [],           // Required by container
-        top_k,
-        temperature,
-        stream: false          // Required by container
+    // Log consultation with enhanced metadata
+    await supabaseClient.from('medical_consultations').insert({
+      user_id: userId,
+      session_id: session_id || agentId,
+      query: query,
+      response: consultationResponse.text,
+      sources: consultationResponse.sources || [],
+      consultation_type: `${agentId}_consultation`,
+      processing_time: Date.now() - startTime,
+      emergency_detected: false,
+      context_used: {
+        preferred_agent: preferred_agent,
+        has_user_profile: !!(context?.user_profile),
+        conversation_history_length: context?.conversation_history?.length || 0
       },
-      { 
-        headers: { Authorization: req.headers.authorization },
-        timeout: 60000
-      }
-    );
-
-    // 5. Return formatted response to frontend
-    res.json({
-      response: chatResp.response,
-      sources: chatResp.sources || [],
-      agent_id: 'txagent',
-      processing_time: chatResp.processing_time || null,
-      timestamp: new Date().toISOString(),
-      status: 'success'
+      confidence_score: consultationResponse.confidence_score || null
     });
 
   } catch (error) {
-    console.error('TxAgent chat error:', error);
-    res.status(502).json({ 
-      error: 'TxAgent chat processing failed',
-      details: error.message
-    });
+    // Enhanced error handling...
   }
 });
 ```
 
-### **Frontend Chat Integration (Implemented)**
+### **Voice Services Endpoints (NEW)**
 
-**File:** `frontend/src/pages/Chat.tsx`
+#### **Text-to-Speech**
+```http
+POST /api/voice/tts
+Authorization: Bearer <user_jwt_token>
+Content-Type: application/json
 
-```typescript
-const handleSendMessage = async (e: React.FormEvent) => {
-  // Choose endpoint based on selected agent
-  const endpoint = selectedAgent === 'txagent' ? '/api/chat' : '/api/openai-chat';
-  
-  // Prepare request body based on agent type
-  let requestBody;
-  if (selectedAgent === 'txagent') {
-    // TxAgent expects: message, top_k, temperature
-    requestBody = {
-      message: messageContent,
-      top_k: 5,
-      temperature: 0.7
-    };
-  } else {
-    // OpenAI expects: message, context
-    requestBody = {
-      message: messageContent,
-      context: messages.slice(-5)
-    };
+Body:
+{
+  "text": "Based on your symptoms, I recommend consulting with a healthcare provider.",
+  "voice_id": "default",
+  "consultation_id": "uuid-string"
+}
+
+Response:
+{
+  "success": true,
+  "audio_url": "https://storage.supabase.co/object/public/audio/voice/user-id/tts_123.mp3",
+  "file_path": "voice/user-id/tts_123.mp3",
+  "duration_estimate": 15,
+  "voice_id": "default",
+  "processing_time_ms": 2500
+}
+```
+
+#### **Speech-to-Text**
+```http
+POST /api/voice/transcribe
+Authorization: Bearer <user_jwt_token>
+Content-Type: application/json
+
+Body:
+{
+  "audio_url": "https://example.com/audio.mp3",
+  "language": "en"
+}
+
+Response:
+{
+  "success": true,
+  "text": "I have been experiencing headaches for the past week",
+  "language": "en",
+  "confidence": 0.9,
+  "processing_time_ms": 3000
+}
+```
+
+### **Medical Profile Management Endpoints (NEW)**
+
+#### **Get Medical Profile**
+```http
+GET /api/medical-profile
+Authorization: Bearer <user_jwt_token>
+
+Response:
+{
+  "profile": {
+    "id": "uuid-string",
+    "user_id": "uuid-string",
+    "age": 30,
+    "gender": "male",
+    "height_cm": 175.5,
+    "weight_kg": 70.2,
+    "blood_type": "O+",
+    "conditions": [
+      {
+        "id": "uuid-string",
+        "condition_name": "Hypertension",
+        "diagnosed_at": "2023-01-15",
+        "severity": 6,
+        "ongoing": true,
+        "notes": "Well controlled with medication"
+      }
+    ],
+    "medications": [
+      {
+        "id": "uuid-string",
+        "medication_name": "Lisinopril",
+        "dosage": "10mg",
+        "frequency": "Once daily",
+        "is_current": true,
+        "prescribed_by": "Dr. Smith"
+      }
+    ],
+    "allergies": [
+      {
+        "id": "uuid-string",
+        "allergen": "Penicillin",
+        "reaction": "Rash",
+        "severity": 8
+      }
+    ]
+  },
+  "has_profile": true
+}
+```
+
+#### **Create/Update Medical Profile**
+```http
+POST /api/medical-profile
+Authorization: Bearer <user_jwt_token>
+Content-Type: application/json
+
+Body:
+{
+  "age": 30,
+  "gender": "male",
+  "height_cm": 175.5,
+  "weight_kg": 70.2,
+  "blood_type": "O+",
+  "conditions": [
+    {
+      "name": "Hypertension",
+      "diagnosed_at": "2023-01-15",
+      "severity": 6,
+      "ongoing": true,
+      "notes": "Well controlled with medication"
+    }
+  ],
+  "medications": [
+    {
+      "name": "Lisinopril",
+      "dosage": "10mg",
+      "frequency": "Once daily",
+      "is_current": true,
+      "prescribed_by": "Dr. Smith"
+    }
+  ],
+  "allergies": [
+    {
+      "allergen": "Penicillin",
+      "reaction": "Rash",
+      "severity": 8
+    }
+  ]
+}
+
+Response:
+{
+  "success": true,
+  "profile_id": "uuid-string",
+  "message": "Medical profile updated successfully"
+}
+```
+
+### **Symptom Tracking Endpoints (NEW)**
+
+#### **Log Symptom**
+```http
+POST /api/symptoms
+Authorization: Bearer <user_jwt_token>
+Content-Type: application/json
+
+Body:
+{
+  "symptom_name": "Headache",
+  "severity": 7,
+  "description": "Severe throbbing headache on left side",
+  "duration_hours": 4,
+  "triggers": "Stress, lack of sleep",
+  "location": "Left temple"
+}
+
+Response:
+{
+  "success": true,
+  "symptom": {
+    "id": "uuid-string",
+    "symptom_name": "Headache",
+    "severity": 7,
+    "description": "Severe throbbing headache on left side",
+    "duration_hours": 4,
+    "triggers": "Stress, lack of sleep",
+    "location": "Left temple",
+    "created_at": "2024-01-01T00:00:00Z"
   }
+}
+```
 
-  const response = await fetch(`${import.meta.env.VITE_API_URL}${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${session.access_token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
-  });
-};
+#### **Get Symptom History**
+```http
+GET /api/symptoms?limit=50&offset=0
+Authorization: Bearer <user_jwt_token>
+
+Response:
+{
+  "symptoms": [
+    {
+      "id": "uuid-string",
+      "symptom_name": "Headache",
+      "severity": 7,
+      "description": "Severe throbbing headache on left side",
+      "duration_hours": 4,
+      "triggers": "Stress, lack of sleep",
+      "location": "Left temple",
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "total": 25
+}
+```
+
+### **Treatment Tracking Endpoints (NEW)**
+
+#### **Add Treatment**
+```http
+POST /api/treatments
+Authorization: Bearer <user_jwt_token>
+Content-Type: application/json
+
+Body:
+{
+  "treatment_type": "medication",
+  "name": "Ibuprofen",
+  "dosage": "400mg",
+  "duration": "As needed",
+  "description": "For headache relief",
+  "doctor_recommended": false
+}
+
+Response:
+{
+  "success": true,
+  "treatment": {
+    "id": "uuid-string",
+    "treatment_type": "medication",
+    "name": "Ibuprofen",
+    "dosage": "400mg",
+    "duration": "As needed",
+    "description": "For headache relief",
+    "doctor_recommended": false,
+    "completed": false,
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+}
 ```
 
 ---
 
-## 🧪 **Testing and Validation**
+## 🧪 **Enhanced Testing Strategy**
 
-### **Container Direct Testing**
+### **Multi-Agent Testing**
 ```bash
-# Test health endpoint
-curl -X GET "https://your-runpod-url.proxy.runpod.net/health"
-# Expected: {"status":"healthy","model":"BioBERT",...}
-
-# Test embed endpoint (CRITICAL: Must return 768 dimensions)
-curl -X POST "https://your-runpod-url.proxy.runpod.net/embed" \
-  -H "Authorization: Bearer <token>" \
+# Test TxAgent consultation
+curl -X POST "http://localhost:8000/api/medical-consultation" \
+  -H "Authorization: Bearer JWT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"text":"test medical text","normalize":true}'
-# Expected: {"embedding":[...],"dimensions":768,"model":"BioBERT",...}
+  -d '{
+    "query": "What are the symptoms of diabetes?",
+    "preferred_agent": "txagent",
+    "context": {
+      "user_profile": {
+        "age": 30,
+        "gender": "male",
+        "conditions": ["Hypertension"]
+      }
+    }
+  }'
 
-# Test chat endpoint (CRITICAL: Must accept 'query' field)
-curl -X POST "https://your-runpod-url.proxy.runpod.net/chat" \
-  -H "Authorization: Bearer <token>" \
+# Test OpenAI consultation
+curl -X POST "http://localhost:8000/api/medical-consultation" \
+  -H "Authorization: Bearer JWT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"query":"What is diabetes?","top_k":5,"temperature":0.7,"history":[],"stream":false}'
-# Expected: {"response":"...","sources":[...],"processing_time":1250,...}
+  -d '{
+    "query": "What are the symptoms of diabetes?",
+    "preferred_agent": "openai",
+    "context": {
+      "user_profile": {
+        "age": 30,
+        "gender": "male",
+        "conditions": ["Hypertension"]
+      }
+    }
+  }'
 ```
 
-### **Integration Testing Matrix**
-| Test Case | Expected Result | Status |
-|-----------|----------------|---------|
-| Agent Activation | `/api/agent/start` returns 200, creates DB session | ✅ Working |
-| Health Check | Container `/health` returns 200 with JSON | 🔧 Needs container |
-| Embed Generation | Container `/embed` returns 768-dim array | 🔧 Needs container |
-| Chat Request | Container `/chat` processes query and returns response | 🔧 Needs container |
-| Vector Search | Database `match_documents()` finds similar docs | ✅ Working |
-| OpenAI Fallback | `/api/openai-chat` works independently | ✅ Working |
+### **Voice Services Testing**
+```bash
+# Test TTS
+curl -X POST "http://localhost:8000/api/voice/tts" \
+  -H "Authorization: Bearer JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Based on your symptoms, I recommend consulting with a healthcare provider.",
+    "voice_id": "default"
+  }'
+
+# Test STT
+curl -X POST "http://localhost:8000/api/voice/transcribe" \
+  -H "Authorization: Bearer JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "audio_url": "https://example.com/audio.mp3",
+    "language": "en"
+  }'
+```
+
+### **Medical Profile Testing**
+```bash
+# Create medical profile
+curl -X POST "http://localhost:8000/api/medical-profile" \
+  -H "Authorization: Bearer JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "age": 30,
+    "gender": "male",
+    "conditions": [{"name": "Hypertension", "severity": 6}],
+    "medications": [{"name": "Lisinopril", "dosage": "10mg"}],
+    "allergies": [{"allergen": "Penicillin", "severity": 8}]
+  }'
+
+# Log symptom
+curl -X POST "http://localhost:8000/api/symptoms" \
+  -H "Authorization: Bearer JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symptom_name": "Headache",
+    "severity": 7,
+    "duration_hours": 4
+  }'
+```
 
 ---
 
-## 🚨 **Critical Issues for Container Developers**
+## 🚀 **System Architecture Status**
 
-### **Issue #1: Request Format Mismatch**
-- **Problem**: Backend sends `{ "query": "...", "top_k": 5, "temperature": 0.7, "history": [], "stream": false }`
-- **Container Must**: Accept this exact format (not `{ "message": "..." }`)
-- **Fix**: Implement `/chat` endpoint with correct request schema
+### **✅ Backend Complete (100%)**
+- Enhanced medical consultation with dual-agent support
+- Voice services (TTS/STT) integration
+- Comprehensive medical profile management
+- Symptom and treatment tracking
+- Doctor visit management
+- Advanced error handling and diagnostics
+- Multi-tenant security with RLS
 
-### **Issue #2: Embedding Dimensions**
-- **Problem**: System expects exactly 768-dimensional vectors
-- **Container Must**: Return `{"embedding": [...], "dimensions": 768}` with 768 floats
-- **Fix**: Ensure BioBERT model outputs 768-dim embeddings consistently
-
-### **Issue #3: Health Check Format**
-- **Problem**: Backend expects JSON response from `/health`
-- **Container Must**: Return `{"status": "healthy", "model": "BioBERT", ...}`
-- **Fix**: Implement proper JSON health endpoint (not plain text)
-
-### **Issue #4: Authentication**
-- **Problem**: Container receives JWT tokens but may not validate them
-- **Container Should**: Either validate JWT or trust backend proxy
-- **Fix**: Handle `Authorization: Bearer <token>` header appropriately
-
----
-
-## 📊 **System Architecture Status**
-
-### **✅ Backend Ready (100%)**
-- Chat proxy route implemented
-- Agent lifecycle management complete
-- Health monitoring with proper error handling
-- Document processing and embedding storage
-- Vector similarity search optimized
-- Authentication and RLS policies secure
-
-### **✅ Frontend Ready (100%)**
-- Agent selection UI implemented
-- Chat interface with dual-agent support
-- Real-time status monitoring
+### **✅ Frontend Complete (100%)**
+- Doctor portal with full functionality
+- Agent management and monitoring
 - Document upload and management
+- Real-time status monitoring
 - Error handling and user feedback
 
-### **✅ Database Ready (100%)**
-- Schema optimized for 768-dim vectors
-- RLS policies for shared knowledge base
-- Security-hardened functions
-- Performance indexes in place
-- Agent session tracking complete
+### **✅ Database Complete (100%)**
+- Enhanced schema with medical tracking
+- Comprehensive RLS policies
+- Performance-optimized indexes
+- Custom enum types for medical data
+- Junction tables for complex relationships
 
-### **🔧 Container Implementation Needed (0%)**
-- Health endpoint with JSON response
-- Chat endpoint with exact request/response schema
-- Embedding endpoint with 768-dimensional output
-- JWT authentication handling
-- Database access for document retrieval
+### **🔧 Mobile App Integration (90%)**
+- API endpoints ready for mobile consumption
+- Voice services implemented
+- Medical profile APIs available
+- Authentication flow compatible
+- Missing: Mobile app implementation
 
----
-
-## 🎯 **Implementation Priority for Container Developers**
-
-### **Priority 1: Health Check**
-```http
-GET /health
-→ {"status":"healthy","model":"BioBERT","device":"cuda:0","version":"1.0.0"}
-```
-
-### **Priority 2: Embedding Generation**
-```http
-POST /embed
-{"text":"test"}
-→ {"embedding":[768 floats],"dimensions":768,"model":"BioBERT"}
-```
-
-### **Priority 3: Chat Processing**
-```http
-POST /chat
-{"query":"test","top_k":5,"temperature":0.7,"history":[],"stream":false}
-→ {"response":"...","sources":[...],"processing_time":1250}
-```
+### **🔧 Container Implementation Needed (30%)**
+- Health endpoint partially working
+- Chat endpoint needs user profile context support
+- Embedding endpoint working
+- Enhanced error handling needed
 
 ---
 
-## 🚀 **Deployment Readiness**
+## 🎯 **Current Capabilities Summary**
 
-The system is **95% complete** and ready for production deployment. The remaining 5% requires TxAgent container implementation of the three endpoints above.
-
-### **Current Capabilities**
-- ✅ Full OpenAI RAG chat functionality
-- ✅ Document upload and processing
-- ✅ Agent lifecycle management
+### **For Doctors (Doctor Portal)**
+- ✅ Document upload and management
+- ✅ TxAgent session management
+- ✅ Chat with medical documents
 - ✅ Real-time health monitoring
-- ✅ Secure authentication and authorization
-- ✅ Optimized vector search
-- ✅ Responsive UI with error handling
+- ✅ OpenAI fallback support
 
-### **Pending Container Implementation**
-- 🔧 TxAgent chat endpoint compliance
-- 🔧 BioBERT embedding endpoint compliance
-- 🔧 Health check JSON format compliance
+### **For Patients (Mobile App Backend)**
+- ✅ Medical profile management
+- ✅ Symptom tracking and history
+- ✅ Treatment recommendations
+- ✅ Doctor visit scheduling
+- ✅ Voice-enabled consultations
+- ✅ Dual-agent AI support (TxAgent + OpenAI)
+- ✅ Emergency detection
+- ✅ Personalized medical advice
 
-Once the container implements these three endpoints with the exact schemas specified, the system will be 100% functional and ready for production use.
+### **System Features**
+- ✅ Multi-tenant architecture
+- ✅ Secure data isolation
+- ✅ Real-time monitoring
+- ✅ Voice services integration
+- ✅ Comprehensive medical tracking
+- ✅ Advanced error handling
+- ✅ Performance optimization
 
 ---
 
-## 📞 **Support for Container Developers**
+## 📞 **Integration Requirements**
 
-### **Questions to Address:**
-1. **Database Connection**: How should the container connect to Supabase for document retrieval?
-2. **Authentication**: Should JWT tokens be validated or can the container trust the backend proxy?
-3. **Model Loading**: What's the preferred method for loading and caching BioBERT models?
-4. **Error Handling**: What specific error codes and messages should be returned?
-5. **Performance**: What are the expected response times for each endpoint?
+### **For Mobile App Developers**
+1. **Authentication**: Use Supabase JWT tokens
+2. **API Base URL**: Configure backend URL
+3. **Voice Services**: Implement TTS/STT UI components
+4. **Medical Profiles**: Build profile management screens
+5. **Symptom Tracking**: Implement symptom logging interface
 
-### **Available Resources:**
-- Test JWT tokens for development
-- Supabase connection details for testing
-- Sample document embeddings for validation
-- Integration testing support and debugging assistance
+### **For Container Developers**
+1. **User Profile Context**: Support user profile in chat requests
+2. **Enhanced Error Handling**: Return structured error responses
+3. **Performance Optimization**: Improve response times
+4. **Health Monitoring**: Implement comprehensive health checks
 
-The backend team is ready to assist with integration testing and provide any additional support needed for successful container implementation.
+The system is now a comprehensive medical consultation platform supporting both doctor and patient use cases with advanced medical tracking, voice services, and dual-agent AI capabilities.
