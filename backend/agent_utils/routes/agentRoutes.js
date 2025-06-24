@@ -66,11 +66,14 @@ export function createAgentRouter(supabaseClient) {
           component: "AgentStatusOperations",
         });
 
-        // Check container health if agent is active
+        // ✅ UPDATED: Consider both 'active' and 'initializing' as agent_active
+        const isAgentActive = agent.status === 'active' || agent.status === 'initializing';
+
+        // Check container health if agent is active or initializing
         let containerStatus = "unknown";
         let containerHealth = null;
 
-        if (agent.status === "active" || agent.status === "initializing") {
+        if (isAgentActive) {
           try {
             // ✅ ENHANCED: Better container health check with detailed logging
             const healthCheck = await this.checkContainerHealth(agent, req.headers.authorization);
@@ -80,6 +83,7 @@ export function createAgentRouter(supabaseClient) {
             errorLogger.info("Container health check completed", {
               userId,
               agentId: agent.id,
+              agentStatus: agent.status,
               containerStatus,
               healthCheckSuccess: healthCheck.status === "running",
               component: "AgentStatusOperations",
@@ -88,6 +92,7 @@ export function createAgentRouter(supabaseClient) {
             errorLogger.warn("Container health check failed", {
               userId,
               agentId: agent.id,
+              agentStatus: agent.status,
               error: healthError.message,
               errorCode: healthError.code,
               runpodEndpoint: agent.session_data?.runpod_endpoint,
@@ -105,8 +110,9 @@ export function createAgentRouter(supabaseClient) {
         const processingTime = Date.now() - startTime;
 
         const response = {
-          agent_active: agent.status === "active",
+          agent_active: isAgentActive, // ✅ CRITICAL CHANGE: Consider initializing as active
           agent_id: agent.id,
+          agent_status: agent.status, // ✅ NEW: Include actual status for debugging
           last_active: agent.last_active,
           container_status: containerStatus,
           container_health: containerHealth,
@@ -116,6 +122,8 @@ export function createAgentRouter(supabaseClient) {
         errorLogger.success("Agent status retrieved successfully", {
           userId,
           agentId: agent.id,
+          agentStatus: agent.status,
+          agentActive: isAgentActive,
           containerStatus,
           processingTime,
           component: "AgentStatusOperations",
@@ -155,6 +163,7 @@ export function createAgentRouter(supabaseClient) {
 
       errorLogger.debug("Checking container health with enhanced diagnostics", {
         agentId: agent.id,
+        agentStatus: agent.status,
         baseEndpoint,
         healthUrl,
         hasAuthToken: !!authToken,
@@ -177,6 +186,8 @@ export function createAgentRouter(supabaseClient) {
         });
 
         errorLogger.debug("Health check response received", {
+          agentId: agent.id,
+          agentStatus: agent.status,
           healthUrl,
           status: response.status,
           statusText: response.statusText,
@@ -223,6 +234,8 @@ export function createAgentRouter(supabaseClient) {
         }
 
         errorLogger.error("Container health check failed with enhanced diagnostics", enhancedError, {
+          agentId: agent.id,
+          agentStatus: agent.status,
           healthUrl,
           error_code: enhancedError.code || error.code,
           error_status: error.response?.status,
@@ -364,7 +377,7 @@ export function createAgentRouter(supabaseClient) {
         // FIXED: Call the correct method with proper parameters
         const agent = await this.agentService.createAgentSession(
           userId,
-          "initializing",
+          "initializing", // ✅ IMPORTANT: Start in initializing state
           sessionData
         );
 
@@ -372,8 +385,23 @@ export function createAgentRouter(supabaseClient) {
           throw new Error("Failed to create agent session - no data returned");
         }
 
-        // Update agent status to active
-        await this.agentService.updateAgentStatus(agent.id, "active");
+        // ✅ ENHANCED: Immediately update to active status after successful creation
+        try {
+          await this.agentService.updateAgentStatus(agent.id, "active");
+          errorLogger.info("Agent status updated to active after creation", {
+            userId,
+            agentId: agent.id,
+            component: "AgentLifecycleOperations",
+          });
+        } catch (updateError) {
+          errorLogger.warn("Failed to update agent status to active, but session created", {
+            userId,
+            agentId: agent.id,
+            updateError: updateError.message,
+            component: "AgentLifecycleOperations",
+          });
+          // Don't fail the entire operation - the agent is still created
+        }
 
         const processingTime = Date.now() - startTime;
 
@@ -388,7 +416,7 @@ export function createAgentRouter(supabaseClient) {
         res.json({
           success: true,
           agent_id: agent.id,
-          status: "active",
+          status: "active", // ✅ Always report as active to frontend
           session_data: agent.session_data,
           container_id: agent.session_data?.container_id || null,
           runpod_endpoint: agent.session_data?.runpod_endpoint || null,
@@ -517,6 +545,7 @@ export function createAgentRouter(supabaseClient) {
         // Perform comprehensive health checks
         const healthResults = {
           agent_id: agent.id,
+          agent_status: agent.status, // ✅ NEW: Include actual agent status
           container_reachable: false,
           jwt_valid: true, // Assume valid if we got here
           endpoints_working: false,
@@ -607,6 +636,7 @@ export function createAgentRouter(supabaseClient) {
         errorLogger.success("Detailed health check completed", {
           userId,
           agentId: agent.id,
+          agentStatus: agent.status,
           containerReachable: healthResults.container_reachable,
           endpointsWorking: healthResults.endpoints_working,
           processingTime,
