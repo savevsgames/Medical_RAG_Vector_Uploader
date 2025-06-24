@@ -1,6 +1,7 @@
 import express from 'express';
 import { verifyToken } from '../middleware/auth.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
+import { createClient } from '@supabase/supabase-js'; // ✅ ADD: Import createClient for user-authenticated client
 import axios from 'axios';
 
 export function createVoiceServicesRouter(supabaseClient) {
@@ -78,11 +79,42 @@ export function createVoiceServicesRouter(supabaseClient) {
       const audioFileName = `tts_${userId}_${Date.now()}.mp3`;
       const audioPath = `voice/${userId}/${audioFileName}`;
 
-      // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabaseClient.storage
+      // ✅ CRITICAL FIX: Create user-authenticated Supabase client for storage upload
+      errorLogger.debug('Creating user-authenticated Supabase client for storage upload', {
+        userId,
+        audioPath,
+        hasAuthToken: !!req.headers.authorization,
+        authTokenPreview: req.headers.authorization ? req.headers.authorization.substring(0, 30) + '...' : 'none',
+        component: 'VoiceServices'
+      });
+
+      const userSupabaseClient = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_ANON_KEY, // ✅ Use anon key, not service key
+        {
+          global: {
+            headers: {
+              Authorization: req.headers.authorization, // ✅ User's JWT for RLS
+            },
+          },
+        }
+      );
+
+      errorLogger.debug('User-authenticated client created, uploading audio to storage', {
+        userId,
+        audioPath,
+        audioSize: elevenLabsResponse.data.byteLength,
+        bucket: 'audio',
+        authMethod: 'user_jwt',
+        component: 'VoiceServices'
+      });
+
+      // ✅ FIXED: Upload to Supabase Storage using user-authenticated client
+      const { data: uploadData, error: uploadError } = await userSupabaseClient.storage
         .from('audio')
         .upload(audioPath, elevenLabsResponse.data, {
           contentType: 'audio/mpeg',
+          upsert: false, // Set to true if you want to allow overwrite
           metadata: {
             userId: userId,
             consultationId: consultation_id,
@@ -93,22 +125,41 @@ export function createVoiceServicesRouter(supabaseClient) {
         });
 
       if (uploadError) {
-        errorLogger.error('Failed to upload TTS audio to storage', uploadError, {
-          userId,
-          audioPath,
+        errorLogger.error('Supabase storage upload failed for TTS audio', {
+          error_message: uploadError.message,
+          error_code: uploadError.status,
+          audio_path: audioPath,
+          user_id: userId,
+          bucket: 'audio',
+          auth_context: 'user_jwt',
+          rls_check: {
+            auth_uid: userId,
+            folder_structure: audioPath.split('/'),
+            first_folder: audioPath.split('/')[0],
+            policy_match: audioPath.split('/')[1] === userId,
+          },
           component: 'VoiceServices'
         });
         throw new Error(`Storage upload failed: ${uploadError.message}`);
       }
 
-      // Get public URL
-      const { data: urlData } = supabaseClient.storage
+      errorLogger.success('TTS audio uploaded to storage successfully', {
+        filePath: uploadData.path,
+        audioPath: audioPath,
+        userId: userId,
+        authContext: 'user_jwt',
+        rlsPolicyMatch: '✅ auth.uid() matches user folder',
+        component: 'VoiceServices'
+      });
+
+      // ✅ FIXED: Get public URL using user-authenticated client
+      const { data: urlData } = userSupabaseClient.storage
         .from('audio')
         .getPublicUrl(audioPath);
 
       const audioUrl = urlData.publicUrl;
 
-      // Update consultation record if provided
+      // Update consultation record if provided (using service role client for database operations)
       if (consultation_id) {
         try {
           await supabaseClient
