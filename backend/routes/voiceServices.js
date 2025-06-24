@@ -1,7 +1,8 @@
 import express from 'express';
 import { verifyToken } from '../middleware/auth.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
-import { createClient } from '@supabase/supabase-js'; // ✅ ADD: Import createClient for user-authenticated client
+import { createClient } from '@supabase/supabase-js';
+import { config } from '../config/environment.js'; // ✅ ADD: Import config for environment variables
 import axios from 'axios';
 
 export function createVoiceServicesRouter(supabaseClient) {
@@ -32,7 +33,7 @@ export function createVoiceServicesRouter(supabaseClient) {
       });
 
       // Check if ElevenLabs is configured
-      if (!process.env.ELEVENLABS_API_KEY) {
+      if (!config.elevenlabs.apiKey) {
         errorLogger.warn('ElevenLabs not configured for TTS', {
           userId,
           component: 'VoiceServices'
@@ -44,10 +45,34 @@ export function createVoiceServicesRouter(supabaseClient) {
         });
       }
 
+      // ✅ CRITICAL: Validate required environment variables before proceeding
+      if (!config.supabase.url || !config.supabase.anonKey) {
+        errorLogger.error('Missing required Supabase configuration for TTS', {
+          userId,
+          hasSupabaseUrl: !!config.supabase.url,
+          hasSupabaseAnonKey: !!config.supabase.anonKey,
+          component: 'VoiceServices'
+        });
+
+        return res.status(500).json({
+          error: 'Text-to-speech service configuration error',
+          code: 'TTS_CONFIG_ERROR',
+          details: 'Missing Supabase configuration'
+        });
+      }
+
       // Call ElevenLabs API
-      const elevenLabsVoiceId = voice_id || process.env.ELEVENLABS_VOICE_ID || 'default';
+      const elevenLabsVoiceId = voice_id || config.elevenlabs.voiceId || 'default';
       const elevenLabsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${elevenLabsVoiceId}`;
       
+      errorLogger.debug('Calling ElevenLabs API', {
+        userId,
+        elevenLabsUrl,
+        voiceId: elevenLabsVoiceId,
+        textLength: text.length,
+        component: 'VoiceServices'
+      });
+
       const elevenLabsResponse = await axios.post(
         elevenLabsUrl,
         {
@@ -64,7 +89,7 @@ export function createVoiceServicesRouter(supabaseClient) {
           headers: {
             'Accept': 'audio/mpeg',
             'Content-Type': 'application/json',
-            'xi-api-key': process.env.ELEVENLABS_API_KEY
+            'xi-api-key': config.elevenlabs.apiKey
           },
           responseType: 'arraybuffer',
           timeout: 30000
@@ -74,6 +99,13 @@ export function createVoiceServicesRouter(supabaseClient) {
       if (elevenLabsResponse.status !== 200) {
         throw new Error(`ElevenLabs API error: ${elevenLabsResponse.status}`);
       }
+
+      errorLogger.debug('ElevenLabs API response received', {
+        userId,
+        status: elevenLabsResponse.status,
+        audioSize: elevenLabsResponse.data.byteLength,
+        component: 'VoiceServices'
+      });
 
       // Generate unique filename
       const audioFileName = `tts_${userId}_${Date.now()}.mp3`;
@@ -85,12 +117,14 @@ export function createVoiceServicesRouter(supabaseClient) {
         audioPath,
         hasAuthToken: !!req.headers.authorization,
         authTokenPreview: req.headers.authorization ? req.headers.authorization.substring(0, 30) + '...' : 'none',
+        supabaseUrl: config.supabase.url,
+        hasAnonKey: !!config.supabase.anonKey,
         component: 'VoiceServices'
       });
 
       const userSupabaseClient = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_ANON_KEY, // ✅ Use anon key, not service key
+        config.supabase.url,
+        config.supabase.anonKey, // ✅ Use anon key from config
         {
           global: {
             headers: {
@@ -240,7 +274,7 @@ export function createVoiceServicesRouter(supabaseClient) {
       });
 
       // Check if OpenAI is configured for Whisper API
-      if (!process.env.OPENAI_API_KEY) {
+      if (!config.openai.apiKey) {
         errorLogger.warn('OpenAI not configured for transcription', {
           userId,
           component: 'VoiceServices'
@@ -292,7 +326,7 @@ export function createVoiceServicesRouter(supabaseClient) {
         formData,
         {
           headers: {
-            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+            'Authorization': `Bearer ${config.openai.apiKey}`,
             ...formData.getHeaders()
           },
           timeout: 60000
@@ -359,7 +393,7 @@ export function createVoiceServicesRouter(supabaseClient) {
     const userId = req.userId;
 
     try {
-      if (!process.env.ELEVENLABS_API_KEY) {
+      if (!config.elevenlabs.apiKey) {
         return res.status(503).json({
           error: 'Voice service is not configured',
           code: 'VOICE_SERVICE_NOT_CONFIGURED'
@@ -369,7 +403,7 @@ export function createVoiceServicesRouter(supabaseClient) {
       // Get available voices from ElevenLabs
       const voicesResponse = await axios.get('https://api.elevenlabs.io/v1/voices', {
         headers: {
-          'xi-api-key': process.env.ELEVENLABS_API_KEY
+          'xi-api-key': config.elevenlabs.apiKey
         },
         timeout: 10000
       });
