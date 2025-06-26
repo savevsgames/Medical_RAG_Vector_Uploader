@@ -2,6 +2,7 @@ import express from 'express';
 import { verifyToken } from '../middleware/auth.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 import { AgentService } from '../agent_utils/core/agentService.js';
+import { TxAgentRAGService } from '../lib/services/TxAgentRAGService.js';
 import axios from 'axios';
 
 export function createMedicalConsultationRouter(supabaseClient) {
@@ -32,7 +33,7 @@ export function createMedicalConsultationRouter(supabaseClient) {
     };
   };
 
-  // ✅ NEW: OpenAI API call function
+  // ✅ NEW: OpenAI API call function (unchanged)
   const callOpenAI = async (query, context, userProfile) => {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OpenAI API key not configured');
@@ -220,8 +221,8 @@ Guidelines:
       let processingDetails = {};
 
       if (preferred_agent === 'openai') {
-        // ✅ NEW: OpenAI Route
-        errorLogger.info('Routing consultation to OpenAI', {
+        // ✅ NEW: OpenAI Route (no RAG - uses general knowledge)
+        errorLogger.info('Routing consultation to OpenAI (no RAG)', {
           userId,
           queryLength: query.length,
           hasUserProfile: !!(context?.user_profile),
@@ -245,7 +246,8 @@ Guidelines:
           processingDetails = {
             model: openAIResponse.model,
             usage: openAIResponse.usage,
-            agent_type: 'openai'
+            agent_type: 'openai',
+            rag_used: false
           };
 
           errorLogger.info('OpenAI consultation completed successfully', {
@@ -272,8 +274,8 @@ Guidelines:
         }
 
       } else {
-        // ✅ EXISTING: TxAgent Route (default)
-        errorLogger.info('Routing consultation to TxAgent', {
+        // ✅ ENHANCED: TxAgent Route with RAG Integration
+        errorLogger.info('Routing consultation to TxAgent with RAG', {
           userId,
           queryLength: query.length,
           component: 'MedicalConsultation'
@@ -299,138 +301,95 @@ Guidelines:
           });
         }
 
-        // ✅ ENHANCED: Detailed logging for TxAgent URL
-        const txAgentUrl = `${agent.session_data.runpod_endpoint.replace(/\/+$/, '')}/chat`;
-        
-        errorLogger.info('Preparing TxAgent chat request', {
-          userId,
-          agentId: agent.id,
-          agentStatus: agent.status,
+        // ✅ NEW: Initialize TxAgent RAG Service
+        const txAgentUrl = agent.session_data.runpod_endpoint.replace(/\/+$/, '');
+        const ragService = new TxAgentRAGService(
+          supabaseClient,
           txAgentUrl,
-          queryLength: query.length,
-          hasContext: !!context,
-          hasUserProfile: !!(context?.user_profile),
-          hasHistory: !!(context?.conversation_history),
-          historyLength: context?.conversation_history?.length || 0,
-          component: 'MedicalConsultation'
-        });
-        
+          req.headers.authorization
+        );
+
         try {
-          // ✅ ENHANCED: Detailed logging before fetch
-          errorLogger.debug('Sending request to TxAgent container', {
+          // ✅ NEW: Perform RAG workflow
+          errorLogger.info('Starting RAG workflow for TxAgent consultation', {
             userId,
             agentId: agent.id,
             txAgentUrl,
-            requestPayload: {
-              query: query.substring(0, 100) + (query.length > 100 ? '...' : ''),
-              hasHistory: !!(context?.conversation_history),
-              historyLength: context?.conversation_history?.length || 0,
-              hasUserProfile: !!(context?.user_profile),
-              top_k: 5,
-              temperature: 0.7,
-              stream: false
-            },
+            queryLength: query.length,
             component: 'MedicalConsultation'
           });
 
-          // ✅ ENHANCED: Increased timeout from process.env.TXAGENT_TIMEOUT
-          const timeoutMs = parseInt(process.env.TXAGENT_TIMEOUT) || 120000; // Default 2 minutes
+          const ragResult = await ragService.performRAG(query, 5, 0.7);
+
+          // ✅ NEW: Create augmented prompt with RAG context
+          const augmentedQuery = ragService.createAugmentedPrompt(
+            query,
+            ragResult.context,
+            context?.user_profile,
+            context?.conversation_history
+          );
+
+          errorLogger.info('RAG workflow completed, sending augmented query to TxAgent', {
+            userId,
+            agentId: agent.id,
+            originalQueryLength: query.length,
+            augmentedQueryLength: augmentedQuery.length,
+            documentsFound: ragResult.documentsFound,
+            sourcesCount: ragResult.sources.length,
+            component: 'MedicalConsultation'
+          });
+
+          // ✅ ENHANCED: Send augmented query to TxAgent
+          const timeoutMs = parseInt(process.env.TXAGENT_TIMEOUT) || 120000;
           
-          errorLogger.debug('Using TxAgent timeout setting', {
-            timeoutMs,
-            envTimeout: process.env.TXAGENT_TIMEOUT,
-            component: 'MedicalConsultation'
-          });
-
-          const txAgentResponse = await fetch(txAgentUrl, {
+          const txAgentResponse = await fetch(`${txAgentUrl}/chat`, {
             method: 'POST',
             headers: {
               'Authorization': req.headers.authorization,
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              query: query,
+              query: augmentedQuery, // ✅ NEW: Use augmented query with RAG context
               history: context?.conversation_history || [],
               top_k: 5,
               temperature: 0.7,
               stream: false,
-              context: context // ✅ NEW: Pass full context including user_profile
+              context: context // Pass full context including user_profile
             }),
             signal: AbortSignal.timeout(timeoutMs)
           });
 
-          // ✅ ENHANCED: Detailed logging after fetch
-          errorLogger.debug('Received response from TxAgent container', {
-            userId,
-            agentId: agent.id,
-            txAgentUrl,
-            status: txAgentResponse.status,
-            statusText: txAgentResponse.statusText,
-            headers: Object.fromEntries(txAgentResponse.headers.entries()),
-            ok: txAgentResponse.ok,
-            component: 'MedicalConsultation'
-          });
-
           if (!txAgentResponse.ok) {
             const errorText = await txAgentResponse.text();
-            
-            // ✅ ENHANCED: Detailed error logging
-            errorLogger.error('TxAgent responded with error status', {
-              userId,
-              agentId: agent.id,
-              txAgentUrl,
-              status: txAgentResponse.status,
-              statusText: txAgentResponse.statusText,
-              errorText: errorText.substring(0, 500) + (errorText.length > 500 ? '...' : ''),
-              errorTextLength: errorText.length,
-              component: 'MedicalConsultation'
-            });
-            
             throw new Error(`TxAgent responded with status ${txAgentResponse.status}: ${errorText.substring(0, 200)}`);
           }
 
-          // ✅ ENHANCED: Detailed logging for response parsing
-          errorLogger.debug('Parsing TxAgent JSON response', {
-            userId,
-            agentId: agent.id,
-            txAgentUrl,
-            contentType: txAgentResponse.headers.get('content-type'),
-            component: 'MedicalConsultation'
-          });
-
           const txAgentData = await txAgentResponse.json();
 
-          // ✅ ENHANCED: Detailed logging for parsed response
-          errorLogger.debug('Successfully parsed TxAgent response', {
-            userId,
-            agentId: agent.id,
-            responseKeys: Object.keys(txAgentData),
-            hasResponse: !!txAgentData.response,
-            responseLength: txAgentData.response?.length || 0,
-            sourcesCount: txAgentData.sources?.length || 0,
-            processingTime: txAgentData.processing_time,
-            component: 'MedicalConsultation'
-          });
-
+          // ✅ NEW: Combine TxAgent response with RAG sources
           consultationResponse = {
             text: txAgentData.response,
-            sources: txAgentData.sources || [],
+            sources: ragResult.sources, // ✅ NEW: Use RAG sources instead of TxAgent sources
             confidence_score: txAgentData.confidence_score
           };
 
           agentId = 'txagent';
           processingDetails = {
             agent_id: agent.id,
-            sources_count: txAgentData.sources?.length || 0,
+            sources_count: ragResult.sources.length,
+            documents_found: ragResult.documentsFound,
             processing_time: txAgentData.processing_time,
             model: txAgentData.model || 'BioBERT',
-            agent_type: 'txagent'
+            agent_type: 'txagent',
+            rag_used: true,
+            rag_error: ragResult.error || null
           };
 
-          errorLogger.info('TxAgent consultation completed successfully', {
+          errorLogger.info('TxAgent consultation with RAG completed successfully', {
             userId,
             processingTime: txAgentData.processing_time,
-            sourcesCount: txAgentData.sources?.length || 0,
+            sourcesCount: ragResult.sources.length,
+            documentsFound: ragResult.documentsFound,
             agentId: agent.id,
             component: 'MedicalConsultation'
           });
@@ -446,9 +405,12 @@ Guidelines:
           } else if (error.message.includes('fetch failed')) {
             enhancedError = new Error(`Network error connecting to TxAgent container at ${txAgentUrl}. The container may be unreachable.`);
             errorCode = 'TXAGENT_NETWORK_ERROR';
+          } else if (error.message.includes('RAG')) {
+            enhancedError = new Error(`RAG workflow failed: ${error.message}. Falling back to basic TxAgent response.`);
+            errorCode = 'TXAGENT_RAG_FAILED';
           }
           
-          errorLogger.error('TxAgent consultation failed', enhancedError, {
+          errorLogger.error('TxAgent consultation with RAG failed', enhancedError, {
             userId,
             query: query.substring(0, 100),
             agentId: agent.id,
@@ -473,7 +435,7 @@ Guidelines:
         }
       }
 
-      // ✅ UPDATED: Log consultation with agent information
+      // ✅ UPDATED: Log consultation with enhanced RAG information
       const consultationRecord = {
         user_id: userId,
         session_id: session_id || agentId,
@@ -506,10 +468,11 @@ Guidelines:
         sourcesCount: consultationResponse.sources?.length || 0,
         agentUsed: agentId,
         preferredAgent: preferred_agent,
+        ragUsed: processingDetails.rag_used || false,
         component: 'MedicalConsultation'
       });
 
-      // ✅ UPDATED: Return response with agent information
+      // ✅ UPDATED: Return response with enhanced RAG information
       res.json({
         response: {
           text: consultationResponse.text,
@@ -525,7 +488,12 @@ Guidelines:
         processing_time_ms: Date.now() - startTime,
         session_id: session_id || agentId,
         agent_id: agentId, // ✅ NEW: Include which agent was actually used
-        preferred_agent: preferred_agent // ✅ NEW: Include what was requested
+        preferred_agent: preferred_agent, // ✅ NEW: Include what was requested
+        rag_info: { // ✅ NEW: Include RAG information
+          used: processingDetails.rag_used || false,
+          documents_found: processingDetails.documents_found || 0,
+          sources_count: processingDetails.sources_count || 0
+        }
       });
 
     } catch (error) {
