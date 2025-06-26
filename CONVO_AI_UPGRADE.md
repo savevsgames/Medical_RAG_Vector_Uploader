@@ -543,7 +543,7 @@ The result will be a state-of-the-art conversational health assistant that trans
 
 
 
-FRONT END VERSION TO COMBINE WITH YOUR VERSION USING THE FRONT END FOR INFO YOU ARE MISSING:
+### FRONT END VERSION TO COMBINE WITH YOUR VERSION USING THE FRONT END FOR INFO YOU ARE MISSING:
 # Conversational AI Upgrade Plan for Symptom Savior
 
 ## Overview
