@@ -1,4 +1,5 @@
 import express from "express";
+import { createServer } from 'http';
 import { config, validateConfig } from "./config/environment.js";
 import { database, supabase } from "./config/database.js";
 import { corsMiddleware, optionsHandler } from "./middleware/cors.js";
@@ -6,6 +7,7 @@ import { requestLogger } from "./middleware/logging.js";
 import setupRoutes from "./routes/index.js";
 import { staticFileService } from "./services/StaticFileService.js";
 import { initializeLogger, errorLogger } from "./agent_utils/shared/logger.js";
+import { ConversationWebSocketHandler } from "./websocket/conversationHandler.js";
 
 function startServer() {
   const app = express();
@@ -133,6 +135,31 @@ function startServer() {
   // Setup SPA fallback (must be last)
   staticFileService.setupSPAFallback(app);
 
+  // ✅ NEW: Create HTTP server for WebSocket support
+  const server = createServer(app);
+
+  // ✅ NEW: Initialize WebSocket handler for conversational AI
+  try {
+    const wsHandler = new ConversationWebSocketHandler(server, supabaseClient);
+    errorLogger.success("WebSocket conversation handler initialized", {
+      path: '/conversation/stream',
+      component: 'ConversationWebSocketHandler'
+    });
+
+    // Add WebSocket stats endpoint
+    app.get('/api/conversation/stats', (req, res) => {
+      const stats = wsHandler.getStats();
+      res.json({
+        websocket_stats: stats,
+        timestamp: new Date().toISOString()
+      });
+    });
+
+  } catch (error) {
+    errorLogger.error("Failed to initialize WebSocket handler", error);
+    process.exit(1);
+  }
+
   // Error handling middleware
   app.use((error, req, res, next) => {
     errorLogger.error("Unhandled server error", error, {
@@ -177,7 +204,7 @@ function startServer() {
   });
 
   // Start server
-  app.listen(config.port, () => {
+  server.listen(config.port, () => {
     errorLogger.success("🚀 Medical RAG Server running", {
       port: config.port,
       health_check: `http://localhost:${config.port}/health`,
@@ -191,8 +218,9 @@ function startServer() {
     errorLogger.info("🔧 Services configured:");
     errorLogger.connectionCheck("Database", database.isInitialized());
     errorLogger.connectionCheck("Supabase Auth", "service_role");
+    errorLogger.connectionCheck("WebSocket Server", "active");
 
-    errorLogger.info("📚 Available endpoints (LEGACY ROUTES REMOVED):");
+    errorLogger.info("📚 Available endpoints (UPDATED WITH WEBSOCKET):");
     errorLogger.info("  - GET  /health (Health check)");
     errorLogger.info("  - POST /upload (Document upload)");
     errorLogger.info("  - POST /api/chat (Chat with TxAgent)");
@@ -200,10 +228,10 @@ function startServer() {
     errorLogger.info("  - POST /api/agent/start (Start TxAgent)");
     errorLogger.info("  - POST /api/agent/stop (Stop TxAgent)");
     errorLogger.info("  - GET  /api/agent/status (Agent status)");
-    errorLogger.info(
-      "  - POST /api/agent/health-check (Detailed health check)"
-    );
+    errorLogger.info("  - POST /api/agent/health-check (Detailed health check)");
     errorLogger.info("  - POST /api/embed (TxAgent embedding proxy)");
+    errorLogger.info("  - POST /api/conversation/start (Start conversation session)");
+    errorLogger.info("  - WS   /conversation/stream/:sessionId (WebSocket stream)");
     errorLogger.info("  - GET  /* (SPA fallback to index.html)");
   });
 }

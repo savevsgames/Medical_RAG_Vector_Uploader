@@ -7,6 +7,7 @@ import { createMedicalConsultationRouter } from "./medicalConsultation.js";
 import { createMedicalProfileRouter } from "./medicalProfile.js"; // Phase 2
 import { createVoiceGenerationRouter } from "./voiceGeneration.js"; // Phase 2
 import { createVoiceServicesRouter } from "./voiceServices.js"; // ✅ NEW: Voice services for mobile app
+import { createConversationWebSocketRouter } from "./conversationWebSocket.js"; // ✅ NEW: Conversation WebSocket
 import { mountAgentRoutes } from "../agent_utils/index.js";
 import { verifyToken } from "../middleware/auth.js";
 import { errorLogger } from "../agent_utils/shared/logger.js";
@@ -41,6 +42,7 @@ export function setupRoutes(app, supabaseClient) {
   const medicalProfileRouter = createMedicalProfileRouter(supabaseClient); // Phase 2
   const voiceGenerationRouter = createVoiceGenerationRouter(supabaseClient); // Phase 2
   const voiceServicesRouter = createVoiceServicesRouter(supabaseClient); // ✅ NEW: Voice services
+  const conversationWebSocketRouter = createConversationWebSocketRouter(supabaseClient); // ✅ NEW: Conversation WebSocket
 
   // FIXED: Clean route structure - no legacy routes
   // Mount protected routes - auth is now handled within each router
@@ -49,6 +51,7 @@ export function setupRoutes(app, supabaseClient) {
   app.use("/api", medicalProfileRouter); // Phase 2: /api/medical-profile, /api/symptoms, /api/treatments
   app.use("/api", voiceGenerationRouter); // Phase 2: /api/generate-voice, /api/voices
   app.use("/api/voice", voiceServicesRouter); // ✅ NEW: /api/voice/tts, /api/voice/transcribe, /api/voice/voices
+  app.use("/api", conversationWebSocketRouter); // ✅ NEW: /api/conversation/start, /api/conversation/:sessionId/status
   app.use("/", documentsRouter); // /upload (legacy for compatibility)
 
   // FIXED: Mount agent routes ONLY (no legacy routes)
@@ -103,6 +106,11 @@ export function setupRoutes(app, supabaseClient) {
       "POST /api/agent/stop",
       "GET /api/agent/status",
       "POST /api/agent/health-check",
+      "POST /api/conversation/start", // ✅ NEW: Start conversation session
+      "GET /api/conversation/:sessionId/status", // ✅ NEW: Get conversation status
+      "POST /api/conversation/:sessionId/end", // ✅ NEW: End conversation session
+      "GET /api/conversation/active", // ✅ NEW: Get active conversations
+      "WS /conversation/stream/:sessionId", // ✅ NEW: WebSocket stream
     ],
     legacy_routes_removed: true,
   });
