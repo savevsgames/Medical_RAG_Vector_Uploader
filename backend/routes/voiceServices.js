@@ -1,15 +1,32 @@
 import express from 'express';
+import multer from 'multer'; // ✅ ADD: Import multer for file handling
 import { verifyToken } from '../middleware/auth.js';
 import { errorLogger } from '../agent_utils/shared/logger.js';
 import { createClient } from '@supabase/supabase-js';
-import { config } from '../config/environment.js'; // ✅ ADD: Import config for environment variables
+import { config } from '../config/environment.js';
 import axios from 'axios';
+
+// ✅ NEW: Configure multer for memory storage (files stored in memory as Buffer)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB limit for audio files
+  },
+  fileFilter: (req, file, cb) => {
+    // Accept audio files
+    if (file.mimetype.startsWith('audio/') || file.mimetype === 'application/octet-stream') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only audio files are allowed'), false);
+    }
+  }
+});
 
 export function createVoiceServicesRouter(supabaseClient) {
   const router = express.Router();
   router.use(verifyToken);
 
-  // Text-to-Speech endpoint
+  // Text-to-Speech endpoint (unchanged)
   router.post('/tts', async (req, res) => {
     const startTime = Date.now();
     const userId = req.userId;
@@ -250,28 +267,106 @@ export function createVoiceServicesRouter(supabaseClient) {
     }
   });
 
-  // Speech-to-Text endpoint (transcription)
-  router.post('/transcribe', async (req, res) => {
+  // ✅ UPDATED: Speech-to-Text endpoint with multer support
+  router.post('/transcribe', upload.single('audio'), async (req, res) => {
     const startTime = Date.now();
     const userId = req.userId;
 
     try {
-      const { audio_url, audio_data, language = 'en' } = req.body;
-
-      if (!audio_url && !audio_data) {
-        return res.status(400).json({
-          error: 'Either audio_url or audio_data is required for transcription',
-          code: 'MISSING_AUDIO'
-        });
-      }
-
       errorLogger.info('Transcription request received', {
         userId,
-        hasAudioUrl: !!audio_url,
-        hasAudioData: !!audio_data,
-        language,
+        hasFile: !!req.file,
+        hasBody: !!req.body,
+        fileInfo: req.file ? {
+          originalname: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size
+        } : null,
+        bodyKeys: Object.keys(req.body || {}),
         component: 'VoiceServices'
       });
+
+      // ✅ NEW: Handle both multipart/form-data (req.file) and JSON (req.body) formats
+      let audioBuffer;
+      let language = 'en';
+
+      if (req.file) {
+        // ✅ NEW: Audio file uploaded via multipart/form-data
+        audioBuffer = req.file.buffer;
+        language = req.body.language || 'en';
+        
+        errorLogger.debug('Processing audio file from multipart upload', {
+          userId,
+          filename: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          language,
+          component: 'VoiceServices'
+        });
+      } else {
+        // ✅ FALLBACK: Handle JSON format for backward compatibility
+        const { audio_url, audio_data, language: reqLanguage = 'en' } = req.body || {};
+        language = reqLanguage;
+
+        if (!audio_url && !audio_data) {
+          errorLogger.warn('No audio file or data provided in transcription request', {
+            userId,
+            hasFile: !!req.file,
+            hasAudioUrl: !!audio_url,
+            hasAudioData: !!audio_data,
+            bodyKeys: Object.keys(req.body || {}),
+            component: 'VoiceServices'
+          });
+
+          return res.status(400).json({
+            error: 'Audio file is required for transcription. Please upload an audio file.',
+            code: 'MISSING_AUDIO',
+            details: 'Expected either a file upload (multipart/form-data) or audio_url/audio_data in JSON body'
+          });
+        }
+
+        if (audio_url) {
+          // Download audio from URL
+          try {
+            errorLogger.debug('Downloading audio from URL for transcription', {
+              userId,
+              audioUrl: audio_url,
+              component: 'VoiceServices'
+            });
+
+            const audioResponse = await axios.get(audio_url, {
+              responseType: 'arraybuffer',
+              timeout: 30000
+            });
+            audioBuffer = audioResponse.data;
+          } catch (downloadError) {
+            errorLogger.error('Failed to download audio from URL', downloadError, {
+              userId,
+              audioUrl: audio_url,
+              component: 'VoiceServices'
+            });
+            throw new Error(`Failed to download audio from URL: ${downloadError.message}`);
+          }
+        } else {
+          // Use provided audio data (base64 encoded)
+          try {
+            audioBuffer = Buffer.from(audio_data, 'base64');
+            errorLogger.debug('Processing base64 audio data', {
+              userId,
+              audioDataLength: audio_data.length,
+              bufferSize: audioBuffer.length,
+              component: 'VoiceServices'
+            });
+          } catch (decodeError) {
+            errorLogger.error('Failed to decode base64 audio data', decodeError, {
+              userId,
+              audioDataLength: audio_data?.length,
+              component: 'VoiceServices'
+            });
+            throw new Error('Invalid audio_data format. Expected base64 encoded audio.');
+          }
+        }
+      }
 
       // Check if OpenAI is configured for Whisper API
       if (!config.openai.apiKey) {
@@ -286,39 +381,35 @@ export function createVoiceServicesRouter(supabaseClient) {
         });
       }
 
-      let audioBuffer;
-
-      if (audio_url) {
-        // Download audio from URL
-        try {
-          const audioResponse = await axios.get(audio_url, {
-            responseType: 'arraybuffer',
-            timeout: 30000
-          });
-          audioBuffer = audioResponse.data;
-        } catch (downloadError) {
-          throw new Error(`Failed to download audio from URL: ${downloadError.message}`);
-        }
-      } else {
-        // Use provided audio data (base64 encoded)
-        try {
-          audioBuffer = Buffer.from(audio_data, 'base64');
-        } catch (decodeError) {
-          throw new Error('Invalid audio_data format. Expected base64 encoded audio.');
-        }
-      }
-
-      // Create FormData for OpenAI Whisper API
+      // ✅ ENHANCED: Create FormData for OpenAI Whisper API
       const FormData = (await import('form-data')).default;
       const formData = new FormData();
       
+      // Determine appropriate filename and content type
+      let filename = 'audio.webm';
+      let contentType = 'audio/webm';
+      
+      if (req.file) {
+        filename = req.file.originalname || 'audio.webm';
+        contentType = req.file.mimetype || 'audio/webm';
+      }
+      
       formData.append('file', audioBuffer, {
-        filename: 'audio.mp3',
-        contentType: 'audio/mpeg'
+        filename: filename,
+        contentType: contentType
       });
       formData.append('model', 'whisper-1');
       formData.append('language', language);
       formData.append('response_format', 'json');
+
+      errorLogger.debug('Calling OpenAI Whisper API for transcription', {
+        userId,
+        filename,
+        contentType,
+        language,
+        audioSize: audioBuffer.length,
+        component: 'VoiceServices'
+      });
 
       // Call OpenAI Whisper API
       const whisperResponse = await axios.post(
@@ -342,6 +433,8 @@ export function createVoiceServicesRouter(supabaseClient) {
         transcriptionLength: transcription.text?.length || 0,
         language,
         processingTime,
+        audioSize: audioBuffer.length,
+        filename,
         component: 'VoiceServices'
       });
 
@@ -350,7 +443,12 @@ export function createVoiceServicesRouter(supabaseClient) {
         text: transcription.text,
         language: language,
         confidence: 0.9, // Whisper doesn't provide confidence scores
-        processing_time_ms: processingTime
+        processing_time_ms: processingTime,
+        audio_info: {
+          size: audioBuffer.length,
+          filename: filename,
+          content_type: contentType
+        }
       });
 
     } catch (error) {
@@ -360,6 +458,12 @@ export function createVoiceServicesRouter(supabaseClient) {
       errorLogger.error('Transcription failed', error, {
         userId,
         processingTime,
+        hasFile: !!req.file,
+        fileInfo: req.file ? {
+          originalname: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size
+        } : null,
         component: 'VoiceServices'
       });
 
@@ -388,7 +492,7 @@ export function createVoiceServicesRouter(supabaseClient) {
     }
   });
 
-  // Get available voices endpoint
+  // Get available voices endpoint (unchanged)
   router.get('/voices', async (req, res) => {
     const userId = req.userId;
 
