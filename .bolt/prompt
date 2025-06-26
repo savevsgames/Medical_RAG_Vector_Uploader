@@ -1,27 +1,42 @@
-We have built a companion app for doctors to connect to the TxAgent Container.
-
-- We are currently integrating new back-end features for the new USER PORTAL expo application that lets users chat with the TxAgent embeddings just like this app lets doctors, but also includes their user specific information and calls a different endpoint. 
-
 The Plan
-To correctly handle the different types of consultations (doctor vs. patient) and route to the appropriate AI model while incorporating relevant context, you should make the following changes:
+Supabase Database Update for Conversation Sessions:
 
-Modify hybrid-agent/routes/medical_consultation.py:
+File: This will involve a database migration.
+Description: Create a new table named conversation_sessions to store the state and history of each real-time conversation. This is crucial for maintaining context across turns and for features like interruption.
+Why: To persist conversation history, user medical context, and session status, allowing for seamless, multi-turn interactions and recovery from disconnections.
+Backend WebSocket Server Implementation:
 
-File: hybrid-agent/routes/medical_consultation.py
-Change: Update the MedicalConsultationRequest Pydantic model to include an optional preferred_agent: Optional[str] = Field(default="txagent", description="Preferred AI agent for consultation (txagent or openai)").
-Change: In the medical_consultation endpoint function, pass the request.preferred_agent and the entire request.context object (which may contain user_profile or just conversation_history) to the chat_with_documents function call.
-Modify hybrid-agent/routes/chat.py:
+File: You will need to create new files, for example, backend/routes/conversationWebSocket.js for REST endpoints to initiate sessions, and backend/websocket/conversationHandler.js for the actual WebSocket logic. You'll also need to integrate the WebSocket server into backend/server.js.
+Description: Set up a WebSocket server that the frontend can connect to. This server will handle real-time audio streams from the user and stream back AI-generated audio responses.
+Implement a REST endpoint (e.g., POST /api/conversation/start) to initiate a new conversation session and return a WebSocket URL.
+Implement the WebSocket connection handler to receive audio chunks from the frontend.
+Why: To enable continuous, low-latency, bidirectional communication required for natural conversational AI, moving beyond the current turn-based request-response model.
+Integrate STT, RAG, and TTS into WebSocket Flow:
 
-File: hybrid-agent/routes/chat.py
-Change: Update the chat_with_documents function signature to accept preferred_agent: str = "txagent" and context: Optional[Dict[str, Any]] = None.
-Change: Inside chat_with_documents, implement conditional logic based on preferred_agent:
-If preferred_agent == "txagent": Proceed with the existing logic of generating an embedding for the query and performing a search_relevant_documents call. Then, pass the query, relevant_docs, history (from context), and the user_profile (if present in context) to the generate_chat_response function.
-If preferred_agent == "openai": Skip the embedding generation and document search steps. Directly call generate_chat_response with the query, an empty list for context_docs, the history (from context), and the user_profile (if present in context).
-Change: Ensure chat_with_documents returns the agent_id that was actually used (e.g., "txagent" or "openai").
-Change: Refine the generate_chat_response function signature to accept query: str, context_docs: List[Dict[str, Any]], history: List[Dict[str, Any]], user_profile: Optional[Dict[str, Any]], and preferred_agent: str.
-Change: Within generate_chat_response, dynamically construct the system prompt for the LLM.
-If user_profile is present, include it in the prompt to personalize the response (for patient queries).
-If context_docs are provided, include them as RAG context.
-Adjust the persona/instructions based on whether user_profile is present (e.g., "You are a medical AI assistant providing personalized advice based on the user's profile and documents" vs. "You are a medical AI assistant providing general information based on documents").
-Change: Implement the actual OpenAI API call within generate_chat_response. This function will be responsible for making the axios or openai library call to OpenAI's chat completions API, using the constructed prompt and the OPENAI_API_KEY.
-These changes will allow the TxAgent container to intelligently adapt its behavior based on the source of the request (doctor vs. patient) and the user's preferred AI model, ensuring secure and contextually relevant responses.
+File: Primarily within backend/websocket/conversationHandler.js and potentially backend/lib/services/TxAgentRAGService.js for prompt refinement.
+Description: Within the WebSocket handler:
+Receive incoming audio chunks from the user.
+Use your existing Speech-to-Text (STT) functionality (e.g., by calling the OpenAI Whisper API directly or via your /api/voice/transcribe endpoint) to transcribe the audio into text.
+Pass the transcribed text to your TxAgentRAGService.performRAG function to retrieve relevant medical documents and generate an augmented query.
+Send this augmented query to your TxAgent container's chat endpoint to get the AI's response.
+Use your existing Text-to-Speech (TTS) functionality (e.g., by calling the ElevenLabs API directly or via your /api/voice/tts endpoint) to convert the AI's text response into audio.
+Stream the generated audio back to the frontend via the WebSocket connection.
+Why: This is the core of the real-time conversational AI, connecting all the pieces: voice input, RAG-enhanced intelligence, and voice output.
+Implement Conversation Session Management Logic:
+
+File: Within backend/websocket/conversationHandler.js and potentially a new service like backend/services/ConversationSessionService.js.
+Description: Manage the conversation_sessions table:
+When a session starts, create a new entry.
+Update the session's conversation_history with each turn of dialogue (user query and AI response).
+Store and retrieve the user's medical_profile and other relevant context from the session.
+Why: To provide the AI with memory of the ongoing conversation and access to the user's profile, enabling more personalized and coherent interactions.
+Integrate AI Behavior (from your Spec) into Backend Logic:
+
+File: Primarily backend/lib/services/TxAgentRAGService.js (for createAugmentedPrompt) and potentially backend/routes/medicalConsultation.js (for emergency detection).
+Description: Ensure your AI's responses adhere to the "Symptom Savior Conversational Agent Spec":
+Disclaimer: Modify the prompt construction in TxAgentRAGService.createAugmentedPrompt to always include the disclaimer at the start of the AI's response.
+Emergency Redirection: Integrate the emergency detection logic into the WebSocket flow. If an emergency is detected, immediately send the emergency response and interrupt any ongoing AI speech.
+Tone and Goal: Refine the system prompts and instructions passed to the TxAgent to guide its tone (professional, empathetic) and ensure it focuses on information retrieval and question answering based on provided documents.
+Guardrails: Reinforce the guardrails (e.g., "use only provided documents," "never give emergency advice") within the system prompts.
+Why: To ensure the AI behaves as intended, providing safe, helpful, and contextually appropriate responses.
+This plan directly addresses the high-priority items identified in the CONVO_AI_UPGRADE.md and integrates your AI agent specification into the backend's operational logic.
